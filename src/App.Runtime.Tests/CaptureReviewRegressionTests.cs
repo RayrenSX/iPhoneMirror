@@ -14,6 +14,7 @@ internal static partial class Program
     {
         foreach (var transition in new[] { "selection", "restart", "background", "shutdown" })
             TestStaleCaptureStatus(transition);
+        TestWirelessStatusTriggersInventory();
         TestDeferredCaptureRelease();
         TestQueuedCaptureWarning();
         TestBackgroundErrorNoticeDoesNotOwnGate();
@@ -23,6 +24,26 @@ internal static partial class Program
         TestFailedCaptureWiredTeardown(restoreWarning: false, throwingObserver: true);
         TestUsbRestoreInventoryRecovery();
         Console.WriteLine("Capture review regressions passed: stale status, deferred generation checks, wired cleanup ordering and restore recovery.");
+    }
+
+    private static void TestWirelessStatusTriggersInventory()
+    {
+        using var fixture = new CaptureReviewFixture();
+        const string sender = "airplay://02:00:00:00:00:41";
+        fixture.State(sender, 141);
+        fixture.SetReader(_ => fixture.Status("Stopped"));
+        SetKeyboardField(fixture.Vm, "_selectedDevice", fixture.Device(sender));
+        var selected = (Task<bool>)KeyboardCall(fixture.Vm, "RefreshActiveSessionStatusAsync")!;
+        WaitReviewTask(selected);
+        InteractionAssert(selected.Result, "A selected AirPlay disconnect must trigger immediate inventory reconciliation.");
+        SetKeyboardField(fixture.Vm, "_selectedDevice", null);
+        var background = (Task<bool>)KeyboardCall(fixture.Vm, "PollBackgroundSessionErrorsAsync", false)!;
+        WaitReviewTask(background);
+        InteractionAssert(background.Result, "A background AirPlay disconnect must trigger immediate inventory reconciliation.");
+        fixture.SetReader(_ => fixture.Status("Streaming"));
+        var idle = (Task<bool>)KeyboardCall(fixture.Vm, "PollBackgroundSessionErrorsAsync", false)!;
+        WaitReviewTask(idle);
+        InteractionAssert(!idle.Result, "An idle but streaming AirPlay session must keep the normal inventory cadence.");
     }
 
     private static void TestUsbRestoreInventoryRecovery()

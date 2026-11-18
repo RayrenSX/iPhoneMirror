@@ -16,6 +16,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 
@@ -100,6 +101,12 @@ struct VideoDimensions {
     std::uint32_t width{};
     std::uint32_t height{};
 };
+
+// Explicit process-only diagnostic input. Both values must be plain decimal
+// dimensions in [16, 8192]; ordinary saved capture preferences stay unchanged.
+[[nodiscard]] std::optional<VideoDimensions> parse_usb_diagnostic_display_override(
+    std::wstring_view width, std::wstring_view height) noexcept;
+[[nodiscard]] std::optional<VideoDimensions> read_usb_diagnostic_display_override();
 
 void normalize_wired_screen_mirroring_color(
     media::DecodedFrame& frame) noexcept;
@@ -273,7 +280,8 @@ struct UsbDisplayConfiguration {
 [[nodiscard]] UsbDisplayConfiguration make_usb_display_configuration(
     UsbProjectionMode mode, std::uint32_t native_width, std::uint32_t native_height,
     std::uint32_t requested_width = 0, std::uint32_t requested_height = 0,
-    bool native_airplay_available = false, bool tablet = false) noexcept;
+    bool native_airplay_available = false, bool tablet = false,
+    std::optional<detail::VideoDimensions> diagnostic_display = std::nullopt) noexcept;
 
 class CaptureSession final : public ICaptureSession {
 public:
@@ -342,6 +350,7 @@ private:
     struct RunOpenState {
         std::uint32_t native_width{};
         std::uint32_t native_height{};
+        bool native_model_known{};
         std::string device_fp;
     };
 

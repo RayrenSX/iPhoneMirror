@@ -1,4 +1,5 @@
 #include "Renderer/D3D11PreviewRenderer.h"
+#include "Renderer/DeviceFrameOrientation.h"
 #include "Renderer/OutputModeState.h"
 
 #include "Logging.h"
@@ -26,6 +27,64 @@ using Microsoft::WRL::ComPtr;
 
 namespace iPhoneMirror::renderer {
 namespace {
+
+// The independent preview HWND uses these to apply the new bounds on its UI thread.
+constexpr UINT PreviewGeometryChanged = WM_APP + 0x140;
+constexpr wchar_t PendingPreviewGeometry[] = L"iPhoneMirrorPendingPreviewGeometry";
+constexpr wchar_t AppliedPreviewGeometry[] = L"iPhoneMirrorAppliedPreviewGeometry";
+
+class PreviewWait {
+public:
+    PreviewWait() noexcept : timer_(CreateWaitableTimerExW(nullptr, nullptr,
+        CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_MODIFY_STATE | SYNCHRONIZE)) {}
+    ~PreviewWait() { if (timer_) CloseHandle(timer_); }
+    PreviewWait(const PreviewWait&) = delete;
+    PreviewWait& operator=(const PreviewWait&) = delete;
+
+    bool high_resolution() const noexcept { return timer_ != nullptr; }
+
+    void wait(std::chrono::milliseconds duration
+#ifdef IPHONEMIRROR_PREVIEW_TEST_HOOKS
+        , const std::function<DWORD(HANDLE, DWORD)>& wait_for_timer
+#endif
+    ) noexcept {
+        // Ordinary Sleep(1) can take a full 15.6 ms tick in this process.
+        // Keep short preview polls independent of the system timer resolution;
+        // long occlusion/error backoffs do not require precise wakeups.
+        if (timer_ && duration < std::chrono::milliseconds(20)) {
+            LARGE_INTEGER due{};
+            due.QuadPart = -duration.count() * 10'000;
+            if (SetWaitableTimerEx(timer_, &due, 0, nullptr, nullptr, nullptr, 0)) {
+                constexpr DWORD timeout_ms = 50;
+#ifdef IPHONEMIRROR_PREVIEW_TEST_HOOKS
+                const auto result = wait_for_timer ? wait_for_timer(timer_, timeout_ms) :
+                    WaitForSingleObject(timer_, timeout_ms);
+#else
+                const auto result = WaitForSingleObject(timer_, timeout_ms);
+#endif
+                if (result == WAIT_OBJECT_0) return;
+                // The requested delay has already elapsed on a timeout. Rearm
+                // on the next poll so a single late wake does not change the
+                // wait mode for the rest of the preview session.
+                if (result == WAIT_TIMEOUT) {
+                    if (!timeout_reported_) {
+                        logging::write("d3d_preview precise_wait_timeout retry=high_resolution_timer");
+                        timeout_reported_ = true;
+                    }
+                    return;
+                }
+            }
+            CloseHandle(timer_);
+            timer_ = nullptr;
+            logging::write("d3d_preview precise_wait_failed fallback=Sleep");
+        }
+        std::this_thread::sleep_for(duration);
+    }
+
+private:
+    HANDLE timer_{};
+    bool timeout_reported_{};
+};
 
 std::uint64_t pack_corner_profile(float normalized_radius, float curve_exponent) noexcept {
     return (static_cast<std::uint64_t>(std::bit_cast<std::uint32_t>(normalized_radius)) << 32U) |
@@ -242,6 +301,7 @@ cbuffer ShapeConstants : register(b0) {
     float4 frameScreenRect;
     float frameRotation;
     float3 framePadding;
+    float4 hiddenSensor;
 };
 
 float2 rotateBy(float2 uv, float rotation) {
@@ -284,6 +344,8 @@ float3 inverseSrgb(float3 value);
 float4 frameComposite(float3 rgb, float2 uv, float2 pixel) {
     if (phoneFrame < 0.5) return premultiplyForCorner(rgb, pixel);
     float2 artworkUv = rotateBy(uv, frameRotation);
+    if (all(artworkUv >= hiddenSensor.xy) && all(artworkUv < hiddenSensor.zw))
+        return float4(rgb, 1.0);
     float4 bezel = deviceFrame.Sample(linearSampler, artworkUv);
     if (hdrSurface > 0.5 && bezel.a > 0.0)
         bezel.rgb = inverseSrgb(bezel.rgb / bezel.a) * bezel.a;
@@ -429,6 +491,7 @@ struct D3D11PreviewRenderer::Impl {
         float frame_screen_rect[4]{};
         float frame_rotation{};
         float frame_padding[3]{};
+        float hidden_sensor[4]{};
     };
 
     struct ImageAdjustments {
@@ -482,6 +545,9 @@ struct D3D11PreviewRenderer::Impl {
     std::uint32_t frame_height{};
     UINT target_width{};
     UINT target_height{};
+    bool follows_frame_geometry{};
+    std::uint32_t notified_geometry{};
+    std::uint32_t ready_geometry{};
     UINT render_width{};
     UINT render_height{};
     UINT local_render_width{};
@@ -491,10 +557,6 @@ struct D3D11PreviewRenderer::Impl {
     std::shared_ptr<const media::DecodedFrame> last_frame;
     std::uint64_t rendered_frames{};
     std::chrono::steady_clock::time_point first_presented_at{};
-    std::uint32_t last_sync_refresh_count{};
-    std::chrono::steady_clock::time_point last_sync_sample_at{};
-    double display_fps{};
-    bool display_statistics_valid{};
     std::atomic_bool refresh_requested{true};
     std::atomic_bool clear_requested{};
     std::atomic_uint32_t max_fps{60};
@@ -510,6 +572,10 @@ struct D3D11PreviewRenderer::Impl {
     ComPtr<ID3D11ShaderResourceView> device_frame_view;
     ComPtr<ID3D11ShaderResourceView> device_mask_view;
     int artwork_rotation{};
+    std::optional<detail::SensorBounds> artwork_sensor;
+    detail::WirelessLandscapeOrientation wireless_landscape_orientation;
+    bool hide_artwork_sensor{};
+    std::atomic<int> presented_artwork_rotation{-1};
     bool artwork_active{};
     std::atomic_uint64_t corner_profile{pack_corner_profile(0.1784F, 2.36F)};
     std::mutex image_adjustments_mutex;
@@ -532,12 +598,53 @@ struct D3D11PreviewRenderer::Impl {
     std::chrono::steady_clock::time_point next_resize_allowed{};
     std::uint32_t scheduled_fps{};
     std::chrono::steady_clock::time_point next_present_due{};
+    PreviewWait preview_wait;
+
+    struct CadenceSample {
+        std::chrono::steady_clock::time_point started_at{};
+        std::uint64_t presented{}, retries{}, cap_waits{}, duplicate_waits{}, empty_waits{};
+        std::uint64_t sleep_calls{};
+        double prepare_ms{}, provider_ms{}, output_ms{}, render_ms{}, sleep_ms{}, max_sleep_ms{};
+    } cadence;
+
+    void report_cadence(std::chrono::steady_clock::time_point now) {
+        if (cadence.started_at.time_since_epoch().count() == 0) cadence.started_at = now;
+        const auto seconds = std::chrono::duration<double>(now - cadence.started_at).count();
+        if (seconds < 5.0) return;
+        if (cadence.presented != 0 || cadence.retries != 0) {
+            logging::write(std::format(
+                "d3d_preview cadence window_s={:.3f} present_fps={:.2f} presented={} retries={} "
+                "cap_waits={} duplicate_waits={} empty_waits={} prepare_ms={:.3f} provider_ms={:.3f} "
+                "output_ms={:.3f} render_ms={:.3f} sleep_ms={:.3f} sleep_calls={} max_sleep_ms={:.3f}",
+                seconds, static_cast<double>(cadence.presented) / seconds,
+                cadence.presented, cadence.retries, cadence.cap_waits, cadence.duplicate_waits,
+                cadence.empty_waits, cadence.prepare_ms, cadence.provider_ms, cadence.output_ms,
+                cadence.render_ms, cadence.sleep_ms, cadence.sleep_calls, cadence.max_sleep_ms));
+        }
+        cadence = {};
+        cadence.started_at = now;
+    }
+
+    void sleep_preview(std::chrono::milliseconds duration) {
+        const auto started = std::chrono::steady_clock::now();
+        preview_wait.wait(duration
+#ifdef IPHONEMIRROR_PREVIEW_TEST_HOOKS
+            , test_hooks.wait_for_timer
+#endif
+        );
+        const auto elapsed = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - started).count();
+        ++cadence.sleep_calls;
+        cadence.sleep_ms += elapsed;
+        cadence.max_sleep_ms = std::max(cadence.max_sleep_ms, elapsed);
+    }
 
     Impl(HWND value, FrameProvider frame_provider
 #ifdef IPHONEMIRROR_PREVIEW_TEST_HOOKS
         , PreviewTestHooks hooks
 #endif
     ) : window(value), provider(std::move(frame_provider)) {
+        follows_frame_geometry = GetPropW(window, AppliedPreviewGeometry) != nullptr;
 #ifdef IPHONEMIRROR_PREVIEW_TEST_HOOKS
         test_hooks = std::move(hooks);
 #endif
@@ -1014,6 +1121,13 @@ struct D3D11PreviewRenderer::Impl {
             values.frame_screen_rect[0] = x; values.frame_screen_rect[1] = y;
             values.frame_screen_rect[2] = w; values.frame_screen_rect[3] = h;
             values.frame_rotation = static_cast<float>(artwork_rotation);
+            if (hide_artwork_sensor) {
+                const auto& sensor = *artwork_sensor;
+                values.hidden_sensor[0] = sensor.left;
+                values.hidden_sensor[1] = sensor.top;
+                values.hidden_sensor[2] = sensor.right;
+                values.hidden_sensor[3] = sensor.bottom;
+            }
         }
         ID3D11ShaderResourceView* artwork_views[] = {device_frame_view.Get(), device_mask_view.Get()};
         context->PSSetShaderResources(3, 2, artwork_views);
@@ -1149,6 +1263,26 @@ struct D3D11PreviewRenderer::Impl {
             output_state.last_failure = output::Failure::DeviceLost;
         check(target_result, "recreate resized swap-chain target");
         refresh_requested.store(true, std::memory_order_release);
+        return true;
+    }
+
+    bool prepare_window_geometry(const media::DecodedFrame& frame) {
+        if (!follows_frame_geometry || frame.width > 0xffff || frame.height > 0xffff) return true;
+        const auto geometry = (frame.width << 16) | frame.height;
+        if (geometry == notified_geometry && geometry == ready_geometry) return true;
+        const auto packed = reinterpret_cast<HANDLE>(static_cast<UINT_PTR>(geometry));
+        if (geometry != notified_geometry) {
+            if (!SetPropW(window, PendingPreviewGeometry, packed) ||
+                !PostMessageW(window, PreviewGeometryChanged, 0, 0)) return true;
+            notified_geometry = geometry;
+        }
+        const auto applied = GetPropW(window, AppliedPreviewGeometry);
+        if (applied != packed) return applied == nullptr;
+        // SetWindowPos is complete. Resize the swap chain before the first
+        // frame at the new aspect, even if the normal resize cooldown is active.
+        next_resize_allowed = {};
+        (void)resize_if_needed(std::chrono::steady_clock::now());
+        ready_geometry = geometry;
         return true;
     }
 
@@ -1412,6 +1546,7 @@ struct D3D11PreviewRenderer::Impl {
         { std::scoped_lock lock(device_frame_mutex); artwork = requested_artwork; }
         if (artwork == uploaded_artwork) return;
         device_frame_view.Reset(); device_mask_view.Reset();
+        artwork_sensor = artwork ? detail::find_center_sensor(*artwork) : std::nullopt;
         if (artwork) {
             const auto upload_texture = [&](DXGI_FORMAT format, const std::uint8_t* bytes, UINT stride,
                 ComPtr<ID3D11ShaderResourceView>& view) {
@@ -1463,9 +1598,28 @@ struct D3D11PreviewRenderer::Impl {
 
         const auto turns = ((rotation_quarter_turns.load(std::memory_order_relaxed) % 4) + 4) % 4;
         prepare_device_frame();
-        artwork_rotation = (turns + (frame.width > frame.height ? 1 : 0)) % 4;
         artwork_active = phone_frame.load(std::memory_order_relaxed) && uploaded_artwork &&
             !IsZoomed(window) && GetPropW(window, L"iPhoneMirrorFullScreen") == nullptr;
+        const auto landscape = frame.width > frame.height;
+        auto source_turns = landscape ? 1 : 0;
+        hide_artwork_sensor = false;
+        if (artwork_active) {
+            if (frame.device_orientation_turns &&
+                (*frame.device_orientation_turns & 1U) == static_cast<unsigned>(landscape)) {
+                source_turns = static_cast<int>(*frame.device_orientation_turns % 4U);
+            } else if (landscape && artwork_sensor) {
+                const auto previous_side = wireless_landscape_orientation.confirmed();
+                const auto detected = frame.wireless_landscape_run != 0
+                    ? wireless_landscape_orientation.observe(frame, *uploaded_artwork, *artwork_sensor)
+                    : detail::landscape_sensor_turns(frame, *uploaded_artwork, *artwork_sensor);
+                if (frame.wireless_landscape_run != 0 && detected && previous_side != detected)
+                    logging::write(std::format("d3d_preview wireless_frame_side run={} turns={}",
+                        frame.wireless_landscape_run, *detected));
+                source_turns = detected.value_or(1);
+                hide_artwork_sensor = !detected;
+            }
+        }
+        artwork_rotation = (turns + source_turns) % 4;
         const bool swaps_axes = (turns & 1) != 0;
         float source_aspect = swaps_axes
             ? static_cast<float>(frame.height) / frame.width
@@ -1612,51 +1766,39 @@ struct D3D11PreviewRenderer::Impl {
                 ? RenderResult::Occluded : RenderResult::Retry;
         }
         ++rendered_frames;
+        presented_artwork_rotation.store(artwork_active ? artwork_rotation + (hide_artwork_sensor ? 4 : 0) : -1,
+            std::memory_order_relaxed);
         if (rendered_frames == 1) first_presented_at = std::chrono::steady_clock::now();
-        DXGI_FRAME_STATISTICS frame_statistics{};
-        const auto statistics_result = swap_chain->GetFrameStatistics(&frame_statistics);
-        if (SUCCEEDED(statistics_result) && frame_statistics.SyncRefreshCount != 0) {
-            const auto now = std::chrono::steady_clock::now();
-            if (display_statistics_valid &&
-                frame_statistics.SyncRefreshCount > last_sync_refresh_count &&
-                last_sync_sample_at.time_since_epoch().count() != 0) {
-                const auto elapsed = std::chrono::duration<double>(
-                    now - last_sync_sample_at).count();
-                if (elapsed > 0.05)
-                    display_fps = static_cast<double>(
-                        frame_statistics.SyncRefreshCount - last_sync_refresh_count) / elapsed;
-            }
-            last_sync_refresh_count = frame_statistics.SyncRefreshCount;
-            last_sync_sample_at = now;
-            display_statistics_valid = true;
-        } else if (FAILED(statistics_result)) {
-            display_statistics_valid = false;
-            last_sync_refresh_count = 0;
-            last_sync_sample_at = {};
-        }
         if (rendered_frames <= 3 || rendered_frames % 300 == 0) {
+            // DXGI refresh counters describe the display clock, not how many
+            // distinct video frames reached scanout. Keep them as raw evidence;
+            // cadence reports successful submission FPS over a short window.
+            DXGI_FRAME_STATISTICS frame_statistics{};
+            const auto statistics_result = swap_chain->GetFrameStatistics(&frame_statistics);
             const auto elapsed = std::chrono::duration<double>(
                 std::chrono::steady_clock::now() - first_presented_at).count();
             const auto present_fps = elapsed > 0.0
                 ? static_cast<double>(rendered_frames - 1U) / elapsed
                 : 0.0;
-            const std::string display_fps_text = display_statistics_valid
-                ? std::format("{:.2f}", display_fps) : "unavailable";
             logging::write(std::format(
-                "d3d_preview render={} timestamp={} submit_fps={:.2f} display_fps={} "
-                "fps_cap={} render={}x{} stats_hr=0x{:08X}",
+                "d3d_preview render={} timestamp={} submit_fps_mean={:.2f} "
+                "fps_cap={} render={}x{} stats_hr=0x{:08X} dxgi_present_count={} dxgi_refresh_count={}",
                 rendered_frames, frame.timestamp_100ns, present_fps,
-                display_fps_text,
                 max_fps.load(std::memory_order_relaxed),
                 local_render_width, local_render_height,
-                static_cast<unsigned>(statistics_result)));
+                static_cast<unsigned>(statistics_result), frame_statistics.PresentCount,
+                frame_statistics.SyncRefreshCount));
         }
         return RenderResult::Presented;
     }
 
     void run(std::stop_token token) noexcept {
+        logging::write(std::format("d3d_preview wait_mode={}",
+            preview_wait.high_resolution() ? "high_resolution_timer" : "Sleep_fallback"));
         while (!token.stop_requested()) {
             try {
+                const auto iteration_started = std::chrono::steady_clock::now();
+                report_cadence(iteration_started);
                 if (!IsWindow(window)) break;
                 if (output_state.last_failure == output::Failure::DeviceLost ||
                     !device || !context || !swap_chain) {
@@ -1681,6 +1823,8 @@ struct D3D11PreviewRenderer::Impl {
                 const bool target_resized = resize_if_needed(
                     std::chrono::steady_clock::now());
                 if (clear_requested.exchange(false, std::memory_order_acq_rel)) {
+                    presented_artwork_rotation.store(-1, std::memory_order_relaxed);
+                    wireless_landscape_orientation = {};
                     last_frame.reset();
                     last_timestamp = 0;
                     publish_diagnostic_field(diagnostic_output_snapshot,
@@ -1692,6 +1836,8 @@ struct D3D11PreviewRenderer::Impl {
                 }
                 const auto requested_fps = max_fps.load(std::memory_order_relaxed);
                 const auto effective_fps = std::clamp<std::uint32_t>(requested_fps, 1, 120);
+                cadence.prepare_ms += std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - iteration_started).count();
                 if (requested_fps != 0) {
                     const auto now = std::chrono::steady_clock::now();
                     if (scheduled_fps != effective_fps ||
@@ -1699,13 +1845,13 @@ struct D3D11PreviewRenderer::Impl {
                         scheduled_fps = effective_fps;
                         next_present_due = now;
                     }
-                    // Submit shortly before the target deadline so Present(1)
-                    // lands on the intended vblank. Deadlines advance from the
-                    // ideal cadence (not from the last actual present), which
-                    // also gives 24/25 fps a correct 2/3-vblank pattern.
+                    // Poll shortly before the target deadline. Present is
+                    // nonblocking; deadlines follow the ideal cadence rather
+                    // than accumulating the last wakeup/presentation delay.
                     if (!target_resized &&
                         now + std::chrono::milliseconds(4) < next_present_due) {
-                        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                        ++cadence.cap_waits;
+                        sleep_preview(std::chrono::milliseconds(1));
                         continue;
                     }
                 } else {
@@ -1714,43 +1860,61 @@ struct D3D11PreviewRenderer::Impl {
                 }
                 const bool force_refresh = refresh_requested.exchange(false,
                     std::memory_order_acq_rel);
+                const auto provider_started = std::chrono::steady_clock::now();
                 auto frame = provider ? provider() : nullptr;
+                cadence.provider_ms += std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - provider_started).count();
                 if ((!frame || frame->timestamp_100ns == 0) && force_refresh)
                     frame = last_frame;
                 if (!frame || frame->timestamp_100ns == 0) {
                     if (target_resized) present_black();
                     if (force_refresh) refresh_requested.store(true, std::memory_order_release);
-                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                    ++cadence.empty_waits;
+                    sleep_preview(std::chrono::milliseconds(1));
+                    continue;
+                }
+                if (!prepare_window_geometry(*frame)) {
+                    // Keep the old image until the independent window has
+                    // applied the new dimensions. Do not block the UI thread.
+                    if (force_refresh) refresh_requested.store(true, std::memory_order_release);
+                    sleep_preview(std::chrono::milliseconds(1));
                     continue;
                 }
                 // Retain a complete candidate before attempting any GPU work.
                 // Even the first presentation can fail after the provider has
                 // handed off its last frame from a now-static AirPlay screen.
                 last_frame = frame;
+                const auto output_started = std::chrono::steady_clock::now();
                 const bool output_mode_changed = update_output_mode(*frame);
+                cadence.output_ms += std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - output_started).count();
                 if (!output_state.target_valid || !target) {
                     refresh_requested.store(true, std::memory_order_release);
-                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                    sleep_preview(std::chrono::milliseconds(1));
                     continue;
                 }
                 if (!force_refresh && !target_resized && !output_mode_changed &&
                     frame->timestamp_100ns == last_timestamp) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                    ++cadence.duplicate_waits;
+                    sleep_preview(std::chrono::milliseconds(1));
                     continue;
                 }
                 const auto render_started = std::chrono::steady_clock::now();
                 const auto render_result = render(*frame);
+                const auto render_ms = std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - render_started).count();
+                cadence.render_ms += render_ms;
                 if (render_result != RenderResult::Presented) {
+                    ++cadence.retries;
                     release_shared_gpu_frame();
                     // Rearm every failed redraw, including upload failures of
                     // a frame whose timestamp was presented before a resize.
                     refresh_requested.store(true, std::memory_order_release);
-                    std::this_thread::sleep_for(std::chrono::milliseconds(
+                    sleep_preview(std::chrono::milliseconds(
                         render_result == RenderResult::Occluded ? 100 : 1));
                     continue;
                 }
-                const auto render_ms = std::chrono::duration<double, std::milli>(
-                    std::chrono::steady_clock::now() - render_started).count();
+                ++cadence.presented;
                 last_timestamp = frame->timestamp_100ns;
                 if (requested_fps != 0) {
                     const auto interval = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
@@ -1784,7 +1948,7 @@ struct D3D11PreviewRenderer::Impl {
                 logging::write(std::format(
                     "d3d_preview error={} removed_hr=0x{:08X}",
                     error.what(), static_cast<unsigned>(removed_reason)));
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                sleep_preview(std::chrono::milliseconds(100));
             }
         }
         logging::write(std::format("d3d_preview stopped rendered={}", rendered_frames));
@@ -1848,6 +2012,10 @@ void D3D11PreviewRenderer::set_device_frame(std::shared_ptr<const DeviceFrameArt
 void D3D11PreviewRenderer::set_phone_frame(bool enabled) noexcept {
     impl_->phone_frame.store(enabled, std::memory_order_relaxed);
     request_refresh();
+}
+
+int D3D11PreviewRenderer::presented_phone_frame_orientation() const noexcept {
+    return impl_->presented_artwork_rotation.load(std::memory_order_relaxed);
 }
 
 void D3D11PreviewRenderer::set_rotation(std::int32_t quarter_turns) noexcept {

@@ -529,13 +529,27 @@ void test_queued_frame_orientation_metadata() {
     auto later = make_frame(200);
     check(apply_video_input_metadata(later, inputs.take(200), true, received_at + 13s) ==
         FrameOrientationResult::Applied && later.width == 2 && later.height == 4 &&
-        later.nv12.front() == 5 && later.timestamp_100ns == 200 && later.received_at == received_at + 20ms,
+        later.nv12.front() == 5 && later.timestamp_100ns == 200 && later.received_at == received_at + 20ms &&
+        later.device_orientation_turns == 1U,
         "reordered output uses its own saved clockwise direction and receipt time");
     auto earlier = make_frame(100);
     check(apply_video_input_metadata(earlier, inputs.take(100), true, received_at + 13s) ==
         FrameOrientationResult::Applied && earlier.width == 4 && earlier.height == 2 &&
-        earlier.nv12.front() == 8 && earlier.received_at == received_at,
+        earlier.nv12.front() == 8 && earlier.received_at == received_at && earlier.device_orientation_turns == 2U,
         "queued portrait frame retains its original direction after history eviction");
+    for (unsigned turns : {1U, 3U}) {
+        auto ordinary = make_frame(250);
+        std::swap(ordinary.width, ordinary.height);
+        ordinary.stride = 2;
+        check(apply_video_input_metadata(ordinary, VideoInputMetadata{250, received_at, turns, false},
+                  false, received_at) == FrameOrientationResult::Applied &&
+              ordinary.width == 4 && ordinary.height == 2 && ordinary.device_orientation_turns == turns,
+            "ordinary USB portrait canvas supplies the matching landscape artwork rotation");
+    }
+    auto pre_oriented = make_frame(251);
+    check(apply_video_input_metadata(pre_oriented, VideoInputMetadata{251, received_at, 0U, false},
+              false, received_at) == FrameOrientationResult::Applied && !pre_oriented.device_orientation_turns,
+        "ordinary USB with pre-oriented landscape pixels cannot report a physical side from rotation zero");
     auto unmatched = make_frame(999);
     const auto original_pixels = unmatched.nv12;
     check(apply_video_input_metadata(unmatched, inputs.take(999), true, received_at) ==
@@ -1006,6 +1020,82 @@ void test_usb_projection_modes() {
         "Aisi mode uses its fixed square display target");
     check(!aisi.adaptive_reconfiguration,
         "Aisi mode keeps the fixed target during orientation changes");
+}
+
+void test_usb_diagnostic_display_override() {
+    using namespace iPhoneMirror::capture;
+    using detail::VideoDimensions;
+    using detail::parse_usb_diagnostic_display_override;
+
+    const auto rectangle = parse_usb_diagnostic_display_override(L"5120", L"2880");
+    check(rectangle && rectangle->width == 5120 && rectangle->height == 2880,
+        "USB diagnostic display accepts an explicit rectangular capability");
+    const auto boundary = parse_usb_diagnostic_display_override(L"16", L"8192");
+    check(boundary && boundary->width == 16 && boundary->height == 8192,
+        "USB diagnostic display accepts both inclusive dimension boundaries");
+    for (const auto invalid : {L"", L"0", L"15", L"8193", L"-1080", L"+1080",
+            L" 1080", L"1080 ", L"1080p", L"1080.0", L"42949672961234"}) {
+        check(!parse_usb_diagnostic_display_override(invalid, L"1920") &&
+            !parse_usb_diagnostic_display_override(L"1920", invalid),
+            "USB diagnostic display rejects either invalid member without partial application");
+    }
+
+    for (const auto mode : {UsbProjectionMode::Demo, UsbProjectionMode::AirPlay, UsbProjectionMode::Aisi}) {
+        for (const bool native : {false, true}) {
+            const auto original = make_usb_display_configuration(mode, 1640, 2360, 0, 0, native, true);
+            const auto overridden = make_usb_display_configuration(mode, 1640, 2360, 0, 0,
+                native, true, rectangle);
+            auto expected_options = original.session_options;
+            if (mode != UsbProjectionMode::Demo) {
+                expected_options.requested_width = 5120;
+                expected_options.requested_height = 2880;
+            }
+            check(initial_hpd1(overridden.session_options) == initial_hpd1(expected_options),
+                "diagnostic dimensions reach HPD1 exactly in non-demo modes while demo remains unchanged");
+            check(overridden.adaptive_reconfiguration == original.adaptive_reconfiguration,
+                "diagnostic display does not introduce rotation-triggered USB reconfiguration");
+            const auto invalid = make_usb_display_configuration(mode, 1640, 2360, 0, 0,
+                native, true, VideoDimensions{5120, 8193});
+            check(initial_hpd1(invalid.session_options) == initial_hpd1(original.session_options),
+                "configuration factory also rejects invalid diagnostic dimensions");
+        }
+    }
+
+    // Exercise the same process environment reader used before capture starts,
+    // preserving any diagnostic values inherited by this test process.
+    constexpr auto width_name = L"IPHONEMIRROR_DIAGNOSTIC_USB_DISPLAY_WIDTH";
+    constexpr auto height_name = L"IPHONEMIRROR_DIAGNOSTIC_USB_DISPLAY_HEIGHT";
+    const auto read_environment = [](const wchar_t* name) -> std::optional<std::wstring> {
+        const auto required = GetEnvironmentVariableW(name, nullptr, 0);
+        if (required == 0) return std::nullopt;
+        std::wstring value(required, L'\0');
+        const auto length = GetEnvironmentVariableW(name, value.data(), required);
+        value.resize(length);
+        return value;
+    };
+    struct RestoreEnvironment {
+        const wchar_t* width_name;
+        const wchar_t* height_name;
+        std::optional<std::wstring> width, height;
+        ~RestoreEnvironment() {
+            SetEnvironmentVariableW(width_name, width ? width->c_str() : nullptr);
+            SetEnvironmentVariableW(height_name, height ? height->c_str() : nullptr);
+        }
+    } restore{width_name, height_name, read_environment(width_name), read_environment(height_name)};
+    SetEnvironmentVariableW(width_name, nullptr);
+    SetEnvironmentVariableW(height_name, nullptr);
+    check(!detail::read_usb_diagnostic_display_override(),
+        "ordinary capture has no diagnostic dimensions without process overrides");
+    SetEnvironmentVariableW(width_name, L"5120");
+    check(!detail::read_usb_diagnostic_display_override(),
+        "one process override never changes a single HPD1 axis");
+    SetEnvironmentVariableW(height_name, L"2880");
+    const auto environment = detail::read_usb_diagnostic_display_override();
+    check(environment && environment->width == 5120 && environment->height == 2880,
+        "native API capture reads exact rectangular dimensions from its process environment");
+    SetEnvironmentVariableW(width_name, L"000000000000000000005120");
+    check(!detail::read_usb_diagnostic_display_override(),
+        "truncated environment values cannot enable a diagnostic capability");
 }
 
 void test_libusb_runtime() {
@@ -2489,6 +2579,9 @@ void test_wireless_multi_stream_isolation() {
         "wireless client pixel buffers are isolated");
 
     const auto frame_before_local_recovery = first->latest_frame();
+    const auto initial_landscape_run = frame_before_local_recovery->wireless_landscape_run;
+    check(initial_landscape_run != 0 && second->latest_frame()->wireless_landscape_run == 0,
+        "only wireless landscape frames carry a landscape run");
     for (int repaint = 0; repaint < 100; ++repaint) {
         const auto main_preview = first->next_render_frame();
         const auto independent_preview = first->next_render_frame();
@@ -2517,11 +2610,16 @@ void test_wireless_multi_stream_isolation() {
     check(first->next_render_frame() == first->latest_frame() &&
             first->next_render_frame() != frame_before_local_recovery,
         "all wireless previews immediately pick up a new frame after inactivity");
+    check(first->latest_frame()->wireless_landscape_run == initial_landscape_run,
+        "local reattachment and subsequent landscape frames preserve the run");
 
     first->publish_video(second_header, second_i420);
     check(first->next_render_frame()->width == 2 &&
             first->next_render_frame() == first->latest_frame(),
         "wireless orientation changes replace the retained frame for every preview");
+    first->publish_video(first_header, first_i420);
+    check(first->latest_frame()->wireless_landscape_run == initial_landscape_run,
+        "a transient square does not establish a new landscape run");
     auto portrait_header = first_header;
     portrait_header.width = 2; portrait_header.height = 4;
     portrait_header.stride[0] = 2;
@@ -2534,10 +2632,14 @@ void test_wireless_multi_stream_isolation() {
     check(first->snapshot().width == 4 && first->snapshot().height == 2 &&
         first->latest_frame()->width == 4 && second->snapshot().width == 2,
         "portrait-to-landscape return is automatic and does not alter another device stream");
+    const auto rotated_landscape_run = first->latest_frame()->wireless_landscape_run;
+    check(rotated_landscape_run != 0 && rotated_landscape_run != initial_landscape_run,
+        "a portrait transition invalidates the run even when previews skip that frame");
 
     const auto video_frames_before_disconnect = first->snapshot().video_frames;
     first->set_identity(L"First iPhone", false);
-    check(first->snapshot().width == 0 && second->snapshot().width == 2,
+    check(first->snapshot().width == 0 &&
+            first->snapshot().state == iPhoneMirror::capture::State::Stopped && second->snapshot().width == 2,
         "disconnect clears only the matching wireless client");
     check(!first->next_render_frame() &&
             second->next_render_frame() == second->latest_frame(),
@@ -2547,10 +2649,135 @@ void test_wireless_multi_stream_isolation() {
             first->latest_frame() == nullptr,
         "late frames after disconnect cannot repopulate the wireless client");
     first->set_identity(L"First iPhone", true);
-    check(!first->next_render_frame(),
-        "a new AirPlay connection cannot expose the previous connection's frame");
+    check(!first->next_render_frame() && first->device().product_type.empty(),
+        "a new AirPlay connection must wait for its own frame and model metadata");
+    first->publish_video(first_header, first_i420);
+    second->publish_video(first_header, first_i420);
+    const auto reconnected_run = first->latest_frame()->wireless_landscape_run;
+    const auto other_run = second->latest_frame()->wireless_landscape_run;
+    check(reconnected_run != 0 && reconnected_run != rotated_landscape_run &&
+            other_run != 0 && other_run != reconnected_run,
+        "reconnects and other devices cannot reuse a previous landscape run");
+    first->set_mirror_state(iPhoneMirror::wireless::MirrorSenderState::Reconnecting);
+    first->publish_video(first_header, first_i420);
+    check(first->latest_frame()->wireless_landscape_run != reconnected_run,
+        "a replacement video transport must provide fresh landscape evidence");
     first->detach();
     second->detach();
+}
+
+void test_wireless_screen_content_geometry() {
+    using iPhoneMirror::capture::WirelessClientStream;
+    using namespace std::chrono_literals;
+    constexpr std::uint32_t ShortEdge = 148, LongEdge = 320;
+    constexpr std::uint32_t ContentY = (LongEdge - ShortEdge) / 2;
+    const auto header_for = [](std::uint32_t width, std::uint32_t height) {
+        iPhoneMirror::wireless::MessageHeader header;
+        header.type = iPhoneMirror::wireless::MessageType::Video;
+        header.width = width;
+        header.height = height;
+        header.stride[0] = width;
+        header.stride[1] = header.stride[2] = width / 2;
+        header.plane_size[0] = width * height;
+        header.plane_size[1] = header.plane_size[2] = width * height / 4;
+        return header;
+    };
+    const auto luma_at = [](std::uint32_t x, std::uint32_t y) {
+        return static_cast<std::uint8_t>(64U + (x * 3U + y * 5U) % 128U);
+    };
+    const auto picture_for = [&luma_at](std::uint32_t width, std::uint32_t height,
+        std::uint32_t top, std::uint32_t content_height) {
+        const auto luma_bytes = static_cast<std::size_t>(width) * height;
+        std::vector<std::uint8_t> picture(luma_bytes * 3U / 2U, 128);
+        std::fill_n(picture.begin(), luma_bytes, std::uint8_t{0});
+        for (std::uint32_t y = top; y < top + content_height; ++y)
+            for (std::uint32_t x = 0; x < width; ++x)
+                picture[static_cast<std::size_t>(y) * width + x] = luma_at(x, y - top);
+        const auto chroma_stride = width / 2U;
+        for (std::uint32_t y = top / 2U; y < (top + content_height) / 2U; ++y) {
+            std::fill_n(picture.begin() + luma_bytes + static_cast<std::size_t>(y) * chroma_stride,
+                chroma_stride, std::uint8_t{80});
+            std::fill_n(picture.begin() + luma_bytes * 5U / 4U + static_cast<std::size_t>(y) * chroma_stride,
+                chroma_stride, std::uint8_t{176});
+        }
+        return picture;
+    };
+    const auto portrait_header = header_for(ShortEdge, LongEdge);
+    const auto square_header = header_for(LongEdge, LongEdge);
+    const auto portrait = picture_for(ShortEdge, LongEdge, 0, LongEdge);
+    const auto padded_landscape = picture_for(LongEdge, LongEdge, ContentY, ShortEdge);
+    iPhoneMirror::capture::CapturePreferences preferences;
+    preferences.play_audio = false;
+    WirelessClientStream first(L"content-test-first", L"Content test first");
+    WirelessClientStream second(L"content-test-second", L"Content test second");
+    first.set_identity(L"Content test first", true);
+    second.set_identity(L"Content test second", true);
+    first.set_metadata(L"iPhone18,3", L"27.2");
+    second.set_metadata(L"iPhone18,3", L"27.2");
+    first.attach(preferences);
+    second.attach(preferences);
+    for (int index = 0; index < 3; ++index) {
+        first.publish_video(portrait_header, portrait);
+        if (index != 2) std::this_thread::sleep_for(70ms);
+    }
+    check(first.snapshot().width == ShortEdge && first.snapshot().height == LongEdge,
+        "wireless real rectangular reference is published at its actual decoded size");
+    for (int index = 0; index < 3; ++index) {
+        first.publish_video(square_header, padded_landscape);
+        second.publish_video(square_header, padded_landscape);
+        if (index == 1) {
+            // Both methods can occur while the sender is still on one stream.
+            // They must not erase the first client's reference/candidate.
+            first.set_identity(L"Content test first", true);
+            first.set_metadata(L"iPhone18,3", L"27.2");
+            first.detach();
+            first.attach(preferences);
+        }
+        if (index != 2) std::this_thread::sleep_for(70ms);
+    }
+    const auto normalized = first.latest_frame();
+    const auto effective = first.snapshot();
+    check(normalized && normalized->width == LongEdge && normalized->height == ShortEdge &&
+        effective.width == LongEdge && effective.height == ShortEdge &&
+        first.next_render_frame() == normalized,
+        "wireless publish, snapshot and every renderer share the same normalized landscape frame");
+    if (normalized && normalized->width == LongEdge && normalized->height == ShortEdge) {
+        const auto stride = static_cast<std::size_t>(normalized->stride);
+        check(normalized->nv12[0] == luma_at(0, 0) &&
+            normalized->nv12[LongEdge - 1U] == luma_at(LongEdge - 1U, 0) &&
+            normalized->nv12[(ShortEdge - 1U) * stride] == luma_at(0, ShortEdge - 1U) &&
+            normalized->nv12[(ShortEdge - 1U) * stride + LongEdge - 1U] ==
+                luma_at(LongEdge - 1U, ShortEdge - 1U),
+            "wireless screen crop preserves all four original content corner pixels exactly");
+        const auto uv_start = stride * ShortEdge;
+        check(normalized->nv12[uv_start] == 80 && normalized->nv12[uv_start + 1U] == 176,
+            "wireless screen crop retains NV12 chroma channels without swapping or scaling");
+    }
+    check(second.snapshot().width == LongEdge && second.snapshot().height == LongEdge &&
+        second.latest_frame()->width == LongEdge && second.latest_frame()->height == LongEdge,
+        "another wireless client cannot borrow the first client's rectangular reference");
+    auto non_padding = padded_landscape;
+    std::fill_n(non_padding.begin(), static_cast<std::size_t>(ContentY) * LongEdge,
+        std::uint8_t{96});
+    first.publish_video(square_header, non_padding);
+    check(first.snapshot().width == LongEdge && first.snapshot().height == LongEdge &&
+        first.latest_frame()->nv12[0] == 96 && first.next_render_frame() == first.latest_frame(),
+        "wireless non-black outer pixels immediately revoke the crop and restore the complete square");
+    first.publish_video(portrait_header, portrait);
+    check(first.snapshot().width == ShortEdge && first.snapshot().height == LongEdge &&
+        first.latest_frame()->nv12.front() == luma_at(0, 0),
+        "wireless return to portrait immediately restores the real rectangular frame");
+    first.set_identity(L"Content test first", false);
+    first.set_identity(L"Content test first", true);
+    for (int index = 0; index < 3; ++index) {
+        first.publish_video(square_header, padded_landscape);
+        if (index != 2) std::this_thread::sleep_for(70ms);
+    }
+    check(first.snapshot().width == LongEdge && first.snapshot().height == LongEdge &&
+        first.latest_frame()->height == LongEdge,
+        "a new wireless connection cannot reuse a previous connection's screen-content reference");
+    first.detach();
+    second.detach();
 }
 
 void test_wireless_audio_only_stream() {
@@ -2829,10 +3056,25 @@ int run_preview_opacity_smoke();
 void test_sdr_bgra_converter(bool benchmark = false);
 int run_wasapi_underrun_smoke();
 int run_preview_static_frame_smoke(bool retry_only = false);
+int run_preview_cadence_smoke(bool request_timer_resolution = false, bool independent_source = false);
 int run_preview_handoff_smoke();
 int run_preview_ownership_smoke();
 
 int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view(argv[1]) == "--usb-geometry-only") {
+        try {
+            test_usb_projection_modes();
+            test_usb_diagnostic_display_override();
+            test_decoded_frame_rotation();
+            test_queued_frame_orientation_metadata();
+            if (failures != 0) return 1;
+            std::cout << "USB geometry tests passed\n";
+            return 0;
+        } catch (const std::exception& error) {
+            std::cerr << error.what() << '\n';
+            return 2;
+        }
+    }
     if (argc == 2 && std::string_view(argv[1]) == "--sdr-bgra-only") {
         try { test_sdr_bgra_converter(true); return 0; }
         catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
@@ -2957,6 +3199,14 @@ int main(int argc, char** argv) {
         return run_wasapi_underrun_smoke();
     if (argc == 2 && std::string_view(argv[1]) == "--preview-static-frame-only")
         return run_preview_static_frame_smoke();
+    if (argc == 2 && std::string_view(argv[1]) == "--preview-cadence-only")
+        return run_preview_cadence_smoke();
+    if (argc == 2 && std::string_view(argv[1]) == "--preview-cadence-timer-only")
+        return run_preview_cadence_smoke(true);
+    if (argc == 2 && std::string_view(argv[1]) == "--preview-cadence-producer-only")
+        return run_preview_cadence_smoke(false, true);
+    if (argc == 2 && std::string_view(argv[1]) == "--preview-cadence-producer-timer-only")
+        return run_preview_cadence_smoke(true, true);
     if (argc == 2 && std::string_view(argv[1]) == "--preview-static-frame-retry-only")
         return run_preview_static_frame_smoke(true);
     if (argc == 2 && std::string_view(argv[1]) == "--preview-handoff-only")
@@ -3004,6 +3254,7 @@ int main(int argc, char** argv) {
         test_upstream_capture_fixtures();
         test_session_protocol();
         test_usb_projection_modes();
+        test_usb_diagnostic_display_override();
         test_apple_usb_serial_matching();
         test_apple_usb_filter_safety();
         test_active_apple_usb_identity_cache();
@@ -3017,6 +3268,7 @@ int main(int argc, char** argv) {
         test_image_adjustment_api_validation();
         test_wireless_i420_conversion();
         test_wireless_multi_stream_isolation();
+        test_wireless_screen_content_geometry();
         test_wireless_audio_only_stream();
         test_wireless_volume_before_connection();
         test_wireless_partial_readiness();

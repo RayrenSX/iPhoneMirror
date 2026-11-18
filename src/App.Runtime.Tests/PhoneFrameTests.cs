@@ -124,6 +124,19 @@ internal static partial class Program
         InteractionAssert(observedWhite17.Detected && !observedWhite17.Manual &&
             observedWhite17.Profile?.Id == "iphone-17-white",
             "Owner-confirmed white iPhone 17 housing code 2 must use the white artwork automatically.");
+        var iphone17Black = DeviceFrameCatalog.Resolve("iPhone18,3", new("1", "1", "1")).Profile!;
+        var housingSample = (1380 * iphone17Black.FrameWidth + 41) * 4;
+        InteractionAssert(iphone17Black.Pixels[housingSample + 2] is > 65 and < 125 &&
+            iphone17Black.Pixels[housingSample + 3] == 255 &&
+            observedWhite17.Profile!.Pixels[housingSample + 2] > 200,
+            "Only the black finish should use the darker housing with unchanged opacity.");
+        var blackPixels = iphone17Black.Pixels;
+        foreach (var (x, y) in new[] { (140, 75), (1274, 141), (77, 2621), (1272, 2621) })
+        {
+            var corner = (y * iphone17Black.FrameWidth + x) * 4;
+            InteractionAssert(blackPixels[corner + 2] is > 70 and < 110 && blackPixels[corner + 3] == 255,
+                "The black frame still has an undimmed corner highlight inside the screen rectangle.");
+        }
         InteractionAssert(DeviceFrameCatalog.Resolve("iPhone13,1", new("black", " BLUE ", "")).ColorId == "blue",
             "Named device colors should be normalized.");
         var appearancePath = Path.Combine(Path.GetFullPath(output), "appearance-cache-test.json");
@@ -138,6 +151,7 @@ internal static partial class Program
             "Appearance cache leaked one phone's color to another device.");
         InteractionAssert(restartedCache.Remember("usb-fixture", "iPhone18,3", DeviceAppearance.Unknown) == DeviceAppearance.Unknown,
             "Appearance cache reused a different model's numeric color codes.");
+        TestBoundAirPlayFrameColors(output, restartedCache);
         var partial = restartedCache.Remember("usb-fixture", "iPhone13,1", new("black", "", ""));
         InteractionAssert(partial.EnclosureColor == "2", "Partial metadata erased the housing color.");
         var newColor = restartedCache.Remember("usb-fixture", "iPhone13,1", new("1", "9", ""));
@@ -283,6 +297,38 @@ internal static partial class Program
         return 0;
     }
 
+    private static void TestBoundAirPlayFrameColors(string output, DeviceAppearanceCache cache)
+    {
+        var path = Path.Combine(output, $"frame-bindings-{Guid.NewGuid():N}.json");
+        var bindings = new DeviceBindingManager(path);
+        const string wiredId = "00008150-aabbcc0000000001";
+        const string wirelessId = "airplay://02:34:56:78:9a:bc";
+        const string product = "iPhone18,3";
+        var fingerprint = new DeviceFingerprint(ProductType: product);
+        var created = bindings.CreateProfileFromIdentity("Frame color fixture", DeviceIdentityType.Wired, wiredId, fingerprint);
+        InteractionAssert(created.Success && created.Profile is not null &&
+            bindings.Bind(created.Profile.Id, DeviceIdentityType.AirPlay, wirelessId, "Frame color fixture",
+                fingerprint, userConfirmed: true).Success, "Could not create the bound AirPlay fixture.");
+
+        IPhoneMirror.App.Models.DeviceViewModel Device(string id, string model) =>
+            IPhoneMirror.App.Models.DeviceViewModel.FromNative(
+                new IPhoneMirror.App.Interop.NativeDeviceInfo { Udid = id, ProductType = model }, DeviceAppearance.Unknown);
+        var wireless = Device(wirelessId, product);
+        foreach (var (code, finish) in new[] { ("1", "black"), ("2", "white"), ("9", "mist-blue"), ("17", "lavender"), ("18", "sage") })
+        {
+            cache.Remember(wiredId, product, new("1", code, code));
+            var selection = DeviceFrameCatalog.Resolve(product, cache.ForProjection(wireless, bindings));
+            InteractionAssert(selection.Detected && selection.ColorId == finish,
+                $"Bound AirPlay did not inherit the matching iPhone 17 finish {finish}.");
+        }
+        InteractionAssert(cache.ForProjection(Device("airplay://02:34:56:78:9a:bd", product), bindings) == DeviceAppearance.Unknown &&
+            cache.ForProjection(Device(wirelessId, "iPhone13,1"), bindings) == DeviceAppearance.Unknown,
+            "An unbound wireless device or a different product must not inherit the wired finish.");
+        InteractionAssert(bindings.Unbind(created.Profile!.Id, DeviceIdentityType.AirPlay) &&
+            cache.ForProjection(wireless, bindings) == DeviceAppearance.Unknown,
+            "An unbound AirPlay device must stop borrowing the cached finish.");
+    }
+
     private static void TestGlobalPhoneFramePersistence(string output)
     {
         var path = Path.Combine(Path.GetFullPath(output), "global-frame-settings.json");
@@ -366,11 +412,25 @@ internal static partial class Program
             InteractionAssert(first.PhoneFrameEnabled && second.PhoneFrameEnabled && !unknown.PhoneFrameEnabled &&
                 ((CheckBox)secondStyle.FindName("PhoneFrameCheckBox")).IsChecked == true && store.Load().PhoneFrameEnabled,
                 "A style switch must enable every supported preview, skip unknown models, synchronize other style windows and persist globally.");
-            manager.UpdateDevice(IPhoneMirror.App.Models.DeviceViewModel.FromNative(
-                new IPhoneMirror.App.Interop.NativeDeviceInfo { Udid = "global-frame-unknown", ProductType = "iPhone13,1" },
-                DeviceAppearance.Unknown), 1206, 2622);
-            InteractionAssert(unknown.PhoneFrameEnabled,
-                "A preview whose model becomes known later must inherit the saved global frame preference.");
+            var late = IPhoneMirror.App.Models.DeviceViewModel.FromNative(
+                new IPhoneMirror.App.Interop.NativeDeviceInfo { Udid = "global-frame-unknown", ProductType = "iPhone18,3" },
+                new("1", "2", "2"));
+            vm.Devices.Add(late);
+            KeyboardCall(manager, "RefreshOpenFrameAppearances");
+            InteractionAssert(unknown.PhoneFrameEnabled && unknown.ActiveDeviceFrame?.Id == "iphone-17-white",
+                "A background preview must apply late model and color without changing its video size.");
+            late.UpdateFrom(IPhoneMirror.App.Models.DeviceViewModel.FromNative(
+                new IPhoneMirror.App.Interop.NativeDeviceInfo { Udid = late.Udid, ProductType = "iPhone99,99" },
+                DeviceAppearance.Unknown));
+            KeyboardCall(manager, "RefreshOpenFrameAppearances");
+            InteractionAssert(!unknown.PhoneFrameEnabled && unknown.ActiveDeviceFrame is null && app.UpdateSettings.PhoneFrameEnabled,
+                "An unsupported model must drop stale artwork while retaining the global preference.");
+            late.UpdateFrom(IPhoneMirror.App.Models.DeviceViewModel.FromNative(
+                new IPhoneMirror.App.Interop.NativeDeviceInfo { Udid = late.Udid, ProductType = "iPhone13,1" },
+                DeviceAppearance.Unknown));
+            KeyboardCall(manager, "RefreshOpenFrameAppearances");
+            InteractionAssert(unknown.PhoneFrameEnabled && unknown.ActiveDeviceFrame?.Id == "iphone-12-mini",
+                "A newly supported model must inherit the saved preference.");
 
             var blockedParent = Path.Combine(Path.GetFullPath(output), "blocked-global-frame-windows");
             File.WriteAllText(blockedParent, "A file cannot hold settings.");
@@ -382,6 +442,21 @@ internal static partial class Program
             SetKeyboardField(app, "_settingsStore", store);
             InteractionAssert(manager.SetPhoneFrameAsync(false).GetAwaiter().GetResult() && !first.PhoneFrameEnabled && !second.PhoneFrameEnabled && !unknown.PhoneFrameEnabled &&
                 !store.Load().PhoneFrameEnabled, "Disabling the global preference must update every preview and persist.");
+
+            var frameShortcut = new SettingShortcutBinding { Setting = PreviewShortcutSetting.PhoneFrame, VirtualKey = 0x78, Value = 1 };
+            var restoreFirst = first.BeginTemporarySetting(frameShortcut);
+            InteractionAssert(restoreFirst is not null && first.PhoneFrameEnabled && !second.PhoneFrameEnabled &&
+                !store.Load().PhoneFrameEnabled && ((CheckBox)firstStyle.FindName("PhoneFrameCheckBox")).IsChecked == false,
+                "The phone frame shortcut must affect only its preview and leave the global setting untouched.");
+            var hideFirst = first.BeginTemporarySetting(frameShortcut with { Value = 0 });
+            InteractionAssert(hideFirst is not null && !first.PhoneFrameEnabled, "The most recent shortcut value must win.");
+            InteractionAssert(manager.SetPhoneFrameAsync(true).GetAwaiter().GetResult() && !first.PhoneFrameEnabled && second.PhoneFrameEnabled,
+                "Changing the global preference must preserve an active per-window override.");
+            restoreFirst!();
+            InteractionAssert(!first.PhoneFrameEnabled, "Removing an older shortcut must leave the current one applied.");
+            hideFirst!();
+            InteractionAssert(first.PhoneFrameEnabled, "Releasing the last shortcut must restore the latest global preference.");
+            InteractionAssert(manager.SetPhoneFrameAsync(false).GetAwaiter().GetResult(), "Could not restore the preference for the failure fixture.");
 
             var secondSession = second.SessionHandle;
             SetKeyboardField(second, "_sessionHandle", ulong.MaxValue);

@@ -14,13 +14,13 @@ internal static class RuntimeBinaryIntegrity
             ["iPhoneMirror.AirPlayControl.dll"] =
                 "85832a1f7805c20060b56ef48426db13831c7c2391e365dbe952e74cb0a70919",
             ["airplay2dll.dll"] =
-                "0ae995831f11729006e50a20f29a78c4016dd3c25bb9a2f8a6413ca6f1c3a3ba",
+                "024d74cc3d8c11846dcd4149f609b5a8c789bd4d1390d3390bf56f10756957bc",
             ["avcodec-58.dll"] =
                 "ca12fe868993903fe36507e23030dd226b2c39f6c905610005f1aeeb2693c959",
             ["avutil-56.dll"] =
                 "8da4b9ff2c577e935597f307eccaaca276b24084388385b2b10f535f7ac3fd27",
             ["dnssd.dll"] =
-                "d7d54e05da7fda335a938967c50f55c19c5da379b4ac4f7da625892777fdfd69",
+                "cdaad47faa2df23bf15c396dc3a801d861f3f16571953fbb3bc35cb505f0387a",
             ["swresample-3.dll"] =
                 "85226ae16655e83f00bec043df5c5096dd398d8b36a126baaea7d57417005309",
             ["swscale-5.dll"] =

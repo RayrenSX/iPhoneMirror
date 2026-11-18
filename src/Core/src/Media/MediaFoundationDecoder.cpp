@@ -231,6 +231,83 @@ coremedia::VideoColorDescription color_description(IMFAttributes* attributes,
     return color;
 }
 
+// Inspect the media type only when selecting an output format. Apertures are
+// evidence about decoder geometry, not authorization to crop: keep every
+// decoded pixel until a real-device capture establishes their meaning here.
+void log_output_geometry(IMFMediaType* output,
+    const coremedia::FormatDescription& format) noexcept {
+    if (!output) return;
+    try {
+        UINT32 width{}, height{}, par_numerator{}, par_denominator{}, pan_scan{};
+        const auto frame_result = MFGetAttributeSize(output, MF_MT_FRAME_SIZE, &width, &height);
+        const auto par_result = MFGetAttributeRatio(output, MF_MT_PIXEL_ASPECT_RATIO,
+            &par_numerator, &par_denominator);
+        const auto pan_result = output->GetUINT32(MF_MT_PAN_SCAN_ENABLED, &pan_scan);
+        const bool frame_valid = SUCCEEDED(frame_result) && width != 0 && height != 0;
+        logging::write(std::format(
+            "mf_decoder output_geometry vdim={}x{} frame={}x{} frame_status={} "
+            "pixel_aspect={}/{} pixel_aspect_status={} pan_scan_enabled={} pan_scan_status={}",
+            format.width, format.height, width, height,
+            frame_valid ? "present" : FAILED(frame_result) ? "unavailable" : "invalid",
+            par_numerator, par_denominator,
+            FAILED(par_result) ? "unavailable" :
+                par_numerator == 0 || par_denominator == 0 ? "invalid" : "present",
+            pan_scan, SUCCEEDED(pan_result) ? "present" : "unavailable"));
+
+        const std::array<std::pair<const char*, GUID>, 3> apertures{{
+            {"geometric", MF_MT_GEOMETRIC_APERTURE},
+            {"minimum_display", MF_MT_MINIMUM_DISPLAY_APERTURE},
+            {"pan_scan", MF_MT_PAN_SCAN_APERTURE},
+        }};
+        for (const auto& [name, attribute] : apertures) {
+            UINT32 blob_size{};
+            const auto size_result = output->GetBlobSize(attribute, &blob_size);
+            if (size_result == MF_E_ATTRIBUTENOTFOUND) {
+                logging::write(std::format(
+                    "mf_decoder output_aperture type={} status=absent", name));
+                continue;
+            }
+            if (FAILED(size_result) || blob_size != sizeof(MFVideoArea)) {
+                logging::write(std::format(
+                    "mf_decoder output_aperture type={} status=invalid_blob "
+                    "blob_bytes={} expected_bytes={} hr=0x{:08X}",
+                    name, blob_size, sizeof(MFVideoArea), static_cast<unsigned>(size_result)));
+                continue;
+            }
+            MFVideoArea area{};
+            UINT32 copied{};
+            const auto read_result = output->GetBlob(attribute,
+                reinterpret_cast<UINT8*>(&area), static_cast<UINT32>(sizeof(area)), &copied);
+            if (FAILED(read_result) || copied != sizeof(area)) {
+                logging::write(std::format(
+                    "mf_decoder output_aperture type={} status=read_failed "
+                    "copied_bytes={} expected_bytes={} hr=0x{:08X}",
+                    name, copied, sizeof(area), static_cast<unsigned>(read_result)));
+                continue;
+            }
+            // MFOffset has a signed integer part and an unsigned 16-bit
+            // fraction. Preserve fractional offsets rather than rounding them
+            // into a proposed NV12/P010 crop or inferring pixel alignment.
+            const double x = area.OffsetX.value + area.OffsetX.fract / 65536.0;
+            const double y = area.OffsetY.value + area.OffsetY.fract / 65536.0;
+            const auto inside = [&](UINT32 frame_width, UINT32 frame_height) {
+                return x >= 0 && y >= 0 && area.Area.cx > 0 && area.Area.cy > 0 &&
+                    x + area.Area.cx <= frame_width && y + area.Area.cy <= frame_height;
+            };
+            logging::write(std::format(
+                "mf_decoder output_aperture type={} status=present offset={:.6f},{:.6f} "
+                "area={}x{} integral_offset={} inside_frame={} inside_vdim={}",
+                name, x, y, area.Area.cx, area.Area.cy,
+                area.OffsetX.fract == 0 && area.OffsetY.fract == 0,
+                frame_valid ? (inside(width, height) ? "true" : "false") : "unknown",
+                inside(format.width, format.height)));
+        }
+    } catch (...) {
+        // Optional diagnostics must not make a supported decoder fail setup.
+        logging::write("mf_decoder output_geometry status=diagnostic_failed");
+    }
+}
+
 struct DecoderCandidate {
     ComPtr<IMFActivate> activation;
     CLSID clsid{};
@@ -1293,6 +1370,7 @@ struct MediaFoundationVideoDecoder::Impl {
                     if (!output_bytes) throw std::runtime_error("decoded output buffer size overflow");
                     minimum_output_bytes = *output_bytes;
                     output_color = color_description(output_type.Get(), format);
+                    log_output_geometry(output_type.Get(), format);
                     return;
                 }
             }

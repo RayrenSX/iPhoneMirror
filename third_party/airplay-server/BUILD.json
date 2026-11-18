@@ -15,8 +15,8 @@
   "Runtime": [
     {
       "Name": "airplay2dll.dll",
-      "Size": 446976,
-      "Sha256": "0ae995831f11729006e50a20f29a78c4016dd3c25bb9a2f8a6413ca6f1c3a3ba"
+      "Size": 448512,
+      "Sha256": "024d74cc3d8c11846dcd4149f609b5a8c789bd4d1390d3390bf56f10756957bc"
     },
     {
       "Name": "avcodec-58.dll",
@@ -30,8 +30,8 @@
     },
     {
       "Name": "dnssd.dll",
-      "Size": 431616,
-      "Sha256": "d7d54e05da7fda335a938967c50f55c19c5da379b4ac4f7da625892777fdfd69"
+      "Size": 432128,
+      "Sha256": "cdaad47faa2df23bf15c396dc3a801d861f3f16571953fbb3bc35cb505f0387a"
     },
     {
       "Name": "iPhoneMirror.AirPlayControl.dll",
@@ -50,15 +50,18 @@
     }
   ],
   "AdditionalPatches": {
-    "Apply-AirPlayControlPatch.ps1": "17f9c39ee0cf3c9390d4d8870496b6d81cf0d09ad855050d33bd245c6de76979",
-    "airplay-hevc-config.h": "dcd1e49f0796d53ff6abb4fd048e57b0edb751aad5e59b5ffbfcdda69a123022",
-    "Apply-AirPlayRequestPolicyPatch.ps1": "14165c2ad14fd2792cd5dbd88992e6c997d02926698f5372ebf0dbd0bbf4e5ea",
     "airplay-play-request.h": "fb4dc351989f19c5c42ea7aa16bac2be3d1f0ca5c61e712e0f434878f3ddd8de",
-    "airplay-hevc.patch": "ecf202b16bd758395611e65a905b2a18156e3cc74e61326dc7f970e07ce1a8fc",
+    "Apply-AirPlayRequestPolicyPatch.ps1": "14165c2ad14fd2792cd5dbd88992e6c997d02926698f5372ebf0dbd0bbf4e5ea",
+    "airplay-control.h": "c8acc293ef973191c9c43684cde63e2857c9c55883b9ae09a50ab911e58fd1be",
     "airplay-scrub-request.h": "e1fa90c650cff4f7937ff6b00dc46a8fbeb2f310582aa2677f1ffb67b803aa10",
-    "airplay-request-policy.h": "5f145863dfd22067b6e3ac0f2617bdcdfa028eca87aa3d1893ab7bb1d7ab7402",
     "airplay-control-httpd.h": "3fb3ac5c367fbc23f2abef6218528017567351e5d855a2df4c91bca3e139fe70",
+    "Apply-AirPlayControlPatch.ps1": "17f9c39ee0cf3c9390d4d8870496b6d81cf0d09ad855050d33bd245c6de76979",
     "airplay-control-media.h": "7db1ac48d9c6fed357c5db8a0488bc1d5f25e3687f62757646f4b26b1db01613",
-    "airplay-control.h": "c8acc293ef973191c9c43684cde63e2857c9c55883b9ae09a50ab911e58fd1be"
+    "airplay-mirror-codec-policy.h": "29e8ea9814a2cd8fb1a3fc2886b8142d3c7d7f52dadd7e941bb78e9e49610e08",
+    "Apply-DiagnosticMirrorCodecPatch.ps1": "8415d0028447b36d8e21e72af1aabc1ed305168472fa2fb1dc51e00007bab138",
+    "airplay-hevc.patch": "ecf202b16bd758395611e65a905b2a18156e3cc74e61326dc7f970e07ce1a8fc",
+    "Apply-AirPlayDisconnectGracePatch.ps1": "e9d3ceeefba0f286b7127a8e613860105aa5dfa1bed6fe3bbe4cbc6c633ff0c4",
+    "airplay-hevc-config.h": "dcd1e49f0796d53ff6abb4fd048e57b0edb751aad5e59b5ffbfcdda69a123022",
+    "airplay-request-policy.h": "5f145863dfd22067b6e3ac0f2617bdcdfa028eca87aa3d1893ab7bb1d7ab7402"
   }
 }

@@ -74,6 +74,20 @@ class BridgeRuntimeCheckTests(unittest.TestCase):
                                                     TOUCHSCREEN_STATE_CONTACT, TOUCHSCREEN_STATE_RELEASE,
                                                     build_touchscreen_frame)
 
+    def test_metal_hud_restart_must_exist_with_bounded_mutating_policy(self):
+        from device_management import ACTIONS
+        for mutation in ('renamed', 'readOnly', 'public', 'timeout'):
+            with self.subTest(mutation=mutation), patch.dict(ACTIONS, clear=False):
+                if mutation == 'renamed':
+                    ACTIONS['unknown_restart'] = ACTIONS.pop('restart_with_metal_hud')
+                else:
+                    ACTIONS['restart_with_metal_hud'] = {**ACTIONS['restart_with_metal_hud'],
+                        mutation: {'readOnly': True, 'public': False, 'timeout': 300}[mutation]}
+                with self.assertRaisesRegex(RuntimeError, 'Device Hub contract'):
+                    check_runtime_functionality(build_touchscreen_report,
+                                                TOUCHSCREEN_STATE_CONTACT, TOUCHSCREEN_STATE_RELEASE,
+                                                build_touchscreen_frame)
+
     def test_single_contact_encoder_cannot_pass_multi_contact_check(self):
         def old_frame(contacts, timestamp):
             return build_touchscreen_report(*contacts[-1], timestamp=timestamp)

@@ -77,7 +77,18 @@ public sealed class SettingShortcutRow : INotifyPropertyChanged
     private SettingShortcutBinding _binding;
     internal SettingShortcutRow(SettingShortcutBinding binding) => _binding = binding with { };
     public IReadOnlyList<string> SettingLabels =>
-        [LocalizationService.Get("IndependentWindowOpacity"), LocalizationService.Get("IndependentWindowPin")];
+    [
+        LocalizationService.Get("IndependentWindowOpacity"),
+        LocalizationService.Get("IndependentWindowPin"),
+        LocalizationService.Get("IndependentWindowOpaqueOnHover"),
+        LocalizationService.Get("SettingShortcutsPhoneFrame"),
+        LocalizationService.Get("SettingShortcutsRecording"),
+        LocalizationService.Get("Screenshot"),
+        LocalizationService.Get("ShortcutSettingsFullScreen"),
+        LocalizationService.Get("SettingShortcutsMuteWindow"),
+        LocalizationService.Get("IndependentWindowRotateLeft"),
+        LocalizationService.Get("IndependentWindowRotateRight"),
+    ];
     public string CardTitle => SettingLabels[SettingIndex];
     public IReadOnlyList<string> TriggerLabels =>
         [LocalizationService.Get("SettingShortcutsHold"), LocalizationService.Get("SettingShortcutsToggle")];
@@ -86,7 +97,7 @@ public sealed class SettingShortcutRow : INotifyPropertyChanged
         get => (int)_binding.Trigger;
         set
         {
-            if (value is < 0 or > 1 || value == TriggerIndex) return;
+            if (_binding.IsAction || value is < 0 or > 1 || value == TriggerIndex) return;
             _binding = _binding with { Trigger = (SettingShortcutTrigger)value };
             RefreshLabels();
         }
@@ -102,17 +113,20 @@ public sealed class SettingShortcutRow : INotifyPropertyChanged
         get => (int)_binding.Setting;
         set
         {
-            if (value is < 0 or > 1 || value == SettingIndex) return;
-            _binding = _binding with { Setting = (PreviewShortcutSetting)value, Value = value == 0 ? 100 : 1 };
+            var setting = (PreviewShortcutSetting)value;
+            if (!Enum.IsDefined(setting) || value == SettingIndex) return;
+            _binding = _binding with { Setting = setting };
+            _binding = _binding.IsAction ? _binding with { Trigger = SettingShortcutTrigger.Toggle, Value = 0 } :
+                _binding with { Value = setting == PreviewShortcutSetting.Opacity ? 100 : 1 };
             RefreshLabels();
         }
     }
     public double Value
     {
-        get => SettingIndex == 0 ? _binding.Value : 100;
+        get => IsOpacity ? _binding.Value : 100;
         set
         {
-            if (SettingIndex != 0 || !double.IsFinite(value)) return;
+            if (!IsOpacity || !double.IsFinite(value)) return;
             _binding = _binding with { Value = Math.Clamp(Math.Round(value), 10, 100) };
             Notify(nameof(Value));
         }
@@ -122,13 +136,15 @@ public sealed class SettingShortcutRow : INotifyPropertyChanged
         get => _binding.Value != 0;
         set
         {
-            if (SettingIndex != 1) return;
+            if (IsOpacity || _binding.IsAction) return;
             _binding = _binding with { Value = value ? 1 : 0 };
             Notify(nameof(BooleanValue));
         }
     }
-    public Visibility OpacityVisibility => SettingIndex == 0 ? Visibility.Visible : Visibility.Collapsed;
-    public Visibility BooleanVisibility => SettingIndex == 1 ? Visibility.Visible : Visibility.Collapsed;
+    private bool IsOpacity => _binding.Setting == PreviewShortcutSetting.Opacity;
+    public Visibility OpacityVisibility => IsOpacity ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility BooleanVisibility => IsOpacity || _binding.IsAction ? Visibility.Collapsed : Visibility.Visible;
+    public Visibility SettingControlsVisibility => _binding.IsAction ? Visibility.Collapsed : Visibility.Visible;
     internal KeyboardShortcut Shortcut => _binding.Shortcut;
     public bool IsBound => Shortcut.IsBound;
     public string ShortcutText => Shortcut.DisplayText;
@@ -143,7 +159,7 @@ public sealed class SettingShortcutRow : INotifyPropertyChanged
     {
         foreach (var name in new[] { nameof(SettingLabels), nameof(CardTitle), nameof(SettingIndex), nameof(Value),
             nameof(TriggerLabels), nameof(TriggerIndex), nameof(TriggerDescription), nameof(TargetLabel), nameof(BooleanLabel),
-            nameof(BooleanValue), nameof(OpacityVisibility), nameof(BooleanVisibility), nameof(ShortcutText) }) Notify(name);
+            nameof(BooleanValue), nameof(OpacityVisibility), nameof(BooleanVisibility), nameof(SettingControlsVisibility), nameof(ShortcutText) }) Notify(name);
     }
     private void Notify(string name) => PropertyChanged?.Invoke(this, new(name));
     public event PropertyChangedEventHandler? PropertyChanged;

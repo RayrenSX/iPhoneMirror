@@ -1,6 +1,9 @@
+using System.Diagnostics;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Windows;
+using IPhoneMirror.App.Controls;
 using IPhoneMirror.App.Interop;
 using IPhoneMirror.App.Services;
 using IPhoneMirror.App.Windows;
@@ -20,6 +23,7 @@ internal static partial class Program
             "Cannot create a synthetic independent corner session: " + session.Message);
         using var handle = session.Handle!;
         var calls = new List<object>();
+        var wheelEvents = new List<PreviewPointerEventArgs>();
         (double Radius, double Exponent) applied = default;
         var constructor = typeof(NativePreviewWindow).GetConstructors(KeyboardTestMembers).Single();
         var parameters = constructor.GetParameters();
@@ -30,6 +34,13 @@ internal static partial class Program
             (Func<nint, bool>)(hwnd => NativeCore.AttachDevicePreview(handle.RawHandle, hwnd)),
             handle.RawHandle, 0d, 2d];
         Array.Copy(required, values, required.Length);
+        values[Array.FindIndex(parameters, parameter => parameter.Name == "isUsbControlEnabled")] =
+            (Func<bool>)(() => true);
+        values[Array.FindIndex(parameters, parameter => parameter.Name == "pointerInput")] =
+            (Action<PreviewPointerEventArgs>)(input =>
+            {
+                if (input.Kind == PreviewPointerKind.Wheel) wheelEvents.Add(input);
+            });
         var setterIndex = Array.FindIndex(parameters, parameter => parameter.Name == "setCornerProfile");
         if (setterIndex >= 0) values[setterIndex] = (Func<ulong, nint, double, double, bool>)((sessionHandle, hwnd, radius, exponent) =>
             {
@@ -106,6 +117,8 @@ internal static partial class Program
             preview.SetSourceDimensions(2007, 2853);
             InteractionAssert(preview.UpdateDeviceAppearance("iPhone19,4", DeviceAppearance.Unknown) &&
                 calls.Count == beforeUnchanged, "Unchanged geometry or metadata resent the same corner profile.");
+
+            TestIndependentRotationGeometry(core, handle, preview, wheelEvents);
             File.WriteAllText(Path.Combine(output, "results.json"), JsonSerializer.Serialize(new
             {
                 scope = "Real independent HWND and synthetic native renderer; no phone or capture receiver is used.",
@@ -120,4 +133,98 @@ internal static partial class Program
             app.Shutdown();
         }
     }
+
+    private static void TestIndependentRotationGeometry(NativeCore core, NativeSessionHandle session,
+        NativePreviewWindow preview, List<PreviewPointerEventArgs> wheelEvents)
+    {
+        InteractionAssert(preview.UpdateDeviceAppearance("iPhone18,3", DeviceAppearance.Unknown) &&
+            preview.SetPhoneFrame(true), "Cannot enable the iPhone 17 test frame.");
+        KeyboardCall(preview, "ShowInitially");
+        KeyboardCall(preview, "ToggleTopMost");
+        SetKeyboardField(preview, "_isFixed", true);
+        SetKeyboardField(preview, "_inputForegroundWindow", (Func<nint>)(() => preview.Handle));
+
+        void Push(uint width, uint height) => core.PushExternalFrame(session, 1, width, height,
+            Enumerable.Repeat((byte)200, (int)(width * height * 3 / 2)).ToArray());
+
+        int PresentedOrientation() => NativeCore.GetDeviceWindowPhoneFrameOrientation(session.RawHandle, preview.Handle);
+
+        (int Width, int Height) Bounds()
+        {
+            InteractionAssert(UnfixGetClientRect(preview.Handle, out var client), "Cannot read the independent client size.");
+            return (client.Right - client.Left, client.Bottom - client.Top);
+        }
+
+        void WaitFor(Func<bool> condition, bool dispatch, string error)
+        {
+            var timer = Stopwatch.StartNew();
+            while (!condition() && timer.Elapsed < TimeSpan.FromSeconds(3))
+            {
+                if (dispatch) DrainDispatcher();
+                Thread.Sleep(5);
+            }
+            InteractionAssert(condition(), error);
+        }
+
+        Push(120, 260);
+        WaitFor(() => PresentedOrientation() == 0, true, "Portrait did not reach the independent renderer.");
+        var portrait = Bounds();
+        InteractionAssert(portrait.Width < portrait.Height && preview.ControlGeometry == (120u, 260u, 0),
+            "The first source frame did not fit the independent window.");
+        TestFramedWheel(preview, portrait, wheelEvents);
+
+        Push(260, 120);
+        WaitFor(() => PreviewGeometryProperty(preview.Handle, "iPhoneMirrorPendingPreviewGeometry") ==
+            (nint)((260 << 16) | 120), false, "The rotation did not notify the window of its decoded dimensions.");
+        Thread.Sleep(100); // Give the render worker time while deliberately withholding the UI message.
+        InteractionAssert(PresentedOrientation() == 0 && Bounds() == portrait,
+            "A landscape frame reached the portrait-sized window before its resize.");
+
+        WaitFor(() => PresentedOrientation() is 1 or 3 or 5, true,
+            "Landscape did not present after the window resized.");
+        var landscape = Bounds();
+        InteractionAssert(landscape.Width > landscape.Height && preview.ControlGeometry == (260u, 120u, 0),
+            "The new landscape frame did not fit the resized independent window.");
+        TestFramedWheel(preview, landscape, wheelEvents);
+        preview.SetSourceDimensions(120, 260);
+        DrainDispatcher();
+        InteractionAssert(Bounds() == landscape && preview.ControlGeometry == (260u, 120u, 0),
+            "A stale status poll changed the independent window back to portrait.");
+
+        Push(120, 260);
+        WaitFor(() => PresentedOrientation() == 0, true, "Portrait did not present after switching back.");
+        var restored = Bounds();
+        InteractionAssert(restored.Width < restored.Height && preview.ControlGeometry == (120u, 260u, 0),
+            "The independent window did not return to portrait.");
+        Console.WriteLine("PASS independent rotation: window geometry is applied before presentation and stale status cannot resize it.");
+        Console.WriteLine("PASS framed wheel in portrait and landscape: both directions reach the screen, bezel rejected.");
+    }
+
+    private static void TestFramedWheel(NativePreviewWindow preview, (int Width, int Height) client,
+        List<PreviewPointerEventArgs> wheelEvents)
+    {
+        var bounds = PhoneFrameGeometry.ScreenBounds(preview.ActiveDeviceFrame!, preview.DeviceFrameRotation,
+            client.Width, client.Height);
+        void SendWheel(int x, int y, int delta)
+        {
+            var point = new AbsoluteLivePoint { X = x, Y = y };
+            InteractionAssert(AbsoluteLiveClientToScreen(preview.Handle, ref point), "Cannot find wheel screen coordinates.");
+            var position = (nint)((point.X & 0xFFFF) | (point.Y << 16));
+            PreviewStyleSendMessage(preview.Handle, 0x020A, (nint)(delta << 16), position);
+        }
+
+        wheelEvents.Clear();
+        var centerX = (int)Math.Round(bounds.Left + bounds.Width / 2);
+        var centerY = (int)Math.Round(bounds.Top + bounds.Height / 2);
+        SendWheel(centerX, centerY, 120);
+        SendWheel(centerX, centerY, -120);
+        SendWheel((int)(bounds.Left / 2), centerY, 120);
+        var (sourceWidth, sourceHeight, _) = preview.ControlGeometry;
+        InteractionAssert(wheelEvents.Select(e => e.Wheel).SequenceEqual([120, -120]) &&
+            wheelEvents.All(e => Math.Abs(e.X - sourceWidth / 2.0) <= 2 && Math.Abs(e.Y - sourceHeight / 2.0) <= 2),
+            "The independent preview must forward both wheel directions at the mapped screen point and reject the bezel.");
+    }
+
+    [DllImport("user32.dll", EntryPoint = "GetPropW", CharSet = CharSet.Unicode)]
+    private static extern nint PreviewGeometryProperty(nint window, string name);
 }

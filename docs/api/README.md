@@ -42,6 +42,8 @@ Clipboard RPC requires a bridge advertising `iphoneMirror.clipboard.rpc.v1`. Old
 
 `geometry.coordinateSpace` is **capturePixels**. Coordinates refer to the current native capture frame returned by the screenshot endpoint, with top-left origin, x rightwards and y downwards. Bounds are `0 <= x < width`, `0 <= y < height`. These are neither WPF preview coordinates nor iOS logical points nor a guessed device panel resolution. Preview window rotation, borders and DPI do not change this API space.
 
+The rotation test build can remove verified black padding from a square mirroring canvas after the same session establishes a matching rectangular screen reference. The screenshot pixels and reported geometry change together; encoded canvas dimensions remain diagnostic data. Refresh geometry and reacquire control after such a change. This conservative pixel fallback is not an authoritative iOS aperture or direction source; see the [rotation investigation and test boundaries](../diagnostics/original-quality-rotation-geometry-20261118.zh-CN.md).
+
 The application converts to normalized touch coordinates using its existing orientation/calibration mapper. The frame is not cropped to guess a device screen. Use only supported full-screen mirroring and the established control calibration. The current capture stack does not provide an independent authoritative iOS rotation angle; unsupported orientation/calibration configurations require correction in the existing UI, not guessed transforms.
 
 Read geometry before input. Optionally include `geometryVersion` in the request. Resolution, session or calibration changes revoke the old geometry; refresh status and reacquire. A `202` response means dispatch through the existing transport, not confirmation that the iPhone UI performed the action. Never automatically retry input after timeout/disconnection.
@@ -141,6 +143,13 @@ The dev branch adds `/devices/{id}/apps`, `/apps/launch`, and the shared device-
 The expanded Device Hub publishes GET /api/v1/hub/actions and
 POST /api/v1/devices/{id}/hub/{action}. Reads require device.read; mutations require
 device.control and the current lease; recording also requires screen.capture.
+
+To restart an installed app with the Metal performance HUD, send
+`POST /api/v1/devices/{id}/hub/restart_with_metal_hud` with `{"bundleId":"com.example.game"}`
+and the current `X-Control-Session` header. The bridge closes the selected app and
+starts it with `MTL_HUD_ENABLED=1`. A successful result confirms the launch request.
+Check the device or mirrored picture to confirm the HUD is visible.
+
 Upload IPA/profile bytes to /api/v1/devices/{id}/apps/install or /profiles/install
 using application/octet-stream, Content-Length and X-File-Name.
 Host paths are never accepted by public actions. Renew the lease during long installs;

@@ -26,6 +26,8 @@ foreach ($name in @('SHA256SUMS.txt','BUILD.json','NOTICE-FFMPEG-BUILD.txt')) {
 Copy-Item -LiteralPath (Join-Path $root 'third_party\airplay-server\patches\airplay-upstream-125.patch') `
     -Destination (Join-Path $vendor 'patches')
 foreach ($name in @('airplay-hevc.patch', 'airplay-hevc-config.h',
+        'Apply-DiagnosticMirrorCodecPatch.ps1', 'airplay-mirror-codec-policy.h',
+        'Apply-AirPlayDisconnectGracePatch.ps1',
         'Apply-AirPlayRequestPolicyPatch.ps1', 'airplay-request-policy.h', 'airplay-play-request.h',
         'Apply-AirPlayControlPatch.ps1', 'airplay-control.h', 'airplay-control-httpd.h', 'airplay-control-media.h',
         'airplay-scrub-request.h')) {

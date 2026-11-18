@@ -338,7 +338,7 @@
                     <ui:SymbolIcon Symbol="PhoneDesktop24" FontSize="36" Foreground="{DynamicResource MutedTextBrush}" HorizontalAlignment="Center" Margin="0,0,0,16"/>
                     <TextBlock x:Name="PromptTitle" TextAlignment="Center" FontWeight="SemiBold" TextWrapping="Wrap"/>
                     <TextBlock x:Name="PromptDetail" Style="{StaticResource HubCaption}" TextAlignment="Center" Margin="0,8,0,16"/>
-                    <Button x:Name="PrepareButton" Content="{DynamicResource DeviceHubPanelRetryConnection}" Tag="prepare" Click="OnActionClick" HorizontalAlignment="Center" Style="{StaticResource HubAction}" AutomationProperties.AutomationId="PrepareDeviceHubButton"/>
+                    <Button x:Name="PrepareButton" Tag="prepare" Click="OnActionClick" HorizontalAlignment="Center" Style="{StaticResource HubAction}" AutomationProperties.AutomationId="PrepareDeviceHubButton"/>
                 </StackPanel>
             </Grid>
             <StackPanel Grid.Row="4" Margin="0,10,0,0">

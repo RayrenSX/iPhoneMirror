@@ -8,6 +8,8 @@ internal sealed class SingleFlightOperation
     private Task _task = Task.CompletedTask;
     private CancellationTokenSource? _cancellation;
 
+    internal Task PendingTask { get { lock (_gate) return _task.IsCompleted ? Task.CompletedTask : _task; } }
+
     internal Task RunAsync(Func<CancellationToken, Task> operation,
         CancellationToken shutdown = default)
     {

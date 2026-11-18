@@ -16,7 +16,9 @@ internal sealed partial class AutomationService
         var policy = DeviceHubContract.Require(action, publicOnly: true);
         if (arguments.ValueKind != JsonValueKind.Object)
             throw new AutomationException("INVALID_REQUEST", "Pass a JSON argument object.", 422);
-        if (action is "launch" or "uninstall_app" or "get_app_icon")
+        if (action == "restart_with_metal_hud" && arguments.EnumerateObject().Count() != 1)
+            throw new AutomationException("INVALID_REQUEST", "A Metal HUD restart accepts only bundleId.", 422);
+        if (action is "launch" or "restart_with_metal_hud" or "uninstall_app" or "get_app_icon")
         {
             var bundle = arguments.TryGetProperty("bundleId", out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
             if (bundle is null || bundle.Length > 512 ||

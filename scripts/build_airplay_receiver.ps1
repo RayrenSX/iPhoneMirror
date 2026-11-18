@@ -82,6 +82,10 @@ $SourceRoot = (Resolve-Path -LiteralPath $BuildSourceRoot).Path
     -SourceRoot $SourceRoot
 & (Join-Path $ReceiverRoot 'patches\Apply-AirPlayControlPatch.ps1') `
     -SourceRoot $SourceRoot
+& (Join-Path $ReceiverRoot 'patches\Apply-DiagnosticMirrorCodecPatch.ps1') `
+    -SourceRoot $SourceRoot
+& (Join-Path $ReceiverRoot 'patches\Apply-AirPlayDisconnectGracePatch.ps1') `
+    -SourceRoot $SourceRoot
 
 $CompatibilityMarkers = @(
     @{ Path = 'AirPlayServerLib\lib\http_parser.c';
@@ -168,7 +172,7 @@ if (-not (Test-Path -LiteralPath $Binary)) {
 $BinaryHex = [BitConverter]::ToString([IO.File]::ReadAllBytes($Binary)).Replace('-', '')
 $TargetHeightAndRate = '6C73100E110B40103C5F102465306666'
 $TargetWidth = '6539323511140013000000005A7FFEE610015A41'
-$MediaFeaturesLittleEndian = 'F7FE7F5A'
+$MediaFeaturesLittleEndian = '73FE7F5A'
 $LegacyHeightAndRate = '6C73100E1105A0101E5F102465306666'
 $LegacyWidth = '65393235110D7013000000005A7FFEE610015A41'
 if (-not $BinaryHex.Contains($TargetHeightAndRate) -or
@@ -201,7 +205,10 @@ foreach ($Marker in @('IPHONE_MIRROR_AIRPLAY_WIDTH', 'IPHONE_MIRROR_AIRPLAY_HEIG
         'IPHONE_MIRROR_RUNTIME_DEVICE_ID',
         'IPHONE_MIRROR_BOUND_MEDIA_SOCKETS',
         'IPHONE_MIRROR_VIDEO_DIAG 32',
+        'IPHONE_MIRROR_VIDEO_DIAG 33',
+        'IPHONE_MIRROR_VIDEO_DIAG 34',
         'IPHONE_MIRROR_PRESERVE_IPV6_MEDIA',
+        'Mirror TCP keepalive configured',
         'Mirror TCP read timed out after %d ms',
         'iphonemirror://pause',
         'iphonemirror://resume',
@@ -211,6 +218,12 @@ foreach ($Marker in @('IPHONE_MIRROR_AIRPLAY_WIDTH', 'IPHONE_MIRROR_AIRPLAY_HEIG
     if (-not $BinaryAscii.Contains($Marker)) {
         throw "Built AirPlay receiver is missing runtime capability marker: $Marker"
     }
+}
+$DiagnosticCodecVariable = 'IPHONE_MIRROR_DIAGNOSTIC_MIRROR_AVC_ONLY'
+$DiagnosticCodecVariableHex = [BitConverter]::ToString(
+    [Text.Encoding]::Unicode.GetBytes($DiagnosticCodecVariable)).Replace('-', '')
+if (-not $BinaryHex.Contains($DiagnosticCodecVariableHex)) {
+    throw 'Built AirPlay receiver is missing the exact Win32 diagnostic codec environment flag.'
 }
 if ($BinaryAscii.Contains('0x5A7FFFF7,0x1E') -or
     $BinaryAscii.Contains('0x5A7FFFC0,0x1E') -or

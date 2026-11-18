@@ -36,6 +36,7 @@ struct PreviewTestHooks {
     std::function<void(HRESULT)> after_present;
     // Runs after the initial swap chain is bound but before its worker starts.
     std::function<void()> after_initialize;
+    std::function<DWORD(HANDLE, DWORD)> wait_for_timer;
 };
 #endif
 
@@ -77,6 +78,7 @@ public:
     void set_corner_profile(float normalized_radius, float curve_exponent) noexcept;
     void set_phone_frame(bool enabled) noexcept;
     void set_device_frame(std::shared_ptr<const DeviceFrameArtwork> artwork) noexcept;
+    [[nodiscard]] int presented_phone_frame_orientation() const noexcept;
     void set_rotation(std::int32_t quarter_turns) noexcept;
     // Applies to this composition visual only, including its black background.
     void set_opacity(float opacity) noexcept;

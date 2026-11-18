@@ -1,7 +1,10 @@
 using System.IO;
+using System.Reflection;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using IPhoneMirror.App.Controls;
@@ -305,9 +308,10 @@ internal static partial class Program
             var appContainer = (ListBoxItem)list.ItemContainerGenerator.ContainerFromIndex(0);
             var rowMore = FindVisualDescendants<Button>(appContainer).Single(button => button.Name == "RowMore");
             rowMore.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent)); Finish();
-            Verify(list.ContextMenu!.IsOpen && ReferenceEquals(list.ContextMenu.PlacementTarget, rowMore),
+            var appMenu = (ContextMenu)KeyboardField(panel, "_rowMenu");
+            Verify(appMenu.IsOpen && ReferenceEquals(appMenu.PlacementTarget, rowMore) && !list.ContextMenu!.IsOpen,
                 "A row's visible more button must open the same operations on that exact application.");
-            var appMenu = Menu(list);
+            VerifyHubRowMenuPosition(rowMore, appMenu);
             Verify(MenuAction(appMenu, "app-launch").IsEnabled && MenuAction(appMenu, "app-remove").IsEnabled,
                 "The selected application must expose launch and uninstall through its context menu.");
             ClickMenu(appMenu, "copy");
@@ -321,12 +325,36 @@ internal static partial class Program
             var pointed = list.Items[1];
             list.ScrollIntoView(pointed); window.UpdateLayout();
             var pointedContainer = (ListBoxItem)list.ItemContainerGenerator.ContainerFromItem(pointed);
-            KeyboardCall(panel, "SelectContextRow", list, pointedContainer);
-            Verify(ReferenceEquals(list.SelectedItem, pointed), "Right-clicking another row must select that row immediately.");
-            KeyboardCall(panel, "SelectContextRow", list, null);
-            var blankMenu = Menu(list);
+            list.SelectedItem = list.Items[0];
+            OpenHubContextMenu(pointedContainer, 4, 4);
+            var pointedMenu = list.ContextMenu!;
+            Verify(pointedMenu.IsOpen && pointedMenu.Placement == PlacementMode.MousePoint && ReferenceEquals(list.SelectedItem, pointed),
+                "The mouse menu must select the row it opens on and retain cursor placement.");
+            pointedMenu.IsOpen = false; Finish();
+            OpenHubContextMenu(list, 4, 4);
+            var blankMenu = list.ContextMenu!;
             Verify(list.SelectedItem is null && !blankMenu.Items.OfType<MenuItem>().Any(item => item.Tag?.ToString() == "app-remove") &&
                 MenuAction(blankMenu, "app-install").IsEnabled, "Blank-space menus must offer page actions without exposing a previous app's uninstall.");
+            blankMenu.IsOpen = false; Finish();
+            list.SelectedItem = list.Items[0];
+            OpenHubContextMenu(pointedContainer, -1, -1);
+            var keyboardMenu = (ContextMenu)KeyboardField(panel, "_rowMenu");
+            Finish();
+            Verify(keyboardMenu.IsOpen && keyboardMenu.Placement == PlacementMode.Bottom &&
+                ReferenceEquals(keyboardMenu.PlacementTarget, pointedContainer) && ReferenceEquals(list.SelectedItem, pointed),
+                $"The keyboard menu must open beside the focused row (open={keyboardMenu.IsOpen}, placement={keyboardMenu.Placement}, " +
+                $"anchor={ReferenceEquals(keyboardMenu.PlacementTarget, pointedContainer)}, selected={ReferenceEquals(list.SelectedItem, pointed)}).");
+            keyboardMenu.IsOpen = false; Finish();
+            void DoubleClickApp(MouseButton button) => KeyboardCall(panel, "OnAppDoubleClick", list,
+                new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, button) { RoutedEvent = Control.MouseDoubleClickEvent, Source = pointedContainer });
+            var priorLaunches = calls.Count(call => call.Action == "launch");
+            DoubleClickApp(MouseButton.Right); Finish();
+            Verify(calls.Count(call => call.Action == "launch") == priorLaunches, "Right double-click must not launch an app.");
+            list.SelectedItem = list.Items[0];
+            DoubleClickApp(MouseButton.Left); Finish();
+            Verify(calls.Count(call => call.Action == "launch") == priorLaunches + 1 &&
+                Equals(launchedBundle, pointed.GetType().GetProperty("Id")!.GetValue(pointed)),
+                "Double-click must open the app under the pointer even if selection differs.");
             Verify(panel.FindName("AppLaunch") is null && panel.FindName("AppRemove") is null,
                 "Application actions must not retain the old footer button row.");
             KeyboardCall(window, "SetSettingsPanelVisible", true); Finish();
@@ -403,6 +431,26 @@ internal static partial class Program
             System.Windows.Controls.Primitives.ScrollBar.PageDownCommand.Execute(null, appBar); Finish();
             Verify(listScroll.VerticalOffset > 0, "Clicking the grouped app scrollbar track must page down.");
             Console.WriteLine("PASS grouped app scrollbar: full-width thumb/track hit targets, dragging and page down.");
+            var viewport = FindVisualDescendants<ScrollContentPresenter>(listScroll).First();
+            var scrolledContainer = FindVisualDescendants<ListBoxItem>(viewport).First(item =>
+            {
+                var top = item.TranslatePoint(new Point(), viewport).Y;
+                return top >= 0 && top + item.ActualHeight <= viewport.ActualHeight;
+            });
+            var scrolledRow = list.ItemContainerGenerator.ItemFromContainer(scrolledContainer);
+            var scrolledMore = FindVisualDescendants<Button>(scrolledContainer).Single(button => button.Name == "RowMore");
+            Verify(scrolledMore.Focus(), "A visible three-dot button should accept focus.");
+            Finish();
+            var menuOffset = listScroll.VerticalOffset;
+            scrolledMore.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            var scrolledMenu = (ContextMenu)KeyboardField(panel, "_rowMenu");
+            Finish();
+            Verify(scrolledMenu.IsOpen && ReferenceEquals(list.SelectedItem, scrolledRow),
+                $"A recycled menu button must target the row now under it (open={scrolledMenu.IsOpen}, selected={ReferenceEquals(list.SelectedItem, scrolledRow)}, same anchor={ReferenceEquals(scrolledMenu.PlacementTarget, scrolledMore)}, offset={menuOffset} -> {listScroll.VerticalOffset}).");
+            VerifyHubRowMenuPosition(scrolledMore, scrolledMenu);
+            listScroll.ScrollToTop(); Finish();
+            Verify(!scrolledMenu.IsOpen, "Scrolling away from a row must dismiss its popup.");
+            Console.WriteLine("PASS device app row menu: pixel alignment, recycled row and dismissal on scroll.");
             manyApps = false; _ = KeyboardCall(panel, "RefreshAsync"); Finish();
 
             Select(2); var profiles = Find<ListBox>("ProfilesList"); profiles.SelectedIndex = 0;
@@ -718,6 +766,28 @@ internal static partial class Program
         for (var i = 0; i < pixels.Length; i += 4)
             if (pixels[i] > 232 && pixels[i + 1] > 232 && pixels[i + 2] > 232 && pixels[i + 3] > 240) bright++;
         return (double)bright / (width * height);
+    }
+
+    private static void VerifyHubRowMenuPosition(Button trigger, ContextMenu menu)
+    {
+        var buttonTop = trigger.PointToScreen(new Point(trigger.ActualWidth, 0));
+        var buttonBottom = trigger.PointToScreen(new Point(trigger.ActualWidth, trigger.ActualHeight));
+        var menuTop = menu.PointToScreen(new Point(menu.ActualWidth, 0));
+        var menuBottom = menu.PointToScreen(new Point(menu.ActualWidth, menu.ActualHeight));
+        var tolerance = System.Windows.Media.VisualTreeHelper.GetDpi(trigger).DpiScaleX * 8;
+        Verify(Math.Abs(menuTop.X - buttonTop.X) <= tolerance &&
+            (Math.Abs(menuTop.Y - buttonBottom.Y) <= tolerance || Math.Abs(menuBottom.Y - buttonTop.Y) <= tolerance),
+            $"Row menu must align with its button (button {buttonTop} to {buttonBottom}, menu {menuTop} to {menuBottom}).");
+    }
+
+    private static void OpenHubContextMenu(IInputElement source, double x, double y)
+    {
+        const BindingFlags Static = BindingFlags.Static | BindingFlags.NonPublic;
+        const BindingFlags Instance = BindingFlags.Instance | BindingFlags.NonPublic;
+        var service = typeof(FrameworkElement).GetProperty("PopupControlService", Static)!.GetValue(null)!;
+        var open = service.GetType().GetMethod("RaiseContextMenuOpeningEvent", Instance,
+            [typeof(IInputElement), typeof(double), typeof(double), typeof(bool)])!;
+        Verify((bool)open.Invoke(service, [source, x, y, false])!, "WPF did not open the context menu.");
     }
 
     private static JsonElement HubFixtureApps(string source, string version = "1.0") => JsonSerializer.SerializeToElement(new

@@ -23,8 +23,8 @@ internal sealed partial class MainViewModel
         {
             // Join a manual or mirroring startup without taking ownership of
             // its cancellation when the panel closes or selection changes.
-            await Task.WhenAll(starting.WiredOperation.RunAsync(_ => Task.CompletedTask),
-                starting.WirelessOperation.RunAsync(_ => Task.CompletedTask)).WaitAsync(cancellation);
+            await Task.WhenAll(starting.WiredOperation.PendingTask,
+                starting.WirelessOperation.PendingTask).WaitAsync(cancellation);
             return;
         }
         _deviceHubConnectionStartup.Add(device.Udid);
@@ -32,20 +32,28 @@ internal sealed partial class MainViewModel
         finally { _deviceHubConnectionStartup.Remove(device.Udid); }
     }
 
-    internal bool IsDeviceHubReady(DeviceViewModel device) =>
-        !device.IsMediaCast && GetReadyUsbControlBridge(device.Udid) is { SupportsDeviceHub: true };
+    internal bool IsDeviceHubReady(DeviceViewModel device) => GetReadyDeviceHubBridge(device) is not null;
+
+    private UsbTouchBridgeHost? GetReadyDeviceHubBridge(DeviceViewModel device)
+    {
+        if (FindControl(device.Udid) is not { } control ||
+            GetReadyUsbControlBridge(device.Udid) is not { SupportsDeviceHub: true } bridge) return null;
+        var mode = ReferenceEquals(bridge, control.WiredBridge) ? ControlStatusMode.Usb : ControlStatusMode.Wireless;
+        return IsControlBindingCurrent(control, device, mode) ? bridge : null;
+    }
 
     internal async Task<JsonElement> DeviceHubUiAsync(DeviceViewModel device, string action,
         object? arguments, CancellationToken cancellation)
     {
-        var bridge = GetReadyUsbControlBridge(device.Udid) ??
+        var bridge = GetReadyDeviceHubBridge(device) ??
             throw new AutomationException("CONTROL_NOT_AVAILABLE", "Prepare the device's USB control connection first.", 503);
+        bool Current() => ReferenceEquals(GetReadyDeviceHubBridge(device), bridge);
         if (DeviceHubContract.Require(action).ReadOnly)
-            return await bridge.DeviceHubAsync(action, arguments, () => true, cancellation);
+            return await bridge.DeviceHubAsync(action, arguments, Current, cancellation);
         var physical = AutomationPhysicalId(device.Udid);
         var guard = AutomationHumanGuard(device.Udid);
         using var owner = AutomationOwnership.EnterInput(physical);
-        return await bridge.DeviceHubAsync(action, arguments, guard, cancellation);
+        return await bridge.DeviceHubAsync(action, arguments, () => Current() && guard(), cancellation);
     }
 
 }

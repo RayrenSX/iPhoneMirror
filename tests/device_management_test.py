@@ -68,6 +68,25 @@ class ManagementTests(unittest.IsolatedAsyncioTestCase):
         self.rsd = Rsd()
         self.management = DeviceManagement(SimpleNamespace(rsd=self.rsd, _generation=8))
 
+    async def test_metal_hud_restart_uses_fixed_launch_wire_options(self):
+        await self.management.request("restart_with_metal_hud", {"bundleId": "com.example.game"})
+        name, packet = self.rsd.messages[-1]
+        self.assertEqual(name, "com.apple.coredevice.appservice")
+        self.assertEqual(packet["CoreDevice.featureIdentifier"], "com.apple.coredevice.feature.launchapplication")
+        payload = packet["CoreDevice.input"]
+        self.assertEqual(payload["applicationSpecifier"], {"bundleIdentifier": {"_0": "com.example.game"}})
+        self.assertEqual(payload["options"]["environmentVariables"], {"MTL_HUD_ENABLED": "1"})
+        self.assertTrue(payload["options"]["terminateExisting"])
+        self.assertFalse(payload["options"]["startStopped"])
+        self.assertEqual(payload["options"]["arguments"], [])
+        self.assertTrue(self.rsd.channels[-1].closed)
+
+        await self.management.request("launch", {"bundleId": "com.example.game"})
+        ordinary = self.rsd.messages[-1][1]["CoreDevice.input"]["options"]
+        self.assertEqual(ordinary["environmentVariables"], {})
+        self.assertFalse(ordinary["terminateExisting"])
+        self.assertTrue(self.rsd.channels[-1].closed)
+
     async def test_settings_exact_wire_payloads_on_selected_rsd(self):
         cases = [
             ("showBorders", True, "setshowborders", {"showBorders": {"enabled": True}}),

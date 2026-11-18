@@ -157,6 +157,8 @@ internal static partial class Program
                 return RunCoreDeviceReplayTest(mediaRecording);
             if (args is ["--device-hub-sidebar", var deviceHubSidebarOutput])
                 return RunDeviceHubSidebarTests(deviceHubSidebarOutput);
+            if (args is ["--metal-hud-restart", var metalHudRestartOutput])
+                return RunMetalHudRestartTests(metalHudRestartOutput);
             if (args is ["--device-hub-file-import", var deviceHubFileImportOutput])
                 return RunDeviceHubFileImportTests(deviceHubFileImportOutput);
             if (args is ["--device-hub-file-delete", var deviceHubFileDeleteOutput])

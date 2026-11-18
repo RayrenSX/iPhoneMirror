@@ -80,12 +80,14 @@ internal static partial class Program
         Verify((await http.GetAsync("/api/v1/devices/a/coredevice/status")).StatusCode == HttpStatusCode.NotFound, "Removed native-media endpoints must not be advertised or accepted.");
         var catalog = await (await http.GetAsync("/api/v1/hub/actions")).Content.ReadFromJsonAsync<JsonElement>();
         var actions = catalog.GetProperty("actions");
-        Verify(actions.EnumerateObject().Count() == 24 && !actions.TryGetProperty("install_app", out _) && !actions.TryGetProperty("upload_file", out _) && !actions.TryGetProperty("delete_file", out _) &&
-            actions.GetProperty("get_settings").GetProperty("readOnly").GetBoolean(), "Public action catalog exposes private host paths or wrong policy.");
+        Verify(actions.EnumerateObject().Count() == 25 && !actions.TryGetProperty("install_app", out _) && !actions.TryGetProperty("upload_file", out _) && !actions.TryGetProperty("delete_file", out _) &&
+            actions.GetProperty("get_settings").GetProperty("readOnly").GetBoolean() &&
+            !actions.GetProperty("restart_with_metal_hud").GetProperty("readOnly").GetBoolean(), "Public action catalog exposes private host paths or wrong policy.");
         foreach (var action in DeviceHubContract.Actions.Where(p => p.Value.Public && p.Key != "launch"))
         {
             var before = hubCalls.GetValueOrDefault(action.Key);
-            object args = action.Key is "get_app_icon" or "uninstall_app" ? new { bundleId = "com.apple.Preferences" } : new { };
+            object args = action.Key is "get_app_icon" or "uninstall_app" or "restart_with_metal_hud"
+                ? new { bundleId = "com.apple.Preferences" } : new { };
             var response = await http.PostAsJsonAsync("/api/v1/devices/a/hub/" + action.Key, args);
             Verify(action.Value.ReadOnly ? response.IsSuccessStatusCode : response.StatusCode == HttpStatusCode.Conflict,
                 "Device Hub action bypassed its read/control admission: " + action.Key);
@@ -112,9 +114,17 @@ internal static partial class Program
             "An invalid app identity reached the bridge.");
         foreach (var action in DeviceHubContract.Actions.Where(p => p.Value.Public && !p.Value.ReadOnly && p.Key != "launch"))
         {
-            object args = action.Key == "uninstall_app" ? new { bundleId = "com.apple.Preferences" } : new { };
+            object args = action.Key is "uninstall_app" or "restart_with_metal_hud"
+                ? new { bundleId = "com.apple.Preferences" } : new { };
             Verify((await http.PostAsJsonAsync("/api/v1/devices/a/hub/" + action.Key, args)).IsSuccessStatusCode &&
                 hubCalls.GetValueOrDefault(action.Key) == 1, "A leased mutation was not dispatched exactly once: " + action.Key);
+        }
+        foreach (var invalidRestart in new object[] { new { }, new { bundleId = "bad/id" },
+            new { bundleId = "com.apple.Preferences", environment = new { MTL_HUD_ENABLED = "0" } } })
+        {
+            var response = await http.PostAsJsonAsync("/api/v1/devices/a/hub/restart_with_metal_hud", invalidRestart);
+            Verify(response.StatusCode == HttpStatusCode.UnprocessableEntity && hubCalls["restart_with_metal_hud"] == 1,
+                "A malformed Metal HUD restart reached the bridge.");
         }
         foreach (var (kind, fileName) in new[] { ("apps", "../../test.ipa"), ("profiles", "test.mobileprovision"), ("profiles", "test.mobileconfig") })
         {

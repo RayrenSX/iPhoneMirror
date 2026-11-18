@@ -20,6 +20,8 @@
 
 namespace {
 
+std::atomic_uint64_t next_wireless_landscape_run{1};
+
 HANDLE as_handle(void* value) noexcept { return static_cast<HANDLE>(value); }
 
 class LocalSecurityAttributes final {
@@ -287,8 +289,19 @@ void WirelessClientStream::set_identity(std::wstring name, bool connected) {
         if (!name.empty()) name_ = std::move(name);
         changed_connection = connected_ != connected;
         connected_ = connected;
+        if (changed_connection) {
+            // A new sender connection must establish its own rectangular
+            // reference. Subscriber reattachment does not enter this path.
+            screen_content_geometry_.reset();
+            landscape_run_ = 0;
+            if (!connected) {
+                product_type_.clear();
+                os_version_.clear();
+                screen_content_geometry_.configure(0, 0);
+            }
+        }
         if (changed_connection || !connected) {
-            snapshot_.state = connected ? State::Handshaking : State::WaitingForDevice;
+            snapshot_.state = connected ? State::Handshaking : State::Stopped;
             snapshot_.message = connected ? L"AirPlay connected: " + name_
                                           : L"AirPlay disconnected";
         }
@@ -301,7 +314,13 @@ void WirelessClientStream::set_metadata(
     std::scoped_lock lock(mutex_);
     if (!product_type.empty()) product_type_ = std::move(product_type);
     if (!os_version.empty()) os_version_ = std::move(os_version);
-    if (const auto* display = devices::find_apple_display(product_type_))
+    const auto* display = devices::find_apple_display(product_type_);
+    // Unknown models (including the synthetic CoreDevice external source)
+    // never enable screen-content normalization. Repeated metadata for the
+    // same known panel preserves the stream's established reference.
+    screen_content_geometry_.configure(display ? display->width : 0,
+        display ? display->height : 0);
+    if (display)
         logging::write(std::format("wireless_display_catalog model={} panel={}x{} long_edge={}",
             narrow(product_type_), display->width, display->height, display->height));
 }
@@ -309,6 +328,7 @@ void WirelessClientStream::set_metadata(
 void WirelessClientStream::set_mirror_state(wireless::MirrorSenderState state) {
     std::scoped_lock lock(mutex_);
     if (!connected_) return;
+    if (state == wireless::MirrorSenderState::Reconnecting) landscape_run_ = 0;
     mirror_state_ = state;
     if (latest_frame_) snapshot_.state = State::Streaming;
     snapshot_.message = state == wireless::MirrorSenderState::Paused
@@ -503,17 +523,45 @@ void WirelessClientStream::publish_video(const wireless::MessageHeader& header,
     if (!connected_) return;
     frame->timestamp_100ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
         received_at - started_at_).count() / 100;
+    const auto active_content = screen_content_geometry_.process(*frame);
+    // Track orientation on capture so previews cannot miss a brief portrait
+    // transition between two landscape frames of the same dimensions.
+    if (frame->width < frame->height) {
+        landscape_run_ = 0;
+    } else if (frame->width > frame->height) {
+        if (landscape_run_ == 0)
+            landscape_run_ = next_wireless_landscape_run.fetch_add(1, std::memory_order_relaxed);
+        frame->wireless_landscape_run = landscape_run_;
+    }
+    const bool active_content_changed = active_content != active_screen_content_ ||
+        (active_content && (active_screen_canvas_width_ != header.width ||
+            active_screen_canvas_height_ != header.height));
+    if (active_content_changed) {
+        // Keep encoded/negotiated geometry separate from the effective pixels
+        // published to every preview, export and input-coordinate consumer.
+        logging::write(std::format(
+            "wireless_active_area device_fp={} active={} decoded={}x{} rect={},{},{}x{} effective={}x{}",
+            anonymous_label(id_), active_content.has_value(), header.width, header.height,
+            active_content ? active_content->x : 0, active_content ? active_content->y : 0,
+            active_content ? active_content->width : header.width,
+            active_content ? active_content->height : header.height, frame->width, frame->height));
+        active_screen_content_ = active_content;
+        active_screen_canvas_width_ = header.width;
+        active_screen_canvas_height_ = header.height;
+    }
     const bool format_changed = snapshot_.width != 0 && snapshot_.height != 0 &&
-        (snapshot_.width != header.width || snapshot_.height != header.height);
+        (snapshot_.width != frame->width || snapshot_.height != frame->height);
     if (snapshot_.video_frames == 0 || format_changed) {
         const auto* display = devices::find_apple_display(product_type_);
         const bool panel_pixels = display &&
-            ((display->width == header.width && display->height == header.height) ||
-             (display->width == header.height && display->height == header.width));
+            ((display->width == frame->width && display->height == frame->height) ||
+             (display->width == frame->height && display->height == frame->width));
         logging::write(std::format(
-            "wireless_resolution model={} panel={}x{} decoded={}x{} panel_pixels={} orientation={}",
+            "wireless_resolution model={} panel={}x{} decoded={}x{} effective={}x{} panel_pixels={} orientation={}",
             narrow(product_type_), display ? display->width : 0, display ? display->height : 0,
-            header.width, header.height, panel_pixels, header.width > header.height ? "landscape" : "portrait"));
+            header.width, header.height, frame->width, frame->height, panel_pixels,
+            frame->width == frame->height ? "unknown" :
+                frame->width > frame->height ? "landscape" : "portrait"));
     }
     if (format_changed) {
         // Replace the retained frame atomically below, so all previews see
@@ -523,14 +571,14 @@ void WirelessClientStream::publish_video(const wireless::MessageHeader& header,
         logging::write(std::format(
             "wireless_video format_changed device_fp={} from={}x{} to={}x{}",
             anonymous_label(id_), snapshot_.width, snapshot_.height,
-            header.width, header.height));
+            frame->width, frame->height));
     }
     latest_frame_ = frame;
     snapshot_.state = State::Streaming;
     snapshot_.message = L"Wireless mirroring";
     mirror_state_ = wireless::MirrorSenderState::Active;
-    snapshot_.width = header.width;
-    snapshot_.height = header.height;
+    snapshot_.width = frame->width;
+    snapshot_.height = frame->height;
     ++snapshot_.video_frames;
     const auto elapsed = std::chrono::duration<double>(received_at - fps_sample_time_).count();
     if (elapsed >= 0.5) {
@@ -568,12 +616,14 @@ void WirelessClientStream::publish_audio(const wireless::MessageHeader& header,
     }
     if (attached) {
         std::scoped_lock lock(audio_mutex_);
+        bool has_video{};
         // detach() releases mutex_ before stopping the renderer. Re-check
         // attachments after taking audio_mutex_ to avoid creating a new
         // renderer in the gap between those two operations.
         {
             std::scoped_lock stream_lock(mutex_);
             if (!connected_ || attachments_ == 0) return;
+            has_video = latest_frame_ != nullptr;
         }
         auto packet = std::make_shared<AudioPacket>();
         packet->sequence = ++audio_output_sequence_;
@@ -586,9 +636,14 @@ void WirelessClientStream::publish_audio(const wireless::MessageHeader& header,
             audio_output_queue_.pop_front();
         const auto format_changed = audio_sample_rate_ != header.sample_rate ||
             audio_channels_ != header.channels || audio_bits_ != header.bits_per_sample;
-        if (format_changed || (!audio_renderer_ && !audio_renderer_failed_)) {
+        // Music can queue ahead to absorb network jitter. A live video preview
+        // shows the newest frame, so that same audio queue makes speech late.
+        // Audio may arrive before the first frame; switch on the next packet.
+        if (format_changed || audio_has_video_ != has_video ||
+            (!audio_renderer_ && !audio_renderer_failed_)) {
             audio_renderer_.reset();
             audio_renderer_failed_ = false;
+            audio_has_video_ = has_video;
             audio_sample_rate_ = header.sample_rate;
             audio_channels_ = header.channels;
             audio_bits_ = header.bits_per_sample;
@@ -606,7 +661,8 @@ void WirelessClientStream::publish_audio(const wireless::MessageHeader& header,
                 audio_renderer_ = std::make_unique<audio::WasapiRenderer>(format,
                     play_audio_.load(std::memory_order_relaxed),
                     effective_audio_volume(),
-                    audio::WasapiBufferingMode::NetworkJitter);
+                    has_video ? audio::WasapiBufferingMode::LowLatency :
+                                audio::WasapiBufferingMode::NetworkJitter);
             } catch (const std::exception& error) {
                 audio_renderer_failed_ = true;
                 logging::write(std::format("wireless audio playback disabled for device_fp={}: {}",
@@ -622,6 +678,18 @@ void WirelessClientStream::clear_media() noexcept {
         std::scoped_lock lock(mutex_);
         latest_frame_.reset();
         snapshot_.width = snapshot_.height = 0;
+        screen_content_geometry_.reset();
+        if (active_screen_content_) {
+            try {
+                logging::write(std::format(
+                    "wireless_active_area device_fp={} active=false reason=disconnected",
+                    anonymous_label(id_)));
+            } catch (...) {
+                // Best-effort diagnostics must never interrupt disconnect cleanup.
+            }
+            active_screen_content_.reset();
+        }
+        active_screen_canvas_width_ = active_screen_canvas_height_ = 0;
         mirror_state_ = wireless::MirrorSenderState::Active;
         source_width_ = source_height_ = output_width_ = output_height_ = 0;
         snapshot_.fps = snapshot_.latency_ms = 0;
@@ -639,6 +707,7 @@ void WirelessClientStream::stop_audio_renderer() noexcept {
         audio_output_queue_.clear();
         audio_sample_rate_ = 0;
         audio_channels_ = audio_bits_ = 0;
+        audio_has_video_ = false;
         audio_renderer_failed_ = false;
     }
     renderer.reset();

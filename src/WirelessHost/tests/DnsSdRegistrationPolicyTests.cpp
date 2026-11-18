@@ -25,6 +25,46 @@ bool has_property(const iPhoneMirror::wireless::DnsSdProperties& properties,
 } // namespace
 
 int main() {
+    constexpr auto diagnostic_flag = L"IPHONE_MIRROR_DIAGNOSTIC_MIRROR_AVC_ONLY";
+    constexpr auto mode_variable = L"IPHONE_MIRROR_AIRPLAY_MODE";
+    SetEnvironmentVariableW(diagnostic_flag, nullptr);
+    SetEnvironmentVariableW(mode_variable, L"mirror");
+    for (const auto* value : {L"0", L"true", L"yes", L"01", L"1 ", L""}) {
+        SetEnvironmentVariableW(diagnostic_flag, value);
+        if (iphone_mirror_mirror_features_high() != 0x400U) {
+            std::cerr << "Only exact diagnostic value 1 may disable mirror multicodec\n";
+            return 1;
+        }
+    }
+    SetEnvironmentVariableW(diagnostic_flag, L"1");
+    for (const auto* mode : {L"mirror", L"combined"}) {
+        SetEnvironmentVariableW(mode_variable, mode);
+        if (iphone_mirror_mirror_features_high() != 0U) return 1;
+        for (const auto service : {"_airplay._tcp", "_raop._tcp"}) {
+            iPhoneMirror::wireless::DnsSdProperties properties;
+            iPhoneMirror::wireless::apply_dns_sd_advertisement_policy(
+                service, std::wstring_view(mode) == L"combined", L"00:11:22:33:44:55", L"", properties, false);
+            const auto key = std::string_view(service) == "_airplay._tcp" ? L"features" : L"ft";
+            if (!has_property(properties, key, iPhoneMirror::wireless::AvcOnlyMirroringFeatures)) {
+                std::cerr << "Mirror diagnostic DNS-SD high word disagrees with global features\n";
+                return 1;
+            }
+        }
+    }
+    SetEnvironmentVariableW(mode_variable, L"media");
+    if (iphone_mirror_mirror_features_high() != 0x400U) return 1;
+    for (const auto service : {"_airplay._tcp", "_raop._tcp"}) {
+        iPhoneMirror::wireless::DnsSdProperties properties;
+        iPhoneMirror::wireless::apply_dns_sd_advertisement_policy(
+            service, true, L"00:11:22:33:44:55", L"", properties, true);
+        const auto key = std::string_view(service) == "_airplay._tcp" ? L"features" : L"ft";
+        if (!has_property(properties, key, iPhoneMirror::wireless::MediaCastFeatures)) {
+            std::cerr << "Mirror diagnostic must never change media receiver features\n";
+            return 1;
+        }
+    }
+    SetEnvironmentVariableW(diagnostic_flag, nullptr);
+    SetEnvironmentVariableW(mode_variable, nullptr);
     for (const auto service : {"_airplay._tcp", "_raop._tcp"}) {
         iPhoneMirror::wireless::DnsSdProperties combined;
         iPhoneMirror::wireless::apply_dns_sd_advertisement_policy(

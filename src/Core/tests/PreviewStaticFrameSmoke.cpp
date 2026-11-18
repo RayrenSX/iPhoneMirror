@@ -197,6 +197,77 @@ void test_static_rotation(HWND window, D3D11PreviewRenderer& preview,
             }
         }
     }
+    // A landscape frame already has its content rotated by the phone. The
+    // artwork must use the matching side without rotating the video again.
+    auto island_art = std::make_shared<iPhoneMirror::renderer::DeviceFrameArtwork>(*artwork);
+    for (int y = 14; y < 24; ++y) for (int x = 40; x < 80; ++x) {
+        const auto index = y * 120 + x;
+        island_art->screen_mask[index] = 0;
+        island_art->premultiplied_bgra[index * 4 + 3] = 255;
+    }
+    preview.set_device_frame(island_art);
+    preview.set_phone_frame(true);
+    preview.set_rotation(0);
+    SetWindowPos(window, nullptr, 0, 0, 240, 120, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    std::int64_t timestamp = 10;
+    std::uint64_t landscape_run = 0;
+    for (const bool limited : {false, true}) {
+        preview.set_render_size_limit(limited ? 160 : 0, limited ? 80 : 0);
+        const auto show_landscape = [&](int source_side, int expected_side, std::uint64_t run) {
+            auto landscape = std::make_shared<DecodedFrame>();
+            landscape->width = landscape->stride = 224;
+            landscape->height = 112;
+            landscape->timestamp_100ns = (timestamp += 500'000);
+            landscape->wireless_landscape_run = run;
+            landscape->color.range = iPhoneMirror::coremedia::ColorRange::Full;
+            landscape->nv12.resize(224 * 112 * 3 / 2, 128);
+            std::fill_n(landscape->nv12.begin(), 224 * 112, std::uint8_t{200});
+            if (source_side) {
+                for (int y = 36; y < 76; ++y) for (int x = 6; x < 16; ++x) {
+                    const auto column = source_side == 3 ? x : 223 - x;
+                    landscape->nv12[y * 224 + column] = 0;
+                }
+            }
+            provided.store(landscape);
+            const auto expected = expected_side ? expected_side : 5;
+            const auto deadline = std::chrono::steady_clock::now() + 2s;
+            do { pump_for(10ms); } while (preview.presented_phone_frame_orientation() != expected &&
+                std::chrono::steady_clock::now() < deadline);
+            require(preview.presented_phone_frame_orientation() == expected,
+                name + ": native landscape artwork did not follow the source sensor");
+            pump_for(50ms);
+            std::string diagnostic;
+            const auto left = sample_owned_pixel(window, 19.0 / 240.0, 0.5, diagnostic);
+            const auto right = sample_owned_pixel(window, 1.0 - 19.0 / 240.0, 0.5, diagnostic);
+            require(((expected_side == 3 || source_side == 3) ? left >= 0 && left < 35 : left > 140) &&
+                    ((expected_side == 1 || source_side == 1) ? right >= 0 && right < 35 : right > 140),
+                name + ": extra or missing landscape cutout " + diagnostic);
+        };
+        for (const int side : {3, 1, 0}) show_landscape(side, side, 0);
+        show_landscape(1, 0, ++landscape_run);
+        preview.request_refresh();
+        pump_for(50ms);
+        require(preview.presented_phone_frame_orientation() == 5,
+            name + ": a repaint of one wireless frame must not confirm orientation");
+        show_landscape(0, 0, landscape_run);
+        show_landscape(3, 0, landscape_run);
+        show_landscape(3, 3, landscape_run);
+        show_landscape(0, 3, landscape_run);
+        // Brief contrary content must not move the locked island. Evidence
+        // persisting across three frames and 100 ms can flip the same run.
+        show_landscape(1, 3, landscape_run);
+        show_landscape(1, 3, landscape_run);
+        show_landscape(0, 3, landscape_run);
+        show_landscape(1, 3, landscape_run);
+        show_landscape(1, 3, landscape_run);
+        show_landscape(1, 1, landscape_run);
+        show_landscape(0, 1, landscape_run);
+        // Capture may have observed portrait even if the preview never drew it.
+        show_landscape(0, 0, ++landscape_run);
+        show_landscape(1, 0, landscape_run);
+        show_landscape(1, 1, landscape_run);
+        show_landscape(0, 1, landscape_run);
+    }
     preview.set_rotation(0);
     preview.set_phone_frame(false);
     const std::weak_ptr<const iPhoneMirror::renderer::DeviceFrameArtwork> empty_preview_artwork = artwork;
@@ -306,6 +377,7 @@ void test_model_artwork(HWND window, D3D11PreviewRenderer& preview,
         landscape->width = landscape->stride = frame->height;
         landscape->height = frame->width;
         landscape->timestamp_100ns = 4;
+        landscape->device_orientation_turns = 1;
         landscape->nv12.assign(landscape->stride * landscape->height * 3 / 2, 128);
         std::fill_n(landscape->nv12.begin(), landscape->stride * landscape->height, std::uint8_t{200});
         provided.store(landscape);

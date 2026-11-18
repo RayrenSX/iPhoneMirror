@@ -24,3 +24,5 @@ src/Core/tests/fixtures/quicktime_video_hack/LICENSE text eol=lf
 tests/fixtures/coredevice/*.hevc -text
 # Preserve the pinned upstream patch, including whitespace in context lines.
 third_party/rplayhub/ffmpeg-rvra.patch -text -whitespace
+# Match the recorded AirPlay patch hashes on every checkout.
+third_party/airplay-server/patches/* text eol=lf

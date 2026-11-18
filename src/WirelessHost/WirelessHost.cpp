@@ -859,6 +859,8 @@ public:
             {"teardown mirror", "teardown_mirror"},
             {"teardown client", "teardown_client"},
             {"Mirror TCP read timed out", "mirror_read_timeout"},
+            {"Mirror TCP keepalive configured", "mirror_keepalive_configured"},
+            {"Mirror TCP keepalive fallback", "mirror_keepalive_fallback"},
             {"Mirror TCP select failed", "mirror_select_failed"},
             {"Mirror TCP socket closed", "mirror_peer_closed"},
             {"Mirror TCP receive failed", "mirror_receive_failed"},
@@ -896,6 +898,10 @@ public:
             if (valid && fields.empty()) {
                 diagnostic(std::format("video_diag event={} values={},{},{},{},{},{}",
                     numbers[0], numbers[1], numbers[2], numbers[3], numbers[4], numbers[5], numbers[6]));
+                if (numbers[0] == 34) {
+                    diagnostic(std::format("video_cadence decoded_callbacks={} {}",
+                        video_callbacks_.load(std::memory_order_relaxed), writer_.summary()));
+                }
                 return;
             }
         }

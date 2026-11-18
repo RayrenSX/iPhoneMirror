@@ -150,7 +150,6 @@
                                 </Grid.ColumnDefinitions>
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto"/><RowDefinition Height="12"/>
-                                    <RowDefinition Height="Auto"/><RowDefinition Height="12"/>
                                     <RowDefinition Height="Auto"/>
                                 </Grid.RowDefinitions>
                                 <TextBlock Text="{DynamicResource SettingShortcutsSetting}" VerticalAlignment="Center"
@@ -166,26 +165,31 @@
                                          PreviewKeyDown="OnShortcutPreviewKeyDown" PreviewMouseDown="OnShortcutPreviewMouseDown"
                                          AutomationProperties.Name="{DynamicResource ShortcutSettingsCaptureHint}"
                                          ToolTip="{DynamicResource ShortcutSettingsCaptureHint}"/>
-                                <TextBlock Grid.Row="4" Text="{DynamicResource SettingShortcutsTrigger}" VerticalAlignment="Center"
-                                           Foreground="{DynamicResource MutedTextBrush}" Margin="0,0,12,0" TextWrapping="Wrap"/>
-                                <ComboBox Grid.Row="4" Grid.Column="1" ItemsSource="{Binding TriggerLabels}" SelectedIndex="{Binding TriggerIndex}"
-                                          Height="40" MinHeight="40" Padding="12,0" FontSize="{DynamicResource FontSize14}"
-                                          AutomationProperties.Name="{DynamicResource SettingShortcutsTrigger}"/>
                             </Grid>
-                            <Border BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,1,0,0" Margin="0,14,0,12"/>
-                            <StackPanel Visibility="{Binding OpacityVisibility}">
-                                <DockPanel Margin="0,0,0,6">
-                                    <TextBlock Text="{Binding TargetLabel}" FontSize="{DynamicResource FontSize14}"/>
-                                    <TextBlock Text="{Binding Value, StringFormat={}{0:0}%}" HorizontalAlignment="Right"
-                                               FontSize="{DynamicResource FontSize14}" FontWeight="SemiBold"/>
-                                </DockPanel>
-                                <Slider Minimum="10" Maximum="100" TickFrequency="1" IsSnapToTickEnabled="True"
-                                        MinHeight="24" Value="{Binding Value}" AutomationProperties.Name="{Binding TargetLabel}"/>
+                            <StackPanel Visibility="{Binding SettingControlsVisibility}">
+                                <Grid Margin="0,12,0,0">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="110"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                    <TextBlock Text="{DynamicResource SettingShortcutsTrigger}" VerticalAlignment="Center"
+                                               Foreground="{DynamicResource MutedTextBrush}" Margin="0,0,12,0" TextWrapping="Wrap"/>
+                                    <ComboBox Grid.Column="1" ItemsSource="{Binding TriggerLabels}" SelectedIndex="{Binding TriggerIndex}"
+                                              Height="40" MinHeight="40" Padding="12,0" FontSize="{DynamicResource FontSize14}"
+                                              AutomationProperties.Name="{DynamicResource SettingShortcutsTrigger}"/>
+                                </Grid>
+                                <Border BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,1,0,0" Margin="0,14,0,12"/>
+                                <StackPanel Visibility="{Binding OpacityVisibility}">
+                                    <DockPanel Margin="0,0,0,6">
+                                        <TextBlock Text="{Binding TargetLabel}" FontSize="{DynamicResource FontSize14}"/>
+                                        <TextBlock Text="{Binding Value, StringFormat={}{0:0}%}" HorizontalAlignment="Right"
+                                                   FontSize="{DynamicResource FontSize14}" FontWeight="SemiBold"/>
+                                    </DockPanel>
+                                    <Slider Minimum="10" Maximum="100" TickFrequency="1" IsSnapToTickEnabled="True"
+                                            MinHeight="24" Value="{Binding Value}" AutomationProperties.Name="{Binding TargetLabel}"/>
+                                </StackPanel>
+                                <CheckBox Visibility="{Binding BooleanVisibility}" IsChecked="{Binding BooleanValue}"
+                                          Content="{Binding BooleanLabel}"/>
+                                <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{Binding TriggerDescription}" TextWrapping="Wrap" Margin="0,10,0,0"
+                                           FontSize="{DynamicResource CaptionFontSize}" Foreground="{DynamicResource MutedTextBrush}"/>
                             </StackPanel>
-                            <CheckBox Visibility="{Binding BooleanVisibility}" IsChecked="{Binding BooleanValue}"
-                                      Content="{Binding BooleanLabel}"/>
-                            <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{Binding TriggerDescription}" TextWrapping="Wrap" Margin="0,10,0,0"
-                                       FontSize="{DynamicResource CaptionFontSize}" Foreground="{DynamicResource MutedTextBrush}"/>
                         </StackPanel>
                         </Border>
                     </DataTemplate>

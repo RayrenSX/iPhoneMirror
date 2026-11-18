@@ -1737,11 +1737,14 @@
     <system:String x:Key="SettingsApplyBluetoothSensitivity">套用靈敏度</system:String>
     <system:String x:Key="SettingsGroupPendingHint">此群組有尚未套用的變更。</system:String>
     <system:String x:Key="SettingShortcutsTitle">更多設定項快捷鍵</system:String>
-    <system:String x:Key="SettingShortcutsDescription">選擇設定項並獨立綁定快捷鍵，可選擇點按切換或按住暫時生效。僅作用於獨立投影視窗，無需開啟反控。</system:String>
+    <system:String x:Key="SettingShortcutsDescription">為獨立投影視窗綁定快捷鍵。錄影、截圖和全螢幕也可在主視窗使用。視窗設定可選擇點按切換或按住暫時生效。</system:String>
+    <system:String x:Key="SettingShortcutsRecording">開始／停止螢幕錄影</system:String>
+    <system:String x:Key="SettingShortcutsMuteWindow">切換目前視窗靜音</system:String>
     <system:String x:Key="SettingShortcutsSetting">設定項</system:String>
     <system:String x:Key="SettingShortcutsRemove">刪除此快捷鍵</system:String>
     <system:String x:Key="SettingShortcutsHeldValue">按住時的透明度</system:String>
-    <system:String x:Key="SettingShortcutsHeldEnabled">按住時啟用置頂</system:String>
+    <system:String x:Key="SettingShortcutsHeldEnabled">按住時啟用</system:String>
+    <system:String x:Key="SettingShortcutsPhoneFrame">顯示手機邊框</system:String>
     <system:String x:Key="SettingShortcutsAdd">新增設定項快捷鍵</system:String>
     <system:String x:Key="SettingShortcutsKey">快捷鍵</system:String>
     <system:String x:Key="SettingShortcutsTrigger">觸發方式</system:String>
@@ -1750,7 +1753,7 @@
     <system:String x:Key="SettingShortcutsHoldHint">按住時套用目標值，放開或視窗失焦後還原原值。</system:String>
     <system:String x:Key="SettingShortcutsToggleHint">按一次套用目標值，再按一次還原原值；放開按鍵或切到其他視窗不會還原。</system:String>
     <system:String x:Key="SettingShortcutsToggleValue">切換後的透明度</system:String>
-    <system:String x:Key="SettingShortcutsToggleEnabled">切換後啟用置頂</system:String>
+    <system:String x:Key="SettingShortcutsToggleEnabled">切換後啟用</system:String>
     <sys:String x:Key="ToolbarCustomize">自訂頂端工具列</sys:String>
     <sys:String x:Key="ToolbarEarlier">向前移動</sys:String>
     <sys:String x:Key="ToolbarLater">向後移動</sys:String>
@@ -1936,7 +1939,9 @@
     <sys:String x:Key="DeviceHubPanelOffline">裝置尚未就緒</sys:String>
     <sys:String x:Key="DeviceHubPanelReconnectHint">請連接並解鎖手機，在手機上信任此電腦後重試。</sys:String>
     <sys:String x:Key="DeviceHubPanelConnectTitle">正在連線至裝置</sys:String>
-    <sys:String x:Key="DeviceHubPanelConnectHint">選取裝置後會自動連線。請保持手機解鎖；首次連線請完成信任與裝置繫結，部分功能需要開發者模式。</sys:String>
+    <sys:String x:Key="DeviceHubPanelConnectRequired">請連線至此 iPhone</sys:String>
+    <sys:String x:Key="DeviceHubPanelConnectControl">啟用反向控制並連線</sys:String>
+    <sys:String x:Key="DeviceHubPanelConnectHint">管理 App 和檔案需要使用反向控制通道。連線時請保持手機解鎖，首次連線可能需要信任此電腦並完成裝置繫結。</sys:String>
     <sys:String x:Key="DeviceHubPanelConnecting">正在連線…</sys:String>
     <sys:String x:Key="DeviceHubPanelConnectFailed">暫時無法連線至裝置</sys:String>
     <sys:String x:Key="DeviceHubPanelConnectRetryHint">請確認手機已解鎖並信任電腦，完成裝置繫結或開發者模式設定後再試一次。</sys:String>
@@ -2032,6 +2037,9 @@
     <sys:String x:Key="DeviceHubPanelMore">更多操作</sys:String>
     <sys:String x:Key="DeviceHubPanelRecoveryShort">連線恢復後自動重新整理，無需切換裝置。</sys:String>
     <sys:String x:Key="DeviceHubPanelOpenApp">開啟</sys:String>
+    <sys:String x:Key="DeviceHubPanelRestartMetalHud">以 Metal 效能 HUD 重新啟動</sys:String>
+    <sys:String x:Key="DeviceHubPanelRestartMetalHudWarning">將關閉並重新啟動所選 App，未儲存的內容可能遺失。Metal 效能 HUD 只會在支援的 App 中顯示。</sys:String>
+    <sys:String x:Key="DeviceHubPanelMetalHudRestarted">已要求以 Metal 效能 HUD 重新啟動 {0}；請在裝置或鏡像畫面確認是否顯示。</sys:String>
     <sys:String x:Key="DeviceHubPanelCopyBundleId">複製 Bundle ID</sys:String>
     <sys:String x:Key="DeviceHubPanelCopyPid">複製程序 ID</sys:String>
     <sys:String x:Key="DeviceHubPanelCopyIdentifier">複製識別碼</sys:String>

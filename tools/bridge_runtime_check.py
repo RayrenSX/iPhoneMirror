@@ -50,7 +50,9 @@ def check_runtime_functionality(build_touchscreen_report, contact, release, buil
         raise RuntimeError('CoreDevice feedback/bridge import failed')
     checks.append('replay_codec_and_hid_feedback')
     mapped_actions = ('stat_file', 'write_mapped_file', 'make_directory', 'move_file', 'delete_mapped_file', 'set_mapped_file_time')
-    if (len(ACTIONS) != 35 or ACTIONS['upload_file']['public'] or ACTIONS['upload_file']['readOnly'] or
+    if (len(ACTIONS) != 36 or
+            ACTIONS.get('restart_with_metal_hud') != {'readOnly': False, 'public': True, 'timeout': 35} or
+            ACTIONS['upload_file']['public'] or ACTIONS['upload_file']['readOnly'] or
             ACTIONS['delete_file']['public'] or ACTIONS['delete_file']['readOnly'] or
             any(action not in ACTIONS or ACTIONS[action]['public'] or
                 ACTIONS[action]['readOnly'] != (action == 'stat_file') for action in mapped_actions) or

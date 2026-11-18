@@ -2253,6 +2253,15 @@ std::int32_t IM_CALL im_session_set_window_phone_frame(iPhoneMirror::SessionHand
     return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
 }
 
+std::int32_t IM_CALL im_session_get_window_phone_frame_orientation(
+    iPhoneMirror::SessionHandle handle, void* hwnd) {
+    auto context = find_multi_session(handle);
+    if (!context) return -1;
+    std::scoped_lock lock(context->renderers_mutex);
+    const auto found = context->renderers.find(static_cast<HWND>(hwnd));
+    return found == context->renderers.end() ? -1 : found->second->presented_phone_frame_orientation();
+}
+
 std::int32_t IM_CALL im_session_set_window_corner_profile(iPhoneMirror::SessionHandle handle,
     void* hwnd, float radius, float exponent) {
     if (!std::isfinite(radius) || !std::isfinite(exponent) || radius < 0 || radius > 0.5F ||

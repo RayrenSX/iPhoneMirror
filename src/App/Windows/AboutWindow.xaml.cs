@@ -26,6 +26,7 @@ public partial class AboutWindow : IPhoneMirror.UI.Controls.RoundedWindow, INoti
     private CancellationTokenSource? _updateCheckCancellation;
     private bool _closed;
     private bool _isCheckingForUpdates;
+    private bool _isCleaningLogs;
     private bool _isLogPaused;
     private string _displayedLogText;
     private string _updateStatus;
@@ -417,18 +418,23 @@ public partial class AboutWindow : IPhoneMirror.UI.Controls.RoundedWindow, INoti
     private void OnOpenLogsClick(object sender, RoutedEventArgs e) =>
         Open(DiagnosticLogger.DirectoryPath);
 
-    private void OnCleanLogsClick(object sender, RoutedEventArgs e)
+    private async void OnCleanLogsClick(object sender, RoutedEventArgs e)
     {
+        if (_isCleaningLogs || _closed) return;
+        _isCleaningLogs = true;
+        var button = sender as Button;
+        if (button is not null) button.IsEnabled = false;
         try
         {
-            var logs = DiagnosticLogger.Cleanup(includeActiveLogs: true);
-            var updates = GitHubReleaseClient.CleanupOldDownloads(
-                includeCompleted: true);
+            var (logs, updates) = await Task.Run(() =>
+                (DiagnosticLogger.Cleanup(includeActiveLogs: true),
+                 GitHubReleaseClient.CleanupOldDownloads(includeCompleted: true)));
             var deletedFiles = logs.DeletedFiles + updates.DeletedFiles;
             var deletedBytes = logs.DeletedBytes + updates.DeletedBytes;
             var skipped = logs.SkippedFiles + updates.SkippedFiles;
-            DiagnosticStatus = LocalizationService.Format("DiagnosticsCleanedFormat", deletedFiles,
-                FormatBytes(deletedBytes), skipped);
+            if (!_closed)
+                DiagnosticStatus = LocalizationService.Format("DiagnosticsCleanedFormat", deletedFiles,
+                    FormatBytes(deletedBytes), skipped);
             DiagnosticLogger.Info("logging", "manual_cleanup_complete",
                 ("deleted_files", deletedFiles), ("deleted_bytes", deletedBytes),
                 ("skipped_files", skipped));
@@ -436,7 +442,13 @@ public partial class AboutWindow : IPhoneMirror.UI.Controls.RoundedWindow, INoti
         catch (Exception error)
         {
             DiagnosticLogger.Exception("logging", "manual_cleanup_failed", error);
-            DiagnosticStatus = LocalizationService.Format("DiagnosticsCleanupFailedFormat", AppLog.Error(error));
+            if (!_closed)
+                DiagnosticStatus = LocalizationService.Format("DiagnosticsCleanupFailedFormat", AppLog.Error(error));
+        }
+        finally
+        {
+            _isCleaningLogs = false;
+            if (button is not null && !_closed) button.IsEnabled = true;
         }
     }
 

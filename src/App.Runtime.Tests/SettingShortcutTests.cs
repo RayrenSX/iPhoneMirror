@@ -3,8 +3,11 @@ using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using IPhoneMirror.App.Interop;
+using IPhoneMirror.App.Models;
 using IPhoneMirror.App.Services;
 using IPhoneMirror.App.Updater;
+using IPhoneMirror.App.ViewModels;
 using IPhoneMirror.App.Windows;
 
 namespace IPhoneMirror.App.Runtime.Tests;
@@ -20,7 +23,7 @@ internal static partial class Program
         var manager = (MultiDevicePreviewManager)KeyboardField(main, "_secondaryMirrors");
         var windows = (IDictionary)KeyboardField(manager, "_windows");
         var constructor = typeof(NativePreviewWindow).GetConstructors(KeyboardTestMembers).Single();
-        NativePreviewWindow Preview(string title, bool managed = true)
+        NativePreviewWindow Preview(string title, bool managed = true, Func<bool>? readAudio = null, Action<bool>? writeAudio = null)
         {
             var parameters = constructor.GetParameters();
             var values = parameters.Select(parameter => parameter.DefaultValue).ToArray();
@@ -29,9 +32,12 @@ internal static partial class Program
             Array.Copy(required, values, required.Length);
             if (managed) values[Array.FindIndex(parameters, parameter => parameter.Name == "managedContent")] =
                 new Border { Background = Brushes.CornflowerBlue };
+            values[Array.FindIndex(parameters, parameter => parameter.Name == "isAudioEnabled")] = readAudio;
+            values[Array.FindIndex(parameters, parameter => parameter.Name == "setAudioEnabled")] = writeAudio;
             return (NativePreviewWindow)constructor.Invoke(values);
         }
-        using var first = Preview("Settings shortcut A");
+        var firstAudio = true;
+        using var first = Preview("Settings shortcut A", readAudio: () => firstAudio, writeAudio: enabled => firstAudio = enabled);
         using var second = Preview("Settings shortcut B");
         using var unavailable = Preview("Settings shortcut unavailable", managed: false);
         windows["setting-test-a"] = first;
@@ -41,7 +47,9 @@ internal static partial class Program
         var opacity = new SettingShortcutBinding { VirtualKey = 0x75, Value = 85 }; // F6
         var mouse = new SettingShortcutBinding { VirtualKey = (int)KeyboardShortcut.MouseXButton1, Value = 100 };
         var topmost = new SettingShortcutBinding { Setting = PreviewShortcutSetting.Topmost, VirtualKey = 0x76, Value = 1 };
-        app.UpdateSettings.SettingShortcuts = [opacity, mouse, topmost];
+        var hover = new SettingShortcutBinding { Setting = PreviewShortcutSetting.OpaqueOnHover, VirtualKey = 0x77, Value = 1 };
+        var frame = new SettingShortcutBinding { Setting = PreviewShortcutSetting.PhoneFrame, VirtualKey = 0x79, Value = 0, Trigger = SettingShortcutTrigger.Toggle };
+        app.UpdateSettings.SettingShortcuts = [opacity, mouse, topmost, hover, frame];
         var keys = (IReadOnlyDictionary<BluetoothShortcutAction, KeyboardShortcut>)KeyboardCall(main, "GetConfiguredShortcuts")!;
         KeyboardCall(main, "ConfigureKeyboardShortcuts", keys);
         var router = (KeyboardInputRouter)KeyboardField(main, "_keyboardRouter");
@@ -78,6 +86,20 @@ internal static partial class Program
             Key(0x75, false);
             InteractionAssert(Applied(first) == 1, "Release must restore the current hover policy.");
             KeyboardCall(first, "SetOpaqueOnHover", false);
+            var hoverTimer = (System.Windows.Threading.DispatcherTimer)KeyboardField(first, "_hoverOpacityTimer");
+            InteractionAssert(Key(hover.VirtualKey, true) && hoverTimer.IsEnabled && !(bool)KeyboardField(first, "_opaqueOnHover"),
+                "Holding the hover shortcut must activate only the temporary mouse tracking policy.");
+            KeyboardCall(first, "UpdateHoverState", true);
+            InteractionAssert(Applied(first) == 1 && Applied(second) == 1, "A temporary hover policy must make the hovered preview opaque.");
+            Key(0x75, true);
+            InteractionAssert(Applied(first) == .85, "An explicit opacity shortcut must take precedence over the hover policy.");
+            Key(0x75, false);
+            InteractionAssert(Applied(first) == 1, "Releasing an opacity override must restore the held hover policy.");
+            Key(hover.VirtualKey, false);
+            InteractionAssert(!hoverTimer.IsEnabled && Applied(first) == .35,
+                "Releasing the hover shortcut must stop mouse tracking and restore opacity.");
+            InteractionAssert(first.BeginTemporarySetting(frame) is null,
+                "A preview without a compatible frame must not retain a frame override.");
             Key(0x75, true);
             KeyboardCall(main, "OnIndependentKeyboardFocusChanged", "setting-test-a", first.Handle, false);
             InteractionAssert(Applied(first) == .35, "Losing focus must restore opacity even without a control session.");
@@ -132,6 +154,8 @@ internal static partial class Program
 
             TestSettingShortcutToggle(main, app, first, second, router, keys,
                 value => foreground = value, Applied, Key);
+            TestProjectionShortcutActions(main, app, first, second, keys, value => foreground = value, Key, () => firstAudio);
+            TestProjectionShortcutScreenshot((MainViewModel)KeyboardField(main, "_viewModel"), output);
             TestSettingShortcutPersistence(app, main, keys, output);
             TestSettingShortcutEditor(app, keys, output);
             Console.WriteLine("PASS settings shortcuts: keyboard/mouse holds, repeats, nesting, hover, latest baseline, focus, handoff, isolation, failure rollback, persistence and five-language UI.");
@@ -143,6 +167,77 @@ internal static partial class Program
             windows.Clear();
             CloseWorkspaceTestWindow(main);
             app.Shutdown();
+        }
+    }
+
+    private static void TestProjectionShortcutScreenshot(MainViewModel vm, string output)
+    {
+        const string deviceA = "shortcut-frame-a", deviceB = "shortcut-frame-b";
+        var core = (NativeCore)KeyboardField(vm, "_core");
+        var sessions = (DeviceSessionManager)KeyboardField(vm, "_sessions");
+        using var first = core.CreateExternalSession(deviceA, false, 0).Handle!;
+        using var second = core.CreateExternalSession(deviceB, false, 0).Handle!;
+        try
+        {
+            var pixels = Enumerable.Repeat((byte)128, 64 * 96 * 3 / 2).ToArray();
+            core.PushExternalFrame(first, 1, 64, 96, pixels);
+            core.PushExternalFrame(second, 1, 96, 64, pixels);
+            sessions.Set(new DeviceCaptureState { Udid = deviceA, Handle = first });
+            sessions.Set(new DeviceCaptureState { Udid = deviceB, Handle = second });
+            var screenshot = vm.CreateDeviceScreenshotCapture(deviceB);
+            InteractionAssert(screenshot() is { Width: 96, Height: 64 } &&
+                vm.CreateDeviceScreenshotCapture(deviceA)() is { Width: 64, Height: 96 }, "Screenshots must read the requested preview's frame.");
+            ScreenshotService.CapturePng(screenshot, Path.Combine(output, "device-b.png"));
+            sessions.Remove(deviceB);
+            InteractionAssert(screenshot() is null, "A closed preview must not return a frame or fall back to a different device.");
+        }
+        finally
+        {
+            sessions.Remove(deviceA);
+            sessions.Remove(deviceB);
+        }
+    }
+
+    private static void TestProjectionShortcutActions(MainWindow main, App app, NativePreviewWindow first, NativePreviewWindow second,
+        IReadOnlyDictionary<BluetoothShortcutAction, KeyboardShortcut> keys, Action<nint> foreground, Func<int, bool, bool> key, Func<bool> audio)
+    {
+        var previous = app.UpdateSettings.SettingShortcuts;
+        app.UpdateSettings.SettingShortcuts = new[] { PreviewShortcutSetting.FullScreen, PreviewShortcutSetting.MuteWindow,
+            PreviewShortcutSetting.RotateLeft, PreviewShortcutSetting.RotateRight }.Select((setting, index) =>
+                new SettingShortcutBinding { Setting = setting, Trigger = SettingShortcutTrigger.Toggle, VirtualKey = index == 3 ? 0x79 : 0x75 + index, Value = 0 }).ToList();
+        KeyboardCall(main, "ConfigureKeyboardShortcuts", keys);
+        try
+        {
+            foreground(first.Handle);
+            void Press(int vk)
+            {
+                InteractionAssert(key(vk, true), "The projection action must consume its shortcut.");
+                key(vk, true); key(vk, false);
+                DrainDispatcher();
+            }
+            Press(0x75);
+            InteractionAssert(first.IsFullScreen && !second.IsFullScreen, "Full screen must target only the foreground preview.");
+            Press(0x75);
+            InteractionAssert(!first.IsFullScreen, "The next press must leave full screen.");
+            Press(0x76);
+            InteractionAssert(!audio(), "The mute shortcut must mute the foreground preview exactly once.");
+            Press(0x76);
+            InteractionAssert(audio(), "The next press must restore sound.");
+            Press(0x77);
+            InteractionAssert((int)KeyboardField(first, "_rotation") == 3 && (int)KeyboardField(second, "_rotation") == 0,
+                "Rotate left must affect only the foreground preview.");
+            Press(0x79);
+            InteractionAssert((int)KeyboardField(first, "_rotation") == 0, "Rotate right must undo a single left rotation.");
+            key(0x77, true); key(0x77, false);
+            foreground(second.Handle);
+            DrainDispatcher();
+            InteractionAssert((int)KeyboardField(first, "_rotation") == 0 && (int)KeyboardField(second, "_rotation") == 0,
+                "A queued shortcut must be discarded when focus changes.");
+        }
+        finally
+        {
+            app.UpdateSettings.SettingShortcuts = previous;
+            KeyboardCall(main, "ConfigureKeyboardShortcuts", keys);
         }
     }
 
@@ -208,7 +303,7 @@ internal static partial class Program
         InteractionAssert(loaded.SettingShortcuts.SequenceEqual(app.UpdateSettings.SettingShortcuts), "Setting shortcuts did not roundtrip.");
         var clone = loaded.Clone();
         clone.SettingShortcuts.Clear();
-        InteractionAssert(loaded.SettingShortcuts.Count == 3, "Cloning shared the list.");
+        InteractionAssert(loaded.SettingShortcuts.Count == 5, "Cloning shared the list.");
         var duplicate = new SettingShortcutBinding { VirtualKey = (int)keys[BluetoothShortcutAction.BluetoothControl].VirtualKey };
         InteractionAssert(KeyboardCall(main, "ApplyShortcutSettings", keys, new[] { duplicate }) is string,
             "A duplicate existing shortcut was accepted.");
@@ -262,10 +357,26 @@ internal static partial class Program
                 InteractionAssert(editor.TryAssignSettingShortcut(row, new(KeyboardShortcut.Control, 0x75)), "The editor rejected a fresh key.");
                 var legacy = editor.Rows.Single(item => item.Action == BluetoothShortcutAction.Home);
                 InteractionAssert(!editor.TryAssignShortcut(legacy, row.Shortcut), "An existing action stole a settings shortcut.");
-                row.SettingIndex = 1;
-                editor.UpdateLayout();
-                InteractionAssert(row.ToBinding().IsValid, "A hidden opacity slider corrupted a boolean target.");
-                row.BooleanValue = false;
+                InteractionAssert(row.SettingLabels.Count == 10 && row.SettingLabels[4] != "SettingShortcutsRecording",
+                    "Every preview setting must have a localized label.");
+                foreach (var setting in new[] { PreviewShortcutSetting.Topmost, PreviewShortcutSetting.OpaqueOnHover, PreviewShortcutSetting.PhoneFrame })
+                {
+                    row.SettingIndex = (int)setting;
+                    editor.UpdateLayout();
+                    InteractionAssert(row.BooleanVisibility == Visibility.Visible && row.OpacityVisibility == Visibility.Collapsed &&
+                        row.ToBinding() is { Value: 1, IsValid: true }, "A boolean setting must start enabled and show its checkbox.");
+                    row.BooleanValue = false;
+                    InteractionAssert(row.ToBinding() is { Value: 0, IsValid: true }, "A boolean setting must save its disabled target.");
+                }
+                for (var index = (int)PreviewShortcutSetting.Recording; index < row.SettingLabels.Count; index++)
+                {
+                    row.SettingIndex = index;
+                    editor.UpdateLayout();
+                    row.TriggerIndex = (int)SettingShortcutTrigger.Hold;
+                    InteractionAssert(row.SettingControlsVisibility == Visibility.Collapsed &&
+                        row.ToBinding() is { Value: 0, Trigger: SettingShortcutTrigger.Toggle, IsValid: true },
+                        "A press-only action must not expose or persist temporary setting values.");
+                }
                 row.SettingIndex = 0;
                 editor.UpdateLayout();
                 InteractionAssert(row.ToBinding().IsValid, "A hidden boolean checkbox corrupted the opacity target.");

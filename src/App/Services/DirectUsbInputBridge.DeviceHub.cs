@@ -45,6 +45,7 @@ public sealed partial class DirectUsbInputBridge
         var generation = InputGeneration;
         var wire = Interlocked.Read(ref _wireGeneration);
         var completion = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var writing = false;
         _hubRequests[id] = (wire, completion);
         try
         {
@@ -53,11 +54,13 @@ public sealed partial class DirectUsbInputBridge
             try
             {
                 if (!IsReady || generation != InputGeneration || !current()) throw new OperationCanceledException();
-                await WriteFrameAsync(JsonSerializer.SerializeToUtf8Bytes(new
+                var payload = JsonSerializer.SerializeToUtf8Bytes(new
                 {
                     schema = CoreDeviceTouchProtocol.MessageSchema, kind = "hub_request", requestId = id,
                     generation = wire, seq = NextSequence(), action, arguments
-                }), cancellation);
+                });
+                writing = true;
+                await WriteFrameAsync(payload, cancellation);
             }
             finally { _sendLock.Release(); }
             var result = await completion.Task.WaitAsync(TimeSpan.FromSeconds(policy.Timeout + 5), cancellation);
@@ -66,7 +69,7 @@ public sealed partial class DirectUsbInputBridge
         }
         finally
         {
-            if (!completion.Task.IsCompleted)
+            if (writing && !completion.Task.IsCompleted)
             {
                 using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(3));
                 try

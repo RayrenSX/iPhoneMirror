@@ -10,17 +10,19 @@ internal sealed partial class MainViewModel
     {
         cancellation.ThrowIfCancellationRequested();
         if (!AutomationControlStartup.Add(source)) throw new InvalidOperationException("Control preparation already active.");
+        Task? startup = null;
         try
         {
             // The bridge owns its DDI/download/mount deadlines. A shorter
             // API deadline would cancel a healthy first-time preparation.
-            await (wireless ? StartWirelessControlAsync(source) : StartUsbControlAsync(source))
-                .WaitAsync(cancellation);
+            startup = wireless ? StartWirelessControlAsync(source) : StartUsbControlAsync(source);
+            await startup.WaitAsync(cancellation);
             cancellation.ThrowIfCancellationRequested();
         }
         catch (Exception) when (cancellation.IsCancellationRequested)
         {
-            await CancelReverseControlAsync(wireless ? ControlStatusMode.Wireless : ControlStatusMode.Usb, source);
+            if (startup is { IsCompleted: false })
+                await CancelReverseControlAsync(wireless ? ControlStatusMode.Wireless : ControlStatusMode.Usb, source);
             throw;
         }
         finally { AutomationControlStartup.Remove(source); }

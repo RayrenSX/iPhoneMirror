@@ -137,6 +137,11 @@ internal sealed class WirelessReceiverController(
             var started = await Task.Run(() => core.StartWirelessReceiver(sanitized, hostPath,
                 capability.Width, capability.Height, capability.FrameRate,
                 selectedBackend == WirelessReceiverBackend.Original ? port : WirelessReceiverConfiguration.DefaultRaopPort));
+            DiagnosticLogger.Info("wireless", "receiver_capability",
+                ("backend", selectedBackend.ToString()),
+                ("quality_profile", profile.Id), ("capability_profile", capability.Id),
+                ("width", capability.Width), ("height", capability.Height),
+                ("fps", capability.FrameRate), ("started", started.Success));
             Running = started.Success;
             Ready = false;
             if (started.Success)

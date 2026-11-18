@@ -194,16 +194,27 @@ internal sealed partial class DeviceHubPanel
     { if (_initialized && _active && _ready) await RefreshAsync(); }
     private async void OnAppDoubleClick(object sender, MouseButtonEventArgs e)
     {
-        if (Option(AppFilter) == "processes" || e.OriginalSource is not DependencyObject origin || IsRowActionSource(origin) ||
-            ItemsControl.ContainerFromElement(AppsList, origin) is not ListBoxItem) return;
+        if (Option(AppFilter) == "processes" || DoubleClickedRow(AppsList, e) is not { } row) return;
         e.Handled = true;
-        await InvokeActionAsync("app-launch");
+        await RunAsync(op => AppsList.Items.Contains(row) ? ExecuteActionAsync(op, "app-launch", row) : Task.CompletedTask);
     }
     private async Task LaunchSelectedAsync(Operation op, HubRow? app)
     {
         if (app is null || !_ready || Option(AppFilter) == "processes") return;
         await op.Call("launch", new { bundleId = app.Id });
         StatusText.Text = F("PanelLaunched", app.Title);
+    }
+    internal Func<Window?, string, bool> ConfirmMetalHudRestart { private get; set; } =
+        (owner, body) => owner is not null && AppPromptWindow.ConfirmDestructive(
+            L("PanelRestartMetalHud"), body, L("PanelRestartMetalHud"), owner);
+    private async Task RestartWithMetalHudAsync(Operation op, HubRow? app)
+    {
+        if (app is null || !_ready || Option(AppFilter) == "processes" || !AppsList.Items.Contains(app)) return;
+        var confirmed = ConfirmMetalHudRestart(Owner, L("PanelRestartMetalHudWarning") + "\n\n" + app.Title + "\n" + app.Id);
+        op.Check();
+        if (!confirmed) { StatusText.Text = ""; return; }
+        await op.Call("restart_with_metal_hud", new { bundleId = app.Id });
+        StatusText.Text = F("PanelMetalHudRestarted", app.Title);
     }
     private async Task RemoveAppAsync(Operation op, HubRow? app)
     {
@@ -485,8 +496,9 @@ internal sealed partial class DeviceHubPanel
     { if (e.Key == Key.Enter) { e.Handled = true; await RunAsync(op => ExecuteActionAsync(op, "file-browse")); } }
     private async void OnFileDoubleClick(object sender, MouseButtonEventArgs e)
     {
-        if (e.OriginalSource is not DependencyObject origin || IsRowActionSource(origin) || ItemsControl.ContainerFromElement(FilesList, origin) is not ListBoxItem) return;
-        e.Handled = true; await InvokeActionAsync("file-download");
+        if (DoubleClickedRow(FilesList, e) is not { } row) return;
+        e.Handled = true;
+        await RunAsync(op => FilesList.Items.Contains(row) ? ExecuteActionAsync(op, "file-download", row) : Task.CompletedTask);
     }
     private async Task BrowseAsync(Operation op, bool append = false, string? targetPath = null)
     {

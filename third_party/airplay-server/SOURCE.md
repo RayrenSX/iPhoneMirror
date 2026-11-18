@@ -42,7 +42,9 @@ smooth Wi-Fi delivery, while unrecovered packets use the negotiated PCM frame
 length so concealment does not advance the playback clock at the wrong rate.
 PCM conversion preserves the decoded sample count and sample rate. No adaptive
 audio clock compensation has been added. The data listener permits a matching
-peer to reconnect for 120 seconds after transport loss, including while paused.
+peer to reconnect for 2 seconds after the socket reports transport loss, including while paused.
+On supported Windows versions the accepted video socket starts TCP keepalive after
+2 seconds of inactivity and waits for 3 unanswered probes at 1-second intervals.
 An idle/static connected stream has no inactivity timeout; only an incomplete
 packet read has a three-second deadline. Pending codec/PTS state is cleared on
 transport replacement while the negotiated AES stream context is retained.
@@ -65,6 +67,32 @@ markers before installation. The host validates predefined profiles, including
 square original-quality profiles derived from the bundled Apple panel catalog,
 1080p, 720p and 540p, and retains the legacy 5120x2880 fallback. It forwards the
 configured receiver name into both DNS-SD registration and the `/info` plist.
+For controlled codec-negotiation comparisons, the final source recipe
+`patches/Apply-DiagnosticMirrorCodecPatch.ps1` recognizes the exact process
+environment value `IPHONE_MIRROR_DIAGNOSTIC_MIRROR_AVC_ONLY=1`. It clears only
+the screen-multicodec feature bit 42 on the mirror/combined receiver, using
+`patches/airplay-mirror-codec-policy.h` for the global feature word, both DNS-SD
+TXT service profiles and the `/info` response. The flag is read through Win32
+environment APIs so separate DLL CRT caches cannot disagree. The default
+multicodec advertisement and HEVC decoding remain available, and the dedicated
+URL-media receiver retains its existing capabilities. Other flag values do not
+activate the diagnostic. The flag does not resize decoded pixels or guarantee
+that iOS selects panel-native dimensions.
+
+Each accepted mirror codec-configuration update also emits numeric diagnostic
+event 33: actual codec (`0` AVC, `1` HEVC), AVC-only diagnostic enabled (`0`/`1`),
+source width, source height, output width and output height. This reports what
+the sender negotiated rather than inferring codec or resolution from a UI
+quality label. The event contains no media payload, keys or device identity.
+Diagnostic event 34 records six integers per receive window: compressed frame
+count, receiver elapsed milliseconds, sender timestamp span in milliseconds,
+count of sender timestamp gaps over 25 ms, total synchronous decode/callback
+milliseconds, and peak decode/callback milliseconds. The host reports its
+decoded callback and IPC counters beside the same event. Only timestamp
+differences are logged.
+The new recipe and shared header are recorded in `BUILD.json` AdditionalPatches
+when installing a rebuilt receiver.
+
 iPhoneMirror keeps the v1.1.2 source pin so its custom IPC and capability patches
 remain reproducible; selected upstream fixes are reapplied as source
 patches during every receiver build rather than replacing the bundled DLL with

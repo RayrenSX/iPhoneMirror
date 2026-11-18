@@ -56,8 +56,7 @@ internal sealed partial class MainViewModel
     private bool ExplorerRouteCurrent(ExplorerMappingSession session) => !_disposed &&
         !session.Token.IsCancellationRequested && ReferenceEquals(_explorerMapping, session) &&
         ReferenceEquals(SelectedDevice, session.Device) && session.Bridge is { IsReady: true, SupportsDeviceHub: true } bridge &&
-        ReferenceEquals(GetReadyUsbControlBridge(session.Device.Udid), bridge) &&
-        bridge.InputGeneration == session.Generation && Devices.Contains(session.Device);
+        ReferenceEquals(GetReadyDeviceHubBridge(session.Device), bridge) && bridge.InputGeneration == session.Generation;
 
     private void NotifyExplorerMapping()
     {
@@ -90,7 +89,7 @@ internal sealed partial class MainViewModel
         // Publish the attempt before the first await, including old cleanup.
         _explorerMappingBusy = true;
         var previous = StopExplorerMappingAsync(keepBusy: true);
-        var session = new ExplorerMappingSession(device, GetReadyUsbControlBridge(device.Udid),
+        var session = new ExplorerMappingSession(device, GetReadyDeviceHubBridge(device),
             CancellationTokenSource.CreateLinkedTokenSource(_shutdownCancellation.Token));
         session.BundleId = bundleId;
         _explorerMapping = session;

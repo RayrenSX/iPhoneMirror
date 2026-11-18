@@ -3,6 +3,7 @@ using IPhoneMirror.App.Models;
 using IPhoneMirror.App.ViewModels;
 using IPhoneMirror.App.Windows;
 using IPhoneMirror.App.Controls;
+using System.Windows.Threading;
 
 namespace IPhoneMirror.App.Services;
 
@@ -10,6 +11,7 @@ namespace IPhoneMirror.App.Services;
 internal sealed class MultiDevicePreviewManager : IDisposable
 {
     private readonly MainViewModel viewModel;
+    private readonly Dispatcher _dispatcher = Dispatcher.CurrentDispatcher;
     private readonly Func<string, nint, bool> _isReverseControlEnabledForWindow;
     private readonly Dictionary<string, NativePreviewWindow> _windows =
         new(StringComparer.OrdinalIgnoreCase);
@@ -22,6 +24,7 @@ internal sealed class MultiDevicePreviewManager : IDisposable
     private bool _disposing;
     private bool _disposed;
     private bool _updatingPhoneFrame;
+    private int _bindingRefreshQueued;
 
     internal event Action<string, nint>? ReverseControlRequested;
     internal event Action<string, nint>? UsbControlRequested;
@@ -41,6 +44,8 @@ internal sealed class MultiDevicePreviewManager : IDisposable
         viewModel.DeviceSessionHandleChanged += OnDeviceSessionHandleChanged;
         viewModel.DeviceSessionRecoveryStateChanged += OnDeviceSessionRecoveryStateChanged;
         viewModel.DeviceProtectionStateChanged += OnDeviceProtectionStateChanged;
+        viewModel.DeviceInventoryReconciled += RefreshOpenFrameAppearances;
+        DeviceBindingManager.Shared.ProfilesChanged += QueueBindingFrameRefresh;
         LocalizationService.LanguageChanged += OnLanguageChanged;
     }
 
@@ -57,7 +62,8 @@ internal sealed class MultiDevicePreviewManager : IDisposable
     {
         var colors = (System.Windows.Application.Current as App)?.UpdateSettings.DeviceFrameColors;
         var selected = colors?.FirstOrDefault(pair => DeviceViewModel.UdidEquals(pair.Key, device.Udid)).Value;
-        return device.Appearance with { SelectedColorId = selected };
+        var appearance = DeviceAppearanceCache.Shared.ForProjection(device, DeviceBindingManager.Shared);
+        return appearance with { SelectedColorId = selected };
     }
 
     internal bool SetSelectedFrameColor(string color)
@@ -68,7 +74,7 @@ internal sealed class MultiDevicePreviewManager : IDisposable
         var changed = new Dictionary<string, string>(previous, StringComparer.OrdinalIgnoreCase);
         if (color.Length == 0) changed.Remove(device.Udid); else changed[device.Udid] = color;
         var oldAppearance = FrameAppearance(device);
-        var appearance = device.Appearance with { SelectedColorId = color };
+        var appearance = oldAppearance with { SelectedColorId = color };
         _windows.TryGetValue(device.Udid, out var window);
         if (window is not null && !window.UpdateDeviceAppearance(device.ProductType, appearance)) return false;
         app.UpdateSettings.DeviceFrameColors = changed;
@@ -97,9 +103,33 @@ internal sealed class MultiDevicePreviewManager : IDisposable
     private static void ApplySavedPhoneFramePreference(NativePreviewWindow window)
     {
         var enabled = SavedPhoneFrameEnabled;
-        if (window.PhoneFrameEnabled != enabled && (!enabled || window.CanShowPhoneFrame))
+        if (window.PhoneFramePreferred != enabled && (!enabled || window.CanShowPhoneFrame))
             _ = window.SetPhoneFrame(enabled);
         window.RefreshPhoneFramePreference();
+    }
+
+    private void RefreshOpenFrameAppearances()
+    {
+        foreach (var device in viewModel.Devices)
+            if (_windows.TryGetValue(device.Udid, out var window))
+            {
+                _ = window.UpdateDeviceAppearance(device.ProductType, FrameAppearance(device));
+                ApplySavedPhoneFramePreference(window);
+            }
+    }
+
+    private void QueueBindingFrameRefresh()
+    {
+        // Binding commits may still hold their lock. Re-evaluate once on the
+        // UI dispatcher using the complete, persisted set of profiles.
+        if (Interlocked.Exchange(ref _bindingRefreshQueued, 1) != 0) return;
+        _ = _dispatcher.BeginInvoke(DispatcherPriority.Normal, () =>
+        {
+            Interlocked.Exchange(ref _bindingRefreshQueued, 0);
+            if (_disposed) return;
+            RefreshOpenFrameAppearances();
+            PhoneFrameChanged?.Invoke();
+        });
     }
 
     internal Task<bool> SetPhoneFrameAsync(bool enabled) => Task.FromResult(SavePhoneFramePreference(enabled));
@@ -115,8 +145,8 @@ internal sealed class MultiDevicePreviewManager : IDisposable
         {
             foreach (var window in _windows.Values)
             {
-                if (window.PhoneFrameEnabled == enabled || (enabled && !window.CanShowPhoneFrame)) continue;
-                changed.Add((window, window.PhoneFrameEnabled));
+                if (window.PhoneFramePreferred == enabled || (enabled && !window.CanShowPhoneFrame)) continue;
+                changed.Add((window, window.PhoneFramePreferred));
                 if (!window.SetPhoneFrame(enabled)) return false;
             }
             app.UpdateSettings.PhoneFrameEnabled = enabled;
@@ -177,6 +207,9 @@ internal sealed class MultiDevicePreviewManager : IDisposable
 
     internal Action? BeginTemporarySetting(nint handle, SettingShortcutBinding binding) =>
         _windows.Values.FirstOrDefault(window => window.Handle == handle)?.BeginTemporarySetting(binding);
+
+    internal NativePreviewWindow? FindWindow(nint handle) => handle == 0
+        ? null : _windows.Values.FirstOrDefault(window => window.Handle == handle);
 
     internal bool AllowsControlInput(nint handle) =>
         _windows.Values.All(window => window.Handle != handle || window.AllowsControlInput);
@@ -340,17 +373,20 @@ internal sealed class MultiDevicePreviewManager : IDisposable
                  hwnd => ReverseControlRequested?.Invoke(device.Udid, hwnd),
                  () => viewModel.IsUsbControlTarget(device.Udid),
                  hwnd => UsbControlRequested?.Invoke(device.Udid, hwnd),
-                 hwnd => WirelessControlRequested?.Invoke(device.Udid, hwnd)) || window is null)
+                 hwnd => WirelessControlRequested?.Invoke(device.Udid, hwnd),
+                 beforeShow: preview =>
+                 {
+                     _ = preview.UpdateDeviceAppearance(device.ProductType, FrameAppearance(device));
+                     ApplySavedPhoneFramePreference(preview);
+                 }) || window is null)
         {
             if (started.Created)
                 await viewModel.StopDeviceSessionAsync(
                     device.Udid, started.Handle, preserveIfSelected: true);
             return (false, LocalizationService.Get("PreviewRendererAttachFailed"));
         }
-        _ = window.UpdateDeviceAppearance(device.ProductType, FrameAppearance(device));
         window.PhoneFramePreferenceRequested = SavePhoneFramePreference;
         window.PhoneFramePreference = () => SavedPhoneFrameEnabled;
-        ApplySavedPhoneFramePreference(window);
         window.PhoneFrameChanged += () => { if (!_updatingPhoneFrame) PhoneFrameChanged?.Invoke(); };
         window.BluetoothWindowMouseEnabled = viewModel.BluetoothWindowMouseEnabled;
         _windows[device.Udid] = window;
@@ -573,6 +609,8 @@ internal sealed class MultiDevicePreviewManager : IDisposable
         viewModel.DeviceSessionHandleChanged -= OnDeviceSessionHandleChanged;
         viewModel.DeviceSessionRecoveryStateChanged -= OnDeviceSessionRecoveryStateChanged;
         viewModel.DeviceProtectionStateChanged -= OnDeviceProtectionStateChanged;
+        viewModel.DeviceInventoryReconciled -= RefreshOpenFrameAppearances;
+        DeviceBindingManager.Shared.ProfilesChanged -= QueueBindingFrameRefresh;
         LocalizationService.LanguageChanged -= OnLanguageChanged;
         foreach (var window in _windows.Values.ToArray())
         {

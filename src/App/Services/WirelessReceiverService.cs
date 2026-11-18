@@ -149,6 +149,11 @@ internal static class WirelessReceiverConfiguration
         new("720p", "WirelessProfile720p", 1280, 720, 30),
         new("540p", "WirelessProfile540p", 960, 540, 30),
     ];
+    // Diagnostic capability only: it is never a settings choice or saved ID.
+    internal const string DiagnosticOriginalCapabilityEnvironment =
+        "IPHONE_MIRROR_DIAGNOSTIC_ORIGINAL_CAPABILITY";
+    internal static WirelessDisplayProfile ExperimentalOriginalWideProfile { get; } =
+        new("diagnostic-original-wide", "WirelessProfileMaximum", 5120, 2880, 60);
     internal static IReadOnlyList<WirelessDisplayProfile> SupportedProfiles { get; } = CreateDisplayProfiles();
 
     private static IReadOnlyList<WirelessDisplayProfile> CreateDisplayProfiles()
@@ -203,11 +208,30 @@ internal static class WirelessReceiverConfiguration
     }
 
     internal static WirelessDisplayProfile ReceiverCapabilityFor(WirelessDisplayProfile profile) =>
-        // Capabilities apply to the listening receiver, including phones that
-        // have not connected yet. A small known phone must never cap a later
-        // larger sender. Each sender negotiates its own stream inside this
-        // orientation-symmetric envelope; decoded frames retain their size.
-        RequiresOriginalQualityWarning(profile) ? DisplayProfiles[0] : profile;
+        ReceiverCapabilityFor(profile,
+            Environment.GetEnvironmentVariable(DiagnosticOriginalCapabilityEnvironment));
+
+    internal static WirelessDisplayProfile ReceiverCapabilityFor(
+        WirelessDisplayProfile profile, string? diagnosticCapability)
+    {
+        // Scaled quality choices keep their exact advertised capability even
+        // when a diagnostic launch environment is inherited.
+        if (!RequiresOriginalQualityWarning(profile)) return profile;
+        var configured = diagnosticCapability?.Trim();
+        if (string.IsNullOrEmpty(configured) || configured == "square")
+            return DisplayProfiles[0];
+        if (configured == "wide") return ExperimentalOriginalWideProfile;
+        // The listener starts before sender discovery. A native experiment
+        // must therefore name the exact catalog ProductType explicitly; it
+        // must not guess from the first device on a shared receiver.
+        const string nativePrefix = "native:";
+        if (configured.StartsWith(nativePrefix, StringComparison.Ordinal) &&
+            NativeProfileFor(configured[nativePrefix.Length..]) is { } native)
+            return native;
+        // Never interpret arbitrary dimensions or log the untrusted value.
+        DiagnosticLogger.Warning("wireless", "original_capability_override_rejected");
+        return DisplayProfiles[0];
+    }
 
     internal static WirelessReceiverBackend NormalizeBackend(
         WirelessReceiverBackend backend) => Enum.IsDefined(backend)

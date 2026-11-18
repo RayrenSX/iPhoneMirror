@@ -190,9 +190,9 @@ WasapiRenderer::WasapiRenderer(const coremedia::AudioStreamBasicDescription& for
     }
     try {
         logging::write(std::format(
-            "wasapi source rate={} channels={} bits={} block_align={} capacity_frames={}",
+            "wasapi source rate={} channels={} bits={} block_align={} capacity_frames={} buffering={}",
             format.sample_rate, format.channels_per_frame, format.bits_per_channel,
-            block_align_, capacity_frames_));
+            block_align_, capacity_frames_, network_buffering ? "network_jitter" : "low_latency"));
         worker_ = std::jthread([this](std::stop_token token) { run(token); });
     } catch (...) {
         close_events();

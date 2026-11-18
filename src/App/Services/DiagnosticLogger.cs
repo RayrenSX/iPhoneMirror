@@ -28,6 +28,7 @@ internal static class DiagnosticLogger
     private static readonly HashSet<string> OnceKeys = new(StringComparer.Ordinal);
     private static bool _sessionStarted;
     private static int _initialized;
+    private static Timer? _maintenanceTimer;
 
     internal static string DirectoryPath { get; } = ResolveDirectoryPath();
     internal static string Path { get; } = System.IO.Path.Combine(
@@ -50,6 +51,8 @@ internal static class DiagnosticLogger
             Environment.SetEnvironmentVariable("IPHONE_MIRROR_LOG_FILE",
                 NativeLogPath, EnvironmentVariableTarget.Process);
             var cleanup = Cleanup(includeActiveLogs: false);
+            _maintenanceTimer = StartDirectoryMaintenance(DirectoryPath,
+                TimeSpan.FromMinutes(1));
             Write("INFO", "lifecycle", "session_start",
                 ("version", Assembly.GetEntryAssembly()?
                     .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
@@ -143,8 +146,27 @@ internal static class DiagnosticLogger
 
     internal static void Shutdown(int exitCode)
     {
+        Interlocked.Exchange(ref _maintenanceTimer, null)?.Dispose();
         Info("lifecycle", "session_end", ("exit_code", exitCode));
     }
+
+    // Native logging can remain active while the managed UI is idle. Keep the
+    // directory budget and age policy running independently of managed writes.
+    internal static Timer StartDirectoryMaintenance(string directory,
+        TimeSpan interval) => new(_ =>
+        {
+            try
+            {
+                lock (Gate)
+                    CleanupDirectory(directory, DateTimeOffset.UtcNow,
+                        includeActiveLogs: false);
+            }
+            catch
+            {
+                // A cleanup failure must not terminate a ThreadPool thread or
+                // recursively create more logs. Retry at the next interval.
+            }
+        }, null, interval, interval);
 
     private static void Write(string level, string category, string eventName,
         params (string Key, object? Value)[] fields)
@@ -155,7 +177,8 @@ internal static class DiagnosticLogger
             {
                 Directory.CreateDirectory(DirectoryPath);
                 if (!TryRotateIfNeeded(Path, MaximumLogBytes,
-                        RetainedArchives, ref _sessionStarted))
+                        RetainedArchives, ref _sessionStarted,
+                        maintainDirectory: true))
                 {
                     TryWriteFallback(FormatEntry(level, category, eventName, fields) +
                         FormatEntry("ERROR", "logging", "rotation_failed",
@@ -188,7 +211,8 @@ internal static class DiagnosticLogger
                 Directory.CreateDirectory(DirectoryPath);
                 var sessionStarted = false;
                 if (!TryRotateIfNeeded(ReverseControlLogPath, MaximumLogBytes,
-                        RetainedArchives, ref sessionStarted))
+                        RetainedArchives, ref sessionStarted,
+                        maintainDirectory: true))
                 {
                     TryWriteFallback(FormatEntry(level, "reverse_control", eventName,
                         fields) + FormatEntry("ERROR", "logging", "rotation_failed",
@@ -264,7 +288,8 @@ internal static class DiagnosticLogger
     }
 
     internal static bool TryRotateIfNeeded(string path, long maximumBytes,
-        int retainedArchives, ref bool sessionStarted)
+        int retainedArchives, ref bool sessionStarted,
+        bool maintainDirectory = false)
     {
         try
         {
@@ -278,6 +303,9 @@ internal static class DiagnosticLogger
                 if (File.Exists(destination)) File.Delete(destination);
                 if (File.Exists(source)) File.Move(source, destination);
             }
+            if (maintainDirectory)
+                CleanupDirectory(System.IO.Path.GetDirectoryName(path)!,
+                    DateTimeOffset.UtcNow, includeActiveLogs: false);
             return true;
         }
         catch

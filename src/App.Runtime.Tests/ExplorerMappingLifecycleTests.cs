@@ -95,6 +95,11 @@ internal static partial class Program
             Console.WriteLine("PASS mapping late resource: stop waits for startup and its returned drive cleanup.");
 
             var control = (DeviceControlSession)KeyboardCall(vm, "GetOrCreateControl", b.Udid)!;
+            var bindings = new DeviceBindingManager(Path.Combine(output, $"explorer-bindings-{Guid.NewGuid():N}.json"));
+            var profile = bindings.CreateProfileFromIdentity(b.Name, DeviceIdentityType.Wired, b.Udid, null).Profile!;
+            var resolver = new DeviceIdentityResolver(bindings);
+            SetKeyboardField(vm, "_identityResolver", resolver);
+            control.Binding = resolver.ResolveControlBinding(b, ReverseControlMode.Usb);
             using var host = new ExplorerReadyBridge(control);
             session = NewExplorerSession(b, host.Host);
             SessionFinished(session).SetResult();
@@ -119,6 +124,10 @@ internal static partial class Program
             session = NewExplorerSession(b, host.Host);
             SessionFinished(session).SetResult();
             SetKeyboardField(vm, "_explorerMapping", session);
+            bindings.Unbind(profile.Id, DeviceIdentityType.Wired);
+            InteractionAssert(!(bool)KeyboardCall(vm, "ExplorerRouteCurrent", session)!, "An unbound device must revoke the Explorer route.");
+            bindings.Bind(profile.Id, DeviceIdentityType.Wired, b.Udid, b.Name, null, true);
+            InteractionAssert((bool)KeyboardCall(vm, "ExplorerRouteCurrent", session)!, "Restoring the same device binding should restore readiness in the fixture.");
             SetKeyboardField(vm, "_disposed", true);
             InteractionAssert(!(bool)KeyboardCall(vm, "ExplorerRouteCurrent", session)!, "Shutdown must invalidate mapping providers before transport cleanup.");
             FinishExplorer(StopExplorer(vm));

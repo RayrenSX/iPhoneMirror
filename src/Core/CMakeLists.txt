@@ -19,6 +19,7 @@ set(IPHONEMIRROR_CORE_SOURCES
     src/Media/BundledH264Decoder.cpp
     src/Media/CoreMedia.cpp
     src/Media/MediaFoundationDecoder.cpp
+    src/Media/ScreenContentGeometry.cpp
     src/Audio/WasapiRenderer.cpp
     src/Renderer/D3D11PreviewRenderer.cpp
 )
@@ -112,6 +113,29 @@ target_link_libraries(iPhoneMirror.UsbConfigurationSwitch PRIVATE
 
 if(IPHONEMIRROR_BUILD_TESTS)
     enable_testing()
+    add_executable(iPhoneMirror.LoggingRotation.Tests
+        tests/LoggingRotationTests.cpp src/Logging.cpp)
+    target_include_directories(iPhoneMirror.LoggingRotation.Tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_compile_definitions(iPhoneMirror.LoggingRotation.Tests PRIVATE
+        UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_compile_options(iPhoneMirror.LoggingRotation.Tests PRIVATE
+        /W4 /permissive- /utf-8 /EHsc)
+    target_link_libraries(iPhoneMirror.LoggingRotation.Tests PRIVATE bcrypt)
+    add_test(NAME LoggingRotationTests COMMAND iPhoneMirror.LoggingRotation.Tests)
+    set_tests_properties(LoggingRotationTests PROPERTIES TIMEOUT 30)
+
+    add_executable(iPhoneMirror.ScreenContentGeometry.Tests
+        tests/ScreenContentGeometryTests.cpp
+        src/Media/ScreenContentGeometry.cpp)
+    target_include_directories(iPhoneMirror.ScreenContentGeometry.Tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_compile_definitions(iPhoneMirror.ScreenContentGeometry.Tests PRIVATE
+        UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_compile_options(iPhoneMirror.ScreenContentGeometry.Tests PRIVATE
+        /W4 /permissive- /utf-8 /EHsc)
+    add_test(NAME ScreenContentGeometryTests COMMAND iPhoneMirror.ScreenContentGeometry.Tests)
+
     add_executable(iPhoneMirror.UsbDeviceReconnect.Tests tests/UsbDeviceReconnectTests.cpp)
     target_include_directories(iPhoneMirror.UsbDeviceReconnect.Tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_compile_definitions(iPhoneMirror.UsbDeviceReconnect.Tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
@@ -122,6 +146,7 @@ if(IPHONEMIRROR_BUILD_TESTS)
         tests/SdrBgraConverterTests.cpp
         tests/PreviewOpacitySmoke.cpp
         tests/PreviewStaticFrameSmoke.cpp
+        tests/PreviewCadenceSmoke.cpp
         tests/PreviewOwnershipSmoke.cpp
         tests/WasapiUnderrunSmoke.cpp
         src/Renderer/D3D11PreviewRenderer.cpp
@@ -132,6 +157,7 @@ if(IPHONEMIRROR_BUILD_TESTS)
         src/Media/BundledH264Decoder.cpp
         src/Media/CoreMedia.cpp
         src/Media/MediaFoundationDecoder.cpp
+        src/Media/ScreenContentGeometry.cpp
         src/Audio/WasapiRenderer.cpp
         src/Transport/Socket.cpp
         src/Transport/UsbMuxClient.cpp

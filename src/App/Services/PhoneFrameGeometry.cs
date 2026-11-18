@@ -34,6 +34,10 @@ internal static class PhoneFrameGeometry
         if (!bounds.Contains(input.X, input.Y)) return false;
         double u = (input.X - bounds.X) / bounds.Width, v = (input.Y - bounds.Y) / bounds.Height;
         for (int i = 0; i < (turns % 4 + 4) % 4; ++i) (u, v) = (v, 1 - u);
+        // The renderer suppresses the centered sensor when the source side is
+        // ambiguous. That interior strip is then part of the visible screen.
+        if (turns >= 4 && u > 1.0 / 9 && u < 8.0 / 9 && v > 0 && v < 0.125)
+            return true;
         var x = Math.Clamp((int)(frame.ScreenX + u * frame.ScreenWidth), 0, frame.FrameWidth - 1);
         var y = Math.Clamp((int)(frame.ScreenY + v * frame.ScreenHeight), 0, frame.FrameHeight - 1);
         return (mask ?? frame.Mask)[y * frame.FrameWidth + x] >= 128;

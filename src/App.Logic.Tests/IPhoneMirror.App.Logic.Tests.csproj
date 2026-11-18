@@ -17,6 +17,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Program.cs" />
+    <Compile Include="DiagnosticLogMaintenanceTests.cs" />
     <Compile Include="ExplorerWebDavTests.cs" />
     <Compile Include="ExplorerWebDavLocksTests.cs" />
     <Compile Include="ExplorerFileStoreTests.cs" />
@@ -50,6 +51,7 @@
     <Compile Include="FcupHlsPlaybackTests.cs" />
     <Compile Include="MediaCastStartupBudgetTests.cs" />
     <Compile Include="WirelessRuntimeAvailabilityTests.cs" />
+    <Compile Include="WirelessOriginalCapabilityTests.cs" />
     <Compile Include="MediaOutputCoordinatorTests.cs" />
     <Compile Include="ReviewFixRegressionTests.cs" />
     <Compile Include="..\App\Services\MediaOutputCoordinator.cs" Link="MediaOutputCoordinator.cs" />

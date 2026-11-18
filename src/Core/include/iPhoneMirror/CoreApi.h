@@ -491,6 +491,10 @@ IM_API std::int32_t IM_CALL im_session_set_window_device_frame(
 // Disabling also releases the window's artwork. Supply it again before enabling.
 IM_API std::int32_t IM_CALL im_session_set_window_phone_frame(
     iPhoneMirror::SessionHandle handle, void* hwnd, std::int32_t enabled);
+// The most recently presented artwork orientation, or -1 if absent. Values
+// 4 through 7 indicate turns 0 through 3 with the artwork sensor suppressed.
+IM_API std::int32_t IM_CALL im_session_get_window_phone_frame_orientation(
+    iPhoneMirror::SessionHandle handle, void* hwnd);
 IM_API std::int32_t IM_CALL im_session_set_window_corner_profile(
     iPhoneMirror::SessionHandle handle, void* hwnd, float normalized_radius,
     float curve_exponent);

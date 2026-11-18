@@ -29,7 +29,7 @@ internal sealed class AspectRatioWindowController : IDisposable
     private nint _handle;
     private double _aspectRatio;
     private bool _disposed;
-    private bool _resizeQueued;
+    private DispatcherOperation? _queuedResize;
 
     internal AspectRatioWindowController(Window window, uint sourceWidth, uint sourceHeight)
     {
@@ -77,6 +77,15 @@ internal sealed class AspectRatioWindowController : IDisposable
 
     internal void Reflow() => QueueResize(fitToWorkArea: false);
 
+    // The native renderer is waiting to present the frame that changed the ratio.
+    internal void ApplyPendingResize()
+    {
+        if (_queuedResize is null) return;
+        _queuedResize.Abort();
+        _queuedResize = null;
+        _ = ResizeWindowToAspect(fitToWorkArea: false);
+    }
+
     private static double? ValidAspect(uint width, uint height)
     {
         if (width == 0 || height == 0) return null;
@@ -116,11 +125,10 @@ internal sealed class AspectRatioWindowController : IDisposable
 
     private void QueueResize(bool fitToWorkArea)
     {
-        if (_disposed || _handle == 0 || _resizeQueued) return;
-        _resizeQueued = true;
-        _dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
+        if (_disposed || _handle == 0 || _queuedResize is not null) return;
+        _queuedResize = _dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
         {
-            _resizeQueued = false;
+            _queuedResize = null;
             _ = ResizeWindowToAspect(fitToWorkArea);
         });
     }
@@ -326,6 +334,8 @@ internal sealed class AspectRatioWindowController : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        _queuedResize?.Abort();
+        _queuedResize = null;
         _source?.RemoveHook(WindowProcedure);
         _source = null;
         _handle = 0;

@@ -1737,11 +1737,14 @@
     <system:String x:Key="SettingsApplyBluetoothSensitivity">应用灵敏度</system:String>
     <system:String x:Key="SettingsGroupPendingHint">本组有未应用的修改。</system:String>
     <system:String x:Key="SettingShortcutsTitle">更多设置项快捷键</system:String>
-    <system:String x:Key="SettingShortcutsDescription">选择设置项并单独绑定快捷键，可选择点击切换或按住临时生效。仅作用于独立投屏窗口，无需开启反控。</system:String>
+    <system:String x:Key="SettingShortcutsDescription">为独立投屏窗口绑定快捷键。录屏、截图和全屏也可在主窗口使用。窗口设置可选择点按切换或按住暂时生效。</system:String>
+    <system:String x:Key="SettingShortcutsRecording">开始／停止录屏</system:String>
+    <system:String x:Key="SettingShortcutsMuteWindow">切换当前窗口静音</system:String>
     <system:String x:Key="SettingShortcutsSetting">设置项</system:String>
     <system:String x:Key="SettingShortcutsRemove">删除此快捷键</system:String>
     <system:String x:Key="SettingShortcutsHeldValue">按住时的透明度</system:String>
-    <system:String x:Key="SettingShortcutsHeldEnabled">按住时启用置顶</system:String>
+    <system:String x:Key="SettingShortcutsHeldEnabled">按住时启用</system:String>
+    <system:String x:Key="SettingShortcutsPhoneFrame">显示手机边框</system:String>
     <system:String x:Key="SettingShortcutsAdd">添加设置项快捷键</system:String>
     <system:String x:Key="SettingShortcutsKey">快捷键</system:String>
     <system:String x:Key="SettingShortcutsTrigger">触发方式</system:String>
@@ -1750,7 +1753,7 @@
     <system:String x:Key="SettingShortcutsHoldHint">按住时应用目标值，松开或窗口失焦后恢复原值。</system:String>
     <system:String x:Key="SettingShortcutsToggleHint">按一次应用目标值，再按一次恢复原值；松开按键或切到其他窗口不会恢复。</system:String>
     <system:String x:Key="SettingShortcutsToggleValue">切换后的透明度</system:String>
-    <system:String x:Key="SettingShortcutsToggleEnabled">切换后启用置顶</system:String>
+    <system:String x:Key="SettingShortcutsToggleEnabled">切换后启用</system:String>
     <sys:String x:Key="ToolbarCustomize">自定义顶部工具栏</sys:String>
     <sys:String x:Key="ToolbarEarlier">向前移动</sys:String>
     <sys:String x:Key="ToolbarLater">向后移动</sys:String>
@@ -1936,7 +1939,9 @@
     <sys:String x:Key="DeviceHubPanelOffline">设备尚未就绪</sys:String>
     <sys:String x:Key="DeviceHubPanelReconnectHint">请连接并解锁手机，在手机上信任此电脑，然后重试。</sys:String>
     <sys:String x:Key="DeviceHubPanelConnectTitle">正在连接设备</sys:String>
-    <sys:String x:Key="DeviceHubPanelConnectHint">选中设备后会自动连接。请保持手机解锁；首次连接请完成信任和设备绑定，部分功能需要开发者模式。</sys:String>
+    <sys:String x:Key="DeviceHubPanelConnectRequired">请连接此 iPhone</sys:String>
+    <sys:String x:Key="DeviceHubPanelConnectControl">启用反控并连接</sys:String>
+    <sys:String x:Key="DeviceHubPanelConnectHint">应用和文件管理需要使用反控通道。连接时请保持手机解锁，首次连接可能需要信任此电脑和完成设备绑定。</sys:String>
     <sys:String x:Key="DeviceHubPanelConnecting">正在连接…</sys:String>
     <sys:String x:Key="DeviceHubPanelConnectFailed">暂时无法连接设备</sys:String>
     <sys:String x:Key="DeviceHubPanelConnectRetryHint">请确认手机已解锁并信任电脑，完成设备绑定或开发者模式设置后重试。</sys:String>
@@ -2032,6 +2037,9 @@
     <sys:String x:Key="DeviceHubPanelMore">更多操作</sys:String>
     <sys:String x:Key="DeviceHubPanelRecoveryShort">连接恢复后自动刷新，无需切换设备。</sys:String>
     <sys:String x:Key="DeviceHubPanelOpenApp">打开</sys:String>
+    <sys:String x:Key="DeviceHubPanelRestartMetalHud">以 Metal 性能 HUD 重启</sys:String>
+    <sys:String x:Key="DeviceHubPanelRestartMetalHudWarning">将关闭并重新启动所选应用，未保存的内容可能丢失。Metal 性能 HUD 仅在受支持的应用中显示。</sys:String>
+    <sys:String x:Key="DeviceHubPanelMetalHudRestarted">已请求以 Metal 性能 HUD 重启 {0}；请在设备或投屏画面确认是否显示。</sys:String>
     <sys:String x:Key="DeviceHubPanelCopyBundleId">复制 Bundle ID</sys:String>
     <sys:String x:Key="DeviceHubPanelCopyPid">复制进程 ID</sys:String>
     <sys:String x:Key="DeviceHubPanelCopyIdentifier">复制标识符</sys:String>

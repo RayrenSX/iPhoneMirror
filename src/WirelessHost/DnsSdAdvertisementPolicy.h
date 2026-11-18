@@ -7,6 +7,7 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+#include "../../third_party/airplay-server/patches/airplay-mirror-codec-policy.h"
 
 namespace iPhoneMirror::wireless {
 
@@ -19,6 +20,11 @@ inline std::uint16_t airplay_service_port(std::wstring_view mode,
 
 // Bit 42 requests explicit H.264/HEVC codec configuration from recent iPhones.
 inline constexpr std::wstring_view MirroringFeatures = L"0x5A7FFEE6,0x400";
+inline constexpr std::wstring_view AvcOnlyMirroringFeatures = L"0x5A7FFEE6,0x0";
+inline std::wstring_view mirroring_features() noexcept {
+    return iphone_mirror_mirror_features_high() == 0U ?
+        AvcOnlyMirroringFeatures : MirroringFeatures;
+}
 // Dedicated video receivers must not advertise Screen (bit 7) or the screen
 // multicodec capability (bit 42), otherwise iOS lists them under mirroring.
 inline constexpr std::wstring_view MediaCastFeatures = L"0x5A7FFE73,0x0";
@@ -51,7 +57,7 @@ inline void apply_dns_sd_advertisement_policy(std::string_view service_type,
     DnsSdProperties& properties, bool video_handoff = true) {
     if (service_type == "_airplay._tcp") {
         set_dns_sd_property(properties, L"features",
-            media_mode && video_handoff ? MediaCastFeatures : MirroringFeatures);
+            media_mode && video_handoff ? MediaCastFeatures : mirroring_features());
         set_dns_sd_property(properties, L"deviceid", device_id);
         if (media_mode) {
             set_dns_sd_property(properties, L"model", LegacyAirPlayModel);
@@ -62,9 +68,10 @@ inline void apply_dns_sd_advertisement_policy(std::string_view service_type,
             set_dns_sd_property(properties, L"pw", L"false");
         }
     }
-    else if (service_type == "_raop._tcp" && media_mode) {
+    else if (service_type == "_raop._tcp") {
         set_dns_sd_property(properties, L"ft",
-            video_handoff ? MediaCastFeatures : MirroringFeatures);
+            media_mode && video_handoff ? MediaCastFeatures : mirroring_features());
+        if (!media_mode) return;
         set_dns_sd_property(properties, L"am", LegacyAirPlayModel);
         set_dns_sd_property(properties, L"vs", LegacyAirPlayVersion);
         if (is_lower_hex(public_key, 64))

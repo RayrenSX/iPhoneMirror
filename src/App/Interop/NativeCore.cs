@@ -585,6 +585,16 @@ internal sealed partial class NativeCore : IDisposable
     internal static bool SetDeviceWindowPhoneFrame(ulong handle, nint hwnd, bool enabled) =>
         im_session_set_window_phone_frame(handle, hwnd, enabled ? 1 : 0) == 0;
 
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int im_session_get_window_phone_frame_orientation(ulong handle, nint hwnd);
+
+    internal static int GetDeviceWindowPhoneFrameOrientation(ulong handle, nint hwnd)
+    {
+        if (handle == 0 || hwnd == 0) return -1;
+        try { return im_session_get_window_phone_frame_orientation(handle, hwnd); }
+        catch (EntryPointNotFoundException) { return -1; }
+    }
+
     internal static bool SetDeviceWindowCornerProfile(NativeSessionHandle handle, nint hwnd,
         double radius, double exponent) => handle is not null && !handle.IsInvalid && hwnd != 0 &&
         im_session_set_window_corner_profile(handle.RawHandle, hwnd,

@@ -74,7 +74,7 @@ struct PipeCapture {
     bool protocol_valid{true};
     bool environment_sync_failed{};
     bool runtime_device_id_invalid{};
-    std::atomic_uint pauses{}, resumes{}, reconnects{}, geometries{};
+    std::atomic_uint pauses{}, resumes{}, reconnects{}, geometries{}, disconnects{}, configured_keepalives{};
 };
 
 void drain_pipe(HANDLE pipe, PipeCapture& capture) {
@@ -100,9 +100,13 @@ void drain_pipe(HANDLE pipe, PipeCapture& capture) {
         }
         if (header.type == iPhoneMirror::wireless::MessageType::MirrorGeometry)
             ++capture.geometries;
+        if (header.type == iPhoneMirror::wireless::MessageType::Disconnected)
+            ++capture.disconnects;
         if (header.type != iPhoneMirror::wireless::MessageType::Log) continue;
         const std::string_view log(reinterpret_cast<const char*>(payload.data()),
             payload.size());
+        if (log.find("protocol_event=mirror_keepalive_configured") != std::string_view::npos)
+            ++capture.configured_keepalives;
         capture.environment_sync_failed = capture.environment_sync_failed ||
             log.find("IPHONE_MIRROR_DLL_ENVIRONMENT_SYNC failed") !=
                 std::string_view::npos;
@@ -742,7 +746,7 @@ bool probe_media_route(DWORD process_id, unsigned short raop_port,
         }
     }
 
-    bool reconnect_valid{}, setup_restart_valid{};
+    bool reconnect_valid{}, setup_restart_valid{}, disconnect_valid{};
     if (ports_valid) {
         const auto await_counter = [](const std::atomic_uint& count, unsigned expected) {
             const auto start = GetTickCount64();
@@ -755,6 +759,11 @@ bool probe_media_route(DWORD process_id, unsigned short raop_port,
             header[4] = 1; header[6] = 0x56;
             const auto paused = send_all(data_socket, std::string_view(header.data(), header.size())) &&
                 await_counter(capture.pauses, 1);
+            // Leave the paused socket idle through multiple probes. The TCP
+            // peer is still reachable even when it sends no video.
+            Sleep(5000);
+            const auto paused_stayed_connected = capture.reconnects.load() == 0 &&
+                capture.disconnects.load() == 0 && capture.configured_keepalives.load() != 0;
             // FIN after only eight header bytes must preserve the data listener.
             send_all(data_socket, std::string_view(header.data(), 8));
             closesocket(data_socket);
@@ -763,7 +772,7 @@ bool probe_media_route(DWORD process_id, unsigned short raop_port,
             if (data_socket != INVALID_SOCKET) {
                 const auto resumes_before = capture.resumes.load();
                 header[6] = 0x16;
-                reconnect_valid = paused && interrupted &&
+                reconnect_valid = paused && paused_stayed_connected && interrupted &&
                     send_all(data_socket, std::string_view(header.data(), header.size())) &&
                     await_counter(capture.resumes, resumes_before + 1);
                 // Retrying the existing stream must return the current ports.
@@ -819,7 +828,14 @@ bool probe_media_route(DWORD process_id, unsigned short raop_port,
                         setup_restart_valid = send_all(data_socket,
                             std::string_view(header.data(), header.size())) &&
                             await_counter(capture.pauses, pauses_before + 1);
+                        const auto disconnects_before = capture.disconnects.load();
                         closesocket(data_socket);
+                        const auto lost_at = GetTickCount64();
+                        // The sender disappears without a control TEARDOWN.
+                        while (capture.disconnects.load() == disconnects_before &&
+                            GetTickCount64() - lost_at < 4500) Sleep(10);
+                        disconnect_valid = capture.disconnects.load() > disconnects_before &&
+                            GetTickCount64() - lost_at >= 1500;
                     }
                 }
             }
@@ -835,7 +851,7 @@ bool probe_media_route(DWORD process_id, unsigned short raop_port,
         successful_rtsp_response(setup_two_response) && response_plist.valid();
     const auto passed = responses_valid && ports_valid && tcp_exact && udp_exact &&
         !tcp_wildcard && !udp_wildcard && timing_source_valid && reconnect_valid &&
-        setup_restart_valid;
+        setup_restart_valid && disconnect_valid;
     std::array<char, INET_ADDRSTRLEN> address_text{};
     InetNtopA(AF_INET, &local_address, address_text.data(),
         static_cast<DWORD>(address_text.size()));
@@ -848,6 +864,7 @@ bool probe_media_route(DWORD process_id, unsigned short raop_port,
         << " timing_source=" << timing_source_valid
         << " pause_reconnect=" << reconnect_valid
         << " setup_restart=" << setup_restart_valid
+        << " disconnect_after_grace=" << disconnect_valid
         << " passed=" << passed << '\n';
     return passed;
 }
@@ -1014,7 +1031,9 @@ bool probe_mode(const std::filesystem::path& host, std::wstring_view mode,
 int wmain(int argc, wchar_t** argv) {
     const auto media_route_only = argc == 3 &&
         std::wstring_view(argv[2]) == L"--media-route";
-    if (argc != 2 && !media_route_only) return 2;
+    const auto avc_diagnostic_only = argc == 3 &&
+        std::wstring_view(argv[2]) == L"--avc-only";
+    if (argc != 2 && !media_route_only && !avc_diagnostic_only) return 2;
     WSADATA winsock{};
     if (WSAStartup(MAKEWORD(2, 2), &winsock) != 0) return 2;
     constexpr std::array variables{
@@ -1022,6 +1041,7 @@ int wmain(int argc, wchar_t** argv) {
         L"IPHONE_MIRROR_AIRPLAY_FPS", L"IPHONE_MIRROR_AIRPLAY_MODE",
         L"IPHONE_MIRROR_AIRPLAY_NAME", L"IPHONE_MIRROR_AIRPLAY_DEVICE_ID",
         L"IPHONE_MIRROR_AIRPLAY_PAIRING_SEED", L"IPHONE_MIRROR_AIRPLAY_PUBLIC_KEY",
+        L"IPHONE_MIRROR_DIAGNOSTIC_MIRROR_AVC_ONLY",
     };
     bool environment_clean{true};
     for (const auto* variable : variables) {
@@ -1029,6 +1049,20 @@ int wmain(int argc, wchar_t** argv) {
             GetEnvironmentVariableW(variable, nullptr, 0) == 0 && environment_clean;
     }
     const auto host = std::filesystem::absolute(argv[1]);
+    if (avc_diagnostic_only) {
+        const auto enabled = SetEnvironmentVariableW(
+            L"IPHONE_MIRROR_DIAGNOSTIC_MIRROR_AVC_ONLY", L"1") != FALSE;
+        const auto passed = environment_clean && enabled &&
+            probe_mode(host, L"mirror", 0x5A7FFEE6U, 0x5A7FFEE6ULL,
+                std::nullopt, 2622, 2622, 60) &&
+            probe_mode(host, L"combined", 0x5A7FFEE6U, 0x5A7FFEE6ULL) &&
+            probe_mode(host, L"media", 0x5A7FFE73U, 0x5A7FFE73ULL);
+        SetEnvironmentVariableW(L"IPHONE_MIRROR_DIAGNOSTIC_MIRROR_AVC_ONLY", nullptr);
+        WSACleanup();
+        if (!passed) return 1;
+        std::cout << "Wireless AVC diagnostic protocol smoke passed; media profile unchanged\n";
+        return 0;
+    }
     if (media_route_only) {
         const auto route_address = physical_ipv4_address();
         if (!route_address) {

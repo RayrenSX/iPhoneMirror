@@ -24,8 +24,9 @@ internal static partial class Program
             SetKeyboardField(vm, "_mediaOutputCapabilitiesLoaded", true);
             SetKeyboardField(vm, "_mediaOutputCapabilities", new MediaOutputCapabilities(
                 true, true, true, true, true, true, true, "libx264", "unused", ""));
-            SetKeyboardField(vm, "_virtualCameraCapabilities",
-                new VirtualCameraCapabilities(true, true, true, false, false, ""));
+            var cameraCapabilities = new VirtualCameraCapabilities(true, true, true, false, false, "");
+            SetKeyboardField(vm, "_virtualCameraCapabilities", cameraCapabilities);
+            SetKeyboardField(vm, "_virtualCameraCapabilityReader", (Func<VirtualCameraCapabilities>)(() => cameraCapabilities));
             var originalOutput = (MediaOutputCoordinator)KeyboardField(vm, "_mediaOutput");
             var originalCamera = (VirtualCameraService)KeyboardField(vm, "_virtualCamera");
             var record = new AudioGuardOutputSession();

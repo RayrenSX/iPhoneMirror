@@ -51,6 +51,38 @@ internal static partial class Program
         }
         try
         {
+            const string otherDevice = "parallel-shortcut-other";
+            var (shortcutState, shortcutHandle) = fixture.State(otherDevice, 812);
+            vm.Devices.Add((Models.DeviceViewModel)fixture.Device(otherDevice));
+            var shortcutStatus = fixture.Status("Streaming");
+            SetKeyboardField(shortcutStatus, "Width", 1080u);
+            SetKeyboardField(shortcutStatus, "Height", 2400u);
+            fixture.SetReader(handle => ReferenceEquals(handle, shortcutHandle) ? shortcutStatus :
+                throw new InvalidOperationException("Wrong recording status source."));
+            var shortcutRecording = vm.StartShortcutRecordingAsync(otherDevice);
+            WaitReviewTask(shortcutRecording);
+            InteractionAssert(shortcutRecording.Result.Success && recording.SessionHandle == 812 &&
+                vm.IsRecordingSource(otherDevice) && vm.SelectedDevice?.Udid == "parallel-output-test" &&
+                recording.LastRequest is { Width: 972, Height: 2160, FrameRate: 30, BitrateKbps: 6000 },
+                "The recording shortcut must target its preview without changing the primary selection.");
+            WaitReviewTask(vm.StopRecordingAsync());
+            SetKeyboardField(vm, "_pendingRecordingPath", null);
+            var missing = vm.StartRecordingAsync(160, 160, 30, 6000, "closed-preview");
+            WaitReviewTask(missing);
+            InteractionAssert(!missing.Result.Success && !recording.IsRunning,
+                "An unavailable shortcut target must never start recording the selected phone.");
+            var gate = (SemaphoreSlim)KeyboardField(vm, "_mediaOutputGate");
+            gate.Wait();
+            Task<(bool Success, string Message)> stale;
+            try
+            {
+                stale = vm.StartRecordingAsync(160, 160, 30, 6000, otherDevice);
+                fixture.Property(shortcutState, "Handle", fixture.Handle(813));
+            }
+            finally { gate.Release(); }
+            WaitReviewTask(stale);
+            InteractionAssert(!stale.Result.Success && !recording.IsRunning,
+                "A queued recording must not follow the original device onto a replacement session.");
             window.Show();
             window.UpdateLayout();
             var tabs = Visuals(window).OfType<TabControl>().First();
@@ -237,12 +269,14 @@ internal static partial class Program
     {
         public bool IsRunning { get; private set; }
         public ulong SessionHandle { get; private set; }
+        internal MediaOutputRequest? LastRequest { get; private set; }
         public event Action<string, bool>? StatusChanged;
         public Task StartAsync(ulong handle, MediaOutputRequest request, MediaOutputCapabilities capabilities,
             CancellationToken cancellationToken = default)
         {
             IsRunning = true;
             SessionHandle = handle;
+            LastRequest = request;
             StatusChanged?.Invoke("started", false);
             return Task.CompletedTask;
         }

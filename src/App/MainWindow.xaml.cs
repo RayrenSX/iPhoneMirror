@@ -7533,7 +7533,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     // render onto the UI dispatcher and return owned pixel buffers.
     private VideoFrame? CaptureMediaCastVideoFrame(uint width, uint height)
     {
-        if (!_mediaCastActive || !_viewModel.IsMediaCastSelected)
+        if (!_mediaCastActive)
             return null;
         var pixels = CaptureMediaCastBgra(width, height, out var stride);
         return pixels is null ? null : new VideoFrame(width, height, stride,
@@ -7542,7 +7542,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private Nv12VideoFrame? CaptureMediaCastNv12Frame(uint width, uint height)
     {
-        if (!_mediaCastActive || !_viewModel.IsMediaCastSelected)
+        if (!_mediaCastActive)
             return null;
         var bgra = CaptureMediaCastBgra(width, height, out _);
         if (bgra is null) return null;
@@ -7663,7 +7663,14 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         return output;
     }
 
-    private async Task CaptureScreenshotAsync()
+    private Task CaptureScreenshotAsync()
+    {
+        if (_mediaCastActive && _viewModel.IsMediaCastSelected)
+            return SaveScreenshotAsync(path => Task.FromResult(ScreenshotService.CaptureVisualPng(MediaCastVideoHost, path)), "media_cast");
+        return SaveScreenshotAsync(path => Task.Run(() => _viewModel.CaptureScreenshot(path)), "device");
+    }
+
+    private async Task SaveScreenshotAsync(Func<string, Task<string>> capture, string mode)
     {
         if (!await _screenshotGate.WaitAsync(0))
         {
@@ -7685,13 +7692,10 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             };
             if (dialog.ShowDialog(this) != true) return;
             var path = dialog.FileName;
-            var saved = _mediaCastActive && _viewModel.IsMediaCastSelected
-                ? ScreenshotService.CaptureVisualPng(MediaCastVideoHost, path)
-                : await Task.Run(() => _viewModel.CaptureScreenshot(path));
+            var saved = await capture(path);
             _viewModel.AddUiLog(LocalizationService.Format("ScreenshotSavedFormat", saved));
             _viewModel.AddDiagnosticLog(AppLog.Event("screenshot_complete",
-                ("mode", _mediaCastActive && _viewModel.IsMediaCastSelected
-                    ? "media_cast" : "device"), ("success", true)));
+                ("mode", mode), ("success", true)));
         }
         catch (Exception error)
         {

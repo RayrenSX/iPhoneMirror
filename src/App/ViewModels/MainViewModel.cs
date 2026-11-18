@@ -92,6 +92,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         double Gamma);
 
     internal event Action<string, uint, uint>? DeviceVideoSizeChanged;
+    internal event Action? DeviceInventoryReconciled;
     internal event Action<MediaCastRequest>? MediaCastCommandReceived;
     internal event Action? MediaCastStopRequested;
     internal event Action<bool, double>? MediaCastAudioSettingsChanged;
@@ -184,6 +185,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
     private MediaOutputCapabilities _mediaOutputCapabilities = new(
         false, false, false, false, false, false, false,
         string.Empty, string.Empty, string.Empty);
+    private readonly Func<VirtualCameraCapabilities> _virtualCameraCapabilityReader = VirtualCameraService.Probe;
     private VirtualCameraCapabilities _virtualCameraCapabilities = new(
         false, false, false, false, false, string.Empty);
     private string _virtualCameraStatusText = string.Empty;
@@ -3916,16 +3918,15 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         // poll only its status until the user explicitly refreshes devices.
         if (!forceDeviceEnumeration && _sessions.AnySession)
         {
-            await RefreshActiveSessionStatusAsync().ConfigureAwait(true);
+            var wirelessDisconnected = await RefreshActiveSessionStatusAsync().ConfigureAwait(true);
             var poll = Interlocked.Increment(ref _activeSessionStatusPolls);
-            if (poll % 5 != 0)
+            if (poll % 5 != 0 && !wirelessDisconnected)
             {
-                await PollBackgroundSessionErrorsAsync().ConfigureAwait(true);
-                return;
+                if (!await PollBackgroundSessionErrorsAsync().ConfigureAwait(true)) return;
             }
-            // Every fifth timer tick falls through to the normal inventory
-            // path so wireless additions/removals and independent sessions
-            // are reconciled without reopening USB on every tick.
+            // Reconcile a confirmed wireless disconnect on this tick. The
+            // periodic inventory pass still discovers new senders without
+            // reopening USB on every status poll.
         }
         if (forceDeviceEnumeration && Interlocked.Exchange(ref _manualRefreshPending, 1) != 0)
             return;
@@ -4072,6 +4073,13 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
                 var present = devices.Any(device => DeviceViewModel.UdidEquals(
                     device.Udid, known.Udid));
                 if (present)
+                {
+                    _wirelessMissingRefreshes.Remove(known.Udid);
+                    continue;
+                }
+                // A confirmed native disconnect is terminal for this capture.
+                // Discovery grace only covers an incomplete inventory snapshot.
+                if (await IsWirelessSessionDisconnectedAsync(known.Udid))
                 {
                     _wirelessMissingRefreshes.Remove(known.Udid);
                     continue;
@@ -4280,9 +4288,9 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         }
     }
 
-    private async Task RefreshActiveSessionStatusAsync()
+    private async Task<bool> RefreshActiveSessionStatusAsync()
     {
-        if (_disposed || IsMediaCastSelected) return;
+        if (_disposed || IsMediaCastSelected) return false;
         // Snapshot on the dispatcher: the worker must not select a different
         // device, or apply an old result to a restarted session on this device.
         var device = SelectedDevice;
@@ -4304,12 +4312,25 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         {
             DiagnosticLogger.ExceptionOnce("active-session-status-refresh",
                 "capture", "active_session_status_refresh_failed", error);
-            return;
+            return false;
         }
         if (_disposed || IsMediaCastSelected || !ReferenceEquals(SelectedDevice, device) ||
             !ReferenceEquals(CurrentDeviceSession, state) ||
-            !ReferenceEquals(IsSessionPresentable(state) ? state!.Handle : null, handle)) return;
+            !ReferenceEquals(IsSessionPresentable(state) ? state!.Handle : null, handle)) return false;
         ApplyCaptureStatus(status);
+        return device?.IsWireless == true && status.State == CaptureState.Stopped;
+    }
+
+    private async Task<bool> IsWirelessSessionDisconnectedAsync(string udid)
+    {
+        if (!_sessions.TryGet(udid, out var session) ||
+            session.Handle is not { IsInvalid: false, IsClosed: false } handle) return false;
+        try { return (await Task.Run(() => _captureStatusReader(handle))).State == CaptureState.Stopped; }
+        catch (InvalidOperationException)
+        {
+            // The independent window may already have released this session.
+            return handle.IsClosed || session.Handle != handle;
+        }
     }
 
     private async Task SyncWirelessSessionsLockedAsync(IEnumerable<DeviceViewModel> connected)
@@ -4640,6 +4661,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
             DeviceViewModel.UdidEquals(device.Udid, nextUdid));
         SetSelectedDevice(nextSelection, updateDriverStatus: false);
         NotifySelectedDeviceProperties();
+        DeviceInventoryReconciled?.Invoke();
 
         // Never invoke the legacy libusb0 enumeration API while a capture
         // handle is live. The selected device's driver state is refreshed as
@@ -4880,8 +4902,9 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         !_disposed && !state.IsStopping && !handle.IsClosed && !handle.IsInvalid &&
         ReferenceEquals(_sessions.Get(state.Udid), state) && ReferenceEquals(state.Handle, handle);
 
-    private async Task PollBackgroundSessionErrorsAsync(bool coreGateHeld = false)
+    private async Task<bool> PollBackgroundSessionErrorsAsync(bool coreGateHeld = false)
     {
+        var wirelessDisconnected = false;
         foreach (var state in _sessions.Values.Where(value =>
                      value.HasSession && value.Handle?.RawHandle != CurrentSessionHandle).ToArray())
         {
@@ -4901,6 +4924,11 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
                 continue;
             }
             if (!IsCurrentSession(state, h)) continue;
+            if (status.State == CaptureState.Stopped && DeviceViewModel.IsWirelessUdid(state.Udid))
+            {
+                wirelessDisconnected = true;
+                continue;
+            }
             TryStartMirroringControl(state, status);
             if (status.Width != 0 && status.Height != 0)
             {
@@ -4935,6 +4963,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
                 _ = ShowCaptureErrorNoticeAsync(errorTitle, errorBody);
             }
         }
+        return wirelessDisconnected;
     }
 
     private async Task ReleaseFailedSessionAsync(DeviceCaptureState state,
@@ -6186,6 +6215,13 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
     internal string CaptureScreenshot(string path) =>
         ScreenshotService.CapturePng(_core.GetLatestVideoFrame, path);
 
+    internal Func<VideoFrame?> CreateDeviceScreenshotCapture(string source)
+    {
+        var handle = _sessions.Get(source)?.Handle;
+        return () => handle is { IsClosed: false, IsInvalid: false } && ReferenceEquals(_sessions.Get(source)?.Handle, handle)
+            ? _core.GetDeviceOutputFrame(handle, 0, 0, owned: true) : null;
+    }
+
     internal System.Windows.Media.Imaging.BitmapSource? CaptureToolbarPreviewFrame()
     {
         if (!IsCapturing) return null;
@@ -7299,7 +7335,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
 
     private void RefreshVirtualCameraCapabilities()
     {
-        _virtualCameraCapabilities = VirtualCameraService.Probe();
+        _virtualCameraCapabilities = _virtualCameraCapabilityReader();
         VirtualCameraStatusText = !_virtualCameraCapabilities.BackendAvailable
             ? LocalizationService.Get("VirtualCameraBackendMissing")
             : !_virtualCameraCapabilities.Supported
@@ -7328,14 +7364,15 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
     }
 
     internal async Task<(bool Success, string Message)> StartRecordingAsync(
-        uint width, uint height, int frameRate, int bitrateKbps)
+        uint width, uint height, int frameRate, int bitrateKbps, string? source = null)
     {
         if (PendingRecordingPath is not null)
             return (false, LocalizationService.Get("RecordingPendingSave"));
         var path = PendingRecordingStore.CreatePath();
         var request = new MediaOutputRequest(MediaOutputKind.Recording, path,
             width, height, frameRate, bitrateKbps);
-        var result = await StartMediaOutputAsync(request);
+        var result = source is null ? await StartMediaOutputAsync(request) :
+            await StartMediaOutputForSourceAsync(request, Devices.FirstOrDefault(device => DeviceViewModel.UdidEquals(device.Udid, source)), false);
         if (result.Success) _pendingRecordingPath = path;
         else
         {
@@ -7349,6 +7386,19 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         }
         return result;
     }
+
+    internal Task<(bool Success, string Message)> StartShortcutRecordingAsync(string source)
+    {
+        var size = SuggestedMediaOutputSize();
+        if (!DeviceViewModel.IsMediaCastUdid(source) && _sessions.Get(source)?.Handle is { IsClosed: false, IsInvalid: false } handle)
+        {
+            var status = _captureStatusReader(handle);
+            if (status.Width > 0 && status.Height > 0) size = FitMediaOutputSize(status.Width, status.Height);
+        }
+        return StartRecordingAsync(size.Width, size.Height, 30, 6000, source);
+    }
+
+    internal bool IsRecordingSource(string source) => IsRecordingMediaOutput && DeviceViewModel.UdidEquals(_mediaOutputUdid, source);
 
     internal void MarkPendingRecordingSaved(string path)
     {
@@ -7657,6 +7707,11 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
             width = 1280;
             height = 720;
         }
+        return FitMediaOutputSize(width, height);
+    }
+
+    private static (uint Width, uint Height) FitMediaOutputSize(uint width, uint height)
+    {
         if (width > 3840 || height > 2160)
         {
             var scale = Math.Min(3840.0 / width, 2160.0 / height);
@@ -7666,33 +7721,37 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
         return (NormalizeOutputWidth(width), NormalizeOutputHeight(height));
     }
 
-    private async Task<(bool Success, string Message)> StartMediaOutputAsync(
-        MediaOutputRequest request)
+    private Task<(bool Success, string Message)> StartMediaOutputAsync(MediaOutputRequest request) =>
+        StartMediaOutputForSourceAsync(request, SelectedDevice, requireSelected: true);
+
+    private async Task<(bool Success, string Message)> StartMediaOutputForSourceAsync(
+        MediaOutputRequest request, DeviceViewModel? device, bool requireSelected)
     {
         if (_disposed) return (false, LocalizationService.Get("CaptureStopped"));
+        if (device is null) return (false, LocalizationService.Get("MediaOutputNoSession"));
+        var mediaCast = device.IsMediaCast;
+        var expectedState = mediaCast ? null : _sessions.Get(device.Udid);
+        var expectedHandle = expectedState?.Handle;
+        var handle = mediaCast ? MediaCastOutputHandle : expectedHandle?.RawHandle ?? 0;
+        var mediaProvider = _mediaCastNv12FrameProvider;
+        bool SourceCurrent() => !_disposed &&
+            (requireSelected ? ReferenceEquals(SelectedDevice, device) : Devices.Contains(device)) &&
+            (mediaCast ? IsMediaCasting && mediaProvider is not null && ReferenceEquals(mediaProvider, _mediaCastNv12FrameProvider) :
+                handle != 0 && IsSessionPresentable(expectedState) && ReferenceEquals(expectedState!.Handle, expectedHandle) &&
+                ReferenceEquals(_sessions.Get(device.Udid), expectedState));
         await _mediaOutputGate.WaitAsync(_shutdownCancellation.Token);
         SetMediaOutputTransitioning(true);
         try
         {
-            if (IsAudioOnlyAirPlay)
+            if (IsAudioOnlyAirPlay && ReferenceEquals(device, SelectedDevice))
                 return (false, LocalizationService.Get("MediaOutputRequiresVideo"));
+            if (!SourceCurrent()) return (false, LocalizationService.Get("MediaOutputNoSession"));
             await EnsureMediaOutputCapabilitiesAsync();
-            if (IsAudioOnlyAirPlay)
+            if (IsAudioOnlyAirPlay && ReferenceEquals(device, SelectedDevice))
                 return (false, LocalizationService.Get("MediaOutputRequiresVideo"));
+            if (!SourceCurrent()) return (false, LocalizationService.Get("MediaOutputNoSession"));
             if (_virtualCamera.IsRunning)
                 return (false, LocalizationService.Get("MediaOutputAlreadyRunning"));
-            var handle = CurrentSessionHandle;
-            var device = SelectedDevice;
-            var mediaCast = IsMediaCasting && IsMediaCastSelected;
-            DeviceCaptureState? expectedState = null;
-            if (!mediaCast && device is not null)
-                _sessions.TryGet(device.Udid, out expectedState);
-            if (device is null || (!mediaCast &&
-                (handle == 0 || expectedState is null ||
-                 !expectedState.MatchesSessionHandle(handle))) ||
-                (mediaCast && _mediaCastNv12FrameProvider is null))
-                return (false, LocalizationService.Get("MediaOutputNoSession"));
-            if (mediaCast) handle = MediaCastOutputHandle;
             if (!_mediaOutput.CanStart(request.Kind, handle) ||
                 (request.Kind == MediaOutputKind.Recording && PendingRecordingPath is not null))
                 return (false, LocalizationService.Get("MediaOutputAlreadyRunning"));
@@ -7700,11 +7759,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
             OnPropertyChanged(nameof(NeedsMediaCastAudioDecode));
             await _mediaOutput.StartAsync(handle, request, _mediaOutputCapabilities,
                 _shutdownCancellation.Token);
-            if (_disposed || !DeviceViewModel.UdidEquals(SelectedDevice?.Udid,
-                device.Udid) || (!mediaCast &&
-                 (!_sessions.TryGet(device.Udid, out var currentState) ||
-                  !ReferenceEquals(expectedState, currentState) ||
-                  currentState.Handle?.RawHandle != handle)))
+            if (!SourceCurrent())
             {
                 await _mediaOutput.StopAsync(request.Kind);
                 var staleMessage = LocalizationService.Get("MediaOutputNoSession");

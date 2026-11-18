@@ -250,6 +250,17 @@ class DeviceManagement:
             result = await service.launch_application(bundle, kill_existing=False)
         return {"status": "launched", "bundleId": bundle, "process": json_value(result)}
 
+    async def _restart_with_metal_hud(self, args):
+        if set(args) - {"bundleId"}:
+            raise ValueError("Metal HUD restart only accepts a bundleId")
+        bundle = bundle_id(args.get("bundleId"))
+        async with connected(AppServiceService, self.rsd) as service:
+            # Metal reads this variable when the process starts. Restart only
+            # the selected app; a successful launch does not verify the HUD.
+            result = await service.launch_application(bundle, kill_existing=True,
+                start_suspended=False, environment={"MTL_HUD_ENABLED": "1"})
+        return {"status": "launched", "bundleId": bundle, "process": json_value(result)}
+
     async def _list_processes(self, args):
         async with connected(AppServiceService, self.rsd) as service:
             features = self.rsd.get_service_features(service.service_name)

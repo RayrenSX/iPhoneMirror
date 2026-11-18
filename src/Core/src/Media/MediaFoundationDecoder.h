@@ -111,6 +111,10 @@ struct DecodedFrame {
     std::chrono::steady_clock::time_point received_at{};
     PixelFormat pixel_format{PixelFormat::Nv12};
     coremedia::VideoColorDescription color;
+    // Physical orientation relative to the portrait artwork, if supplied by capture.
+    std::optional<unsigned> device_orientation_turns;
+    // Identifies a continuous wireless landscape period. Zero for other frames.
+    std::uint64_t wireless_landscape_run{};
     // Contiguous semi-planar Y followed by interleaved UV. The historical
     // member name is retained for ABI-local consumers; pixel_format tells
     // whether each component occupies 8 bits (NV12) or 16 bits (P010).

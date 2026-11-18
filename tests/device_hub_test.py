@@ -39,6 +39,37 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaises(ValueError): await self.hub.request('launch', {'bundleId': bundle})
             self.assertEqual(service.launch_application.await_count, 1)
 
+    async def test_metal_hud_restart_is_bound_to_selected_device_and_fixed_environment(self):
+        service, manager, context = self.service()
+        service.launch_application.return_value = [{'processIdentifier': 123}]
+        with patch('device_management.AppServiceService', side_effect=lambda _: context()) as constructor:
+            result = await self.hub.request('restart_with_metal_hud', {'bundleId': 'com.example.game'})
+            constructor.assert_called_once_with(self.owner.rsd)
+            service.launch_application.assert_awaited_once_with('com.example.game',
+                kill_existing=True, start_suspended=False, environment={'MTL_HUD_ENABLED': '1'})
+            self.assertEqual(result, {'status': 'launched', 'bundleId': 'com.example.game',
+                'process': [{'processIdentifier': 123}]})
+            self.assertEqual(manager.__aexit__.await_count, 1)
+            for arguments in ({}, {'bundleId': ''}, {'bundleId': 'com.example/game'},
+                              {'bundleId': 'com.example;kill'}, {'bundleId': 42},
+                              {'bundleId': 'a' * 513},
+                              {'bundleId': 'com.example.game', 'environment': {'DYLD_INSERT_LIBRARIES': 'x'}},
+                              {'bundleId': 'com.example.game', 'killExisting': False}):
+                with self.subTest(arguments=arguments), self.assertRaises(ValueError):
+                    await self.hub.request('restart_with_metal_hud', arguments)
+            self.assertEqual(constructor.call_count, 1)
+            self.assertEqual(service.launch_application.await_count, 1)
+
+    async def test_metal_hud_restart_failure_closes_channel_without_ordinary_launch_fallback(self):
+        service, manager, context = self.service()
+        service.launch_application.side_effect = OSError('device rejected launch')
+        with patch('device_management.AppServiceService', side_effect=lambda _: context()) as constructor:
+            with self.assertRaises(OSError):
+                await self.hub.request('restart_with_metal_hud', {'bundleId': 'com.example.game'})
+        self.assertEqual(constructor.call_count, 1)
+        self.assertEqual(service.launch_application.await_count, 1)
+        self.assertEqual(manager.__aexit__.await_count, 1)
+
     async def test_correlated_result_and_obsolete_generation(self):
         frame = {'kind': 'hub_request', 'requestId': 'a' * 32, 'action': 'apps'}
         self.hub.request = AsyncMock(return_value={'apps': []})

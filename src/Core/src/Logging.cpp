@@ -25,6 +25,11 @@ std::mutex log_mutex;
 std::mutex lifecycle_mutex;
 std::ofstream log_file;
 std::filesystem::path log_path;
+constexpr std::uintmax_t MaximumLogBytes = 16U * 1024U * 1024U;
+constexpr std::uintmax_t MaximumHeaderBytes = 1024;
+std::uintmax_t current_file_bytes{};
+std::filesystem::path rotation_failure_path;
+std::chrono::steady_clock::time_point rotation_retry_after{};
 bool initialized{};
 bool writes_suspended{};
 bool session_header_written{};
@@ -124,6 +129,8 @@ std::string make_session_id() {
 }
 
 std::string now_text();
+void initialize_session_locked();
+bool ensure_session_open_locked(bool implicit, std::size_t required_bytes = 0);
 
 void flush_pending_locked() {
     if (pending_lines == 0) return;
@@ -143,10 +150,7 @@ void flush_pending_locked() {
 
 void write_line_locked(Level level, std::string_view category,
     std::string_view message) {
-    if (!log_file.is_open() || !log_file.good()) {
-        ++dropped_write_count;
-        return;
-    }
+    initialize_session_locked();
     const auto sanitized_category = normalize_token(category, "general");
     const auto sanitized_message = sanitize_single_line(message);
     const auto line_number = sequence + 1;
@@ -157,6 +161,12 @@ void write_line_locked(Level level, std::string_view category,
         << "] [category=" << sanitized_category << "] [session="
         << session_id << "] " << sanitized_message << '\n';
     const auto text = line.str();
+    // The stream normally stays open for the entire capture session. Checking
+    // only when opening it lets a continuously running session grow forever.
+    if (!ensure_session_open_locked(true, text.size())) {
+        ++dropped_write_count;
+        return;
+    }
     log_file << text;
     if (!log_file.good()) {
         // Do not call the logger recursively while handling a disk/handle
@@ -170,6 +180,7 @@ void write_line_locked(Level level, std::string_view category,
     if (level == Level::Warning) ++warning_count;
     if (level == Level::Error) ++error_count;
     byte_count += text.size();
+    current_file_bytes += text.size();
     ++pending_lines;
     const auto now = std::chrono::steady_clock::now();
     if (pending_lines >= 64 || now - last_flush >= std::chrono::milliseconds(500)) {
@@ -212,25 +223,51 @@ std::filesystem::path configured_path() {
     return std::filesystem::path(buffer);
 }
 
-void rotate_if_needed(const std::filesystem::path& path) {
-    constexpr std::uintmax_t MaxLogBytes = 16U * 1024U * 1024U;
+bool rotate_if_needed(const std::filesystem::path& path,
+    std::uintmax_t required_bytes) {
     std::error_code error;
-    if (!std::filesystem::exists(path, error) || error ||
-        std::filesystem::file_size(path, error) <= MaxLogBytes || error) return;
+    const auto exists = std::filesystem::exists(path, error);
+    if (error) return false;
+    if (!exists) return true;
+    const auto bytes = std::filesystem::file_size(path, error);
+    if (error) return false;
+    if (bytes <= MaximumLogBytes &&
+        required_bytes <= MaximumLogBytes - bytes) return true;
     auto previous = path;
     previous += L".1";
     std::filesystem::remove(previous, error);
-    error.clear();
-    std::filesystem::rename(path, previous, error);
-    if (error) {
-        // rotate_if_needed runs inside ensure_session_open_locked, which is
-        // reached with log_mutex already held. Calling write() here would
-        // re-acquire the non-recursive mutex on the same thread and deadlock.
-        // write_line_locked is the lock-held path; if the file is not open at
-        // this point it simply counts the line as dropped without recursing.
-        write_line_locked(Level::Warning, "logging",
-            std::format("log rotate failed: {}", error.message()));
+    if (error) return false;
+    if (bytes > MaximumLogBytes) {
+        // Older versions could produce gigabytes in one continuous session.
+        // Keep the most recent bounded tail instead of merely renaming that
+        // oversized file into an equally oversized archive.
+        std::ifstream input(path, std::ios::binary);
+        std::ofstream archive(previous, std::ios::binary | std::ios::trunc);
+        if (!input.is_open() || !archive.is_open()) return false;
+        input.seekg(static_cast<std::streamoff>(bytes - MaximumLogBytes));
+        std::array<char, 64 * 1024> buffer;
+        auto remaining = MaximumLogBytes;
+        while (remaining != 0) {
+            const auto count = static_cast<std::streamsize>(
+                std::min<std::uintmax_t>(remaining, buffer.size()));
+            input.read(buffer.data(), count);
+            if (input.gcount() != count) return false;
+            archive.write(buffer.data(), count);
+            if (!archive.good()) return false;
+            remaining -= static_cast<std::uintmax_t>(count);
+        }
+        archive.flush();
+        if (!archive.good()) return false;
+        archive.close();
+        if (!archive.good()) return false;
+        input.close();
+        std::filesystem::remove(path, error);
+        return !error;
     }
+    std::filesystem::rename(path, previous, error);
+    // A locked archive must not turn a bounded log into an unbounded append.
+    // Keep the stream closed and retry on the next write instead.
+    return !error;
 }
 
 std::string now_text() {
@@ -246,7 +283,7 @@ std::string now_text() {
     return stream.str();
 }
 
-bool ensure_session_open_locked(bool implicit) {
+void initialize_session_locked() {
     if (!initialized) {
         initialized = true;
         pending_lines = 0;
@@ -260,9 +297,15 @@ bool ensure_session_open_locked(bool implicit) {
         session_started = std::chrono::steady_clock::now();
         last_flush = session_started;
     }
+}
 
-    if (log_file.is_open() && log_file.good()) return true;
+bool ensure_session_open_locked(bool implicit, std::size_t required_bytes) {
+    initialize_session_locked();
+    if (log_file.is_open() && log_file.good() &&
+        current_file_bytes <= MaximumLogBytes &&
+        required_bytes <= MaximumLogBytes - current_file_bytes) return true;
     if (log_file.is_open()) {
+        flush_pending_locked();
         log_file.clear();
         log_file.close();
     }
@@ -271,10 +314,22 @@ bool ensure_session_open_locked(bool implicit) {
     const auto custom_log_path =
         GetEnvironmentVariableW(L"IPHONE_MIRROR_LOG_FILE", nullptr, 0) != 0;
     log_path = configured_path();
+    if (rotation_failure_path == log_path &&
+        std::chrono::steady_clock::now() < rotation_retry_after)
+        return false;
     if (!log_path.parent_path().empty())
         std::filesystem::create_directories(log_path.parent_path());
-    rotate_if_needed(log_path);
-    log_file.open(log_path, std::ios::out | std::ios::app);
+    if (!rotate_if_needed(log_path, required_bytes + MaximumHeaderBytes)) {
+        // A held archive or legacy source must not turn high-rate diagnostics
+        // into a filesystem retry loop (or repeated 16 MiB tail copies).
+        rotation_failure_path = log_path;
+        rotation_retry_after = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+        return false;
+    }
+    rotation_failure_path.clear();
+    rotation_retry_after = {};
+    // Binary mode makes the byte budget independent of CRLF translation.
+    log_file.open(log_path, std::ios::out | std::ios::app | std::ios::binary);
     if (!log_file.is_open() || !log_file.good()) {
         if (log_file.is_open()) log_file.close();
         log_file.clear();
@@ -312,6 +367,7 @@ bool ensure_session_open_locked(bool implicit) {
     }
 
     session_header_written = true;
+    current_file_bytes = std::filesystem::file_size(log_path);
     dropped_write_count = 0;
     last_flush = std::chrono::steady_clock::now();
     ensure_flush_thread_locked();
@@ -362,6 +418,7 @@ void initialize() {
     std::scoped_lock lifecycle_lock(lifecycle_mutex);
     std::scoped_lock lock(log_mutex);
     writes_suspended = false;
+    rotation_retry_after = {};
     try {
         (void)ensure_session_open_locked(false);
     } catch (...) {
@@ -376,10 +433,6 @@ void write(std::string_view message) noexcept {
             ++dropped_write_count;
             return;
         }
-        if (!ensure_session_open_locked(true)) {
-            ++dropped_write_count;
-            return;
-        }
         write_line_locked(infer_level(message), infer_category(message), message);
     } catch (...) {
         // Diagnostics are best-effort and must never alter product behavior.
@@ -390,10 +443,6 @@ void write(Level level, std::string_view category, std::string_view message) noe
     try {
         std::scoped_lock lock(log_mutex);
         if (writes_suspended) {
-            ++dropped_write_count;
-            return;
-        }
-        if (!ensure_session_open_locked(true)) {
             ++dropped_write_count;
             return;
         }
@@ -443,11 +492,16 @@ void shutdown() {
             // for one final best-effort summary, then close the actual handle
             // regardless of whether that summary succeeds.
             log_file.clear();
-            log_file << now_text() << " [shutdown] session=" << session_id
+            std::ostringstream summary;
+            summary << now_text() << " [shutdown] session=" << session_id
                 << " lines=" << line_count << " warnings=" << warning_count
                 << " errors=" << error_count << " bytes=" << byte_count
                 << " elapsed_seconds=" << std::fixed << std::setprecision(3)
                 << elapsed << " dropped_after_start=" << dropped_write_count << '\n';
+            const auto text = summary.str();
+            if (current_file_bytes <= MaximumLogBytes &&
+                text.size() <= MaximumLogBytes - current_file_bytes)
+                log_file << text;
             log_file.flush();
             log_file.close();
         }
@@ -455,6 +509,7 @@ void shutdown() {
         initialized = false;
         session_header_written = false;
         pending_lines = 0;
+        current_file_bytes = 0;
         session_id.clear();
         session_started = {};
     }

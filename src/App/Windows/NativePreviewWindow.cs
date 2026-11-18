@@ -55,6 +55,10 @@ internal sealed class NativePreviewWindow : IDisposable
     private const int WmSysKeyDown = 0x0104;
     private const int WmSysKeyUp = 0x0105;
     private const int WmDpiChanged = 0x02E0;
+    // Shared with the native D3D11 preview. Properties carry packed source dimensions.
+    private const int WmPreviewGeometryChanged = 0x8140;
+    private const string PendingPreviewGeometry = "iPhoneMirrorPendingPreviewGeometry";
+    private const string AppliedPreviewGeometry = "iPhoneMirrorAppliedPreviewGeometry";
     private const int VkEscape = 0x1B;
     private const int VkReturn = 0x0D;
     private const int VkF11 = 0x7A;
@@ -156,6 +160,7 @@ internal sealed class NativePreviewWindow : IDisposable
     private readonly Action? _managedContentDetached;
     private uint _sourceWidth;
     private uint _sourceHeight;
+    private bool _hasRendererDimensions;
     private nint _handle;
     private bool _attached;
     private bool _isFullScreen;
@@ -164,6 +169,7 @@ internal sealed class NativePreviewWindow : IDisposable
     private bool _isTopMost;
     private bool _isFixed;
     private bool _cornersEnabled = true;
+    private bool _phoneFramePreferred;
     private bool _phoneFrameEnabled;
     private DeviceFrameHitTest? _phoneFrameHitTest;
     internal string? DeviceProductType { get; private set; }
@@ -182,19 +188,33 @@ internal sealed class NativePreviewWindow : IDisposable
         }
         var next = selection.Profile;
         var hitTest = _phoneFrameHitTest;
+        var frameRemoved = false;
         if (_phoneFrameEnabled && previous != next)
         {
-            if (next is null) return false;
-            hitTest = new DeviceFrameHitTest(next);
-            if (!NativeCore.SetDeviceWindowFrameArtwork(_sessionHandle, _handle, next)) return false;
+            if (next is null)
+            {
+                if (!ApplyPhoneFrame(false, notify: false)) return false;
+                hitTest = null;
+                frameRemoved = true;
+            }
+            else
+            {
+                hitTest = new DeviceFrameHitTest(next);
+                if (!NativeCore.SetDeviceWindowFrameArtwork(_sessionHandle, _handle, next)) return false;
+            }
         }
         DeviceProductType = productType;
         _deviceAppearance = appearance;
         FrameSelection = selection;
         _phoneFrameHitTest = hitTest;
         UpdateDeviceCornerProfile();
-        if (_phoneFrameEnabled && previous != next) ApplyRotatedDimensions();
+        if (previous != next)
+        {
+            if (_phoneFrameEnabled) ApplyRotatedDimensions();
+            else if (next is not null && EffectivePhoneFrame && !ApplyPhoneFrame(true, notify: true)) return false;
+        }
         if (_styleWindow is not null) _styleWindow.SetPhoneFrameDescription(PhoneFrameDescription);
+        if (frameRemoved) PhoneFrameChanged?.Invoke();
         return true;
     }
 
@@ -216,7 +236,16 @@ internal sealed class NativePreviewWindow : IDisposable
     internal string PhoneFrameDescription => LocalizationService.Get("ProjectionPhoneFrameHelp") + " " + DeviceFrameCatalog.Describe(FrameSelection);
     internal void RefreshPhoneFrameDescription() => _styleWindow?.SetPhoneFrameDescription(PhoneFrameDescription);
     internal DeviceFrameProfile? ActiveDeviceFrame => _phoneFrameEnabled && !_isFullScreen && !IsZoomed(_handle) ? DeviceFrame : null;
-    internal int DeviceFrameRotation => (_rotation + (_sourceWidth > _sourceHeight ? 1 : 0)) % 4;
+    private int DefaultFrameRotation => (_rotation + (_sourceWidth > _sourceHeight ? 1 : 0)) % 4;
+    internal int DeviceFrameRotation
+    {
+        get
+        {
+            var orientation = NativeCore.GetDeviceWindowPhoneFrameOrientation(_sessionHandle, _handle);
+            return orientation >= 0 && (orientation & 1) == (DefaultFrameRotation & 1)
+                ? orientation : DefaultFrameRotation;
+        }
+    }
     private int _rotation;
     private byte _capturedMouseButtons;
     private nint _largeIcon;
@@ -439,6 +468,8 @@ internal sealed class NativePreviewWindow : IDisposable
         // Install the instance hook only after every callback dependency is
         // initialized; HwndSource construction itself dispatches messages.
         _source.AddHook(WindowProcedure);
+        if (managedContent is null && _sessionHandle != 0)
+            _ = SetPropW(_handle, AppliedPreviewGeometry, (nint)1);
         OpenWindows.Add(this);
         ThemeService.ThemeChanged += OnThemeChanged;
         if (managedContent is null)
@@ -477,6 +508,9 @@ internal sealed class NativePreviewWindow : IDisposable
         }
 
         _sessionHandle = sessionHandle;
+        _hasRendererDimensions = false;
+        _ = RemovePropW(_handle, PendingPreviewGeometry);
+        _ = SetPropW(_handle, AppliedPreviewGeometry, (nint)1);
         _attachPreview = hwnd => NativeCore.AttachDevicePreview(sessionHandle, hwnd);
         _detachPreview = hwnd => NativeCore.DetachDevicePreview(sessionHandle, hwnd);
         _refreshPreview = hwnd => NativeCore.AttachDevicePreview(sessionHandle, hwnd);
@@ -532,7 +566,8 @@ internal sealed class NativePreviewWindow : IDisposable
         Action<nint>? requestReverseControl = null,
         Func<bool>? isUsbControlEnabled = null,
         Action<nint>? requestUsbControl = null,
-        Action<nint>? requestWirelessControl = null)
+        Action<nint>? requestWirelessControl = null,
+        Action<NativePreviewWindow>? beforeShow = null)
     {
         window = null;
         NativePreviewWindow? candidate = null;
@@ -557,6 +592,7 @@ internal sealed class NativePreviewWindow : IDisposable
                 return false;
             }
             candidate._attached = true;
+            beforeShow?.Invoke(candidate);
             candidate.ShowInitially();
             if (Volatile.Read(ref BossKeyHidden) != 0)
                 candidate.SetBossKeyHidden(true);
@@ -717,6 +753,12 @@ internal sealed class NativePreviewWindow : IDisposable
 
     internal void SetSourceDimensions(uint width, uint height)
     {
+        // Status polling can trail the renderer by seconds during rotation.
+        if (!_hasRendererDimensions) UpdateSourceDimensions(width, height);
+    }
+
+    private void UpdateSourceDimensions(uint width, uint height)
+    {
         var changed = _sourceWidth != width || _sourceHeight != height;
         if (changed) _pointerInput?.Invoke(new PreviewPointerEventArgs(PreviewPointerKind.Reset, 0, 0, 0, 0));
         _sourceWidth = width;
@@ -786,6 +828,21 @@ internal sealed class NativePreviewWindow : IDisposable
     private nint WindowProcedure(nint hwnd, int message, nint wParam, nint lParam,
         ref bool handled)
     {
+        if (message == WmPreviewGeometryChanged && _managedContent is null)
+        {
+            // Read the newest geometry even if several notifications queued up.
+            var pending = GetPropW(hwnd, PendingPreviewGeometry);
+            if (!_disposed && pending != 0 && pending != GetPropW(hwnd, AppliedPreviewGeometry))
+            {
+                var packed = unchecked((uint)pending.ToInt64());
+                _hasRendererDimensions = true;
+                UpdateSourceDimensions(packed >> 16, packed & 0xFFFF);
+                _aspectController.ApplyPendingResize();
+                _ = SetPropW(hwnd, AppliedPreviewGeometry, pending);
+            }
+            handled = true;
+            return 0;
+        }
         if (message == NativeTouchInput.WmTouch && _managedContent is null)
         {
             GetClientRect(hwnd, out var touchRect);
@@ -921,12 +978,9 @@ internal sealed class NativePreviewWindow : IDisposable
                 handled = true;
                 return 1;
             case WmMouseWheel when IsPointerInputActive:
-                if (UsesBluetoothWindowMouse)
-                {
-                    if (!NativePreviewMouse.TryGetWheelClientPosition(hwnd, lParam, out lParam))
-                        break;
-                    _windowMouse.TrackLeave(hwnd);
-                }
+                if (!NativePreviewMouse.TryGetWheelClientPosition(hwnd, lParam, out lParam))
+                    break;
+                if (UsesBluetoothWindowMouse) _windowMouse.TrackLeave(hwnd);
                 DispatchPointer(PreviewPointerKind.Wheel, lParam, 0,
                     unchecked((short)(wParam.ToInt64() >> 16)),
                     NativePreviewMouse.PressedButtons(wParam));
@@ -1158,7 +1212,7 @@ internal sealed class NativePreviewWindow : IDisposable
         _closeItem.Header = LocalizationService.Get("IndependentWindowClose");
     }
 
-    private void ToggleWindowAudio()
+    internal void ToggleWindowAudio()
     {
         if (_disposed || _isAudioEnabled is null || _setAudioEnabled is null) return;
         var enabled = !_isAudioEnabled();
@@ -1194,7 +1248,7 @@ internal sealed class NativePreviewWindow : IDisposable
             return;
         }
         var window = new WindowStyleSettingsWindow(_windowOpacity, SetWindowOpacity,
-            _opaqueOnHover, SetOpaqueOnHover, PhoneFramePreference?.Invoke() ?? _phoneFrameEnabled,
+            _opaqueOnHover, SetOpaqueOnHover, PhoneFramePreference?.Invoke() ?? _phoneFramePreferred,
             _managedContent is null && _sessionHandle != 0 ? enabled => PhoneFramePreferenceRequested?.Invoke(enabled) ?? SetPhoneFrame(enabled) : null,
             PhoneFrameDescription, PhoneFramePreferenceRequested is not null || CanShowPhoneFrame);
         _ = new WindowInteropHelper(window) { Owner = _handle };
@@ -1205,14 +1259,32 @@ internal sealed class NativePreviewWindow : IDisposable
 
     internal Func<bool, bool>? PhoneFramePreferenceRequested { get; set; }
     internal Func<bool>? PhoneFramePreference { get; set; }
-    internal void RefreshPhoneFramePreference() => _styleWindow?.SetPhoneFrameEnabled(PhoneFramePreference?.Invoke() ?? _phoneFrameEnabled);
+    internal void RefreshPhoneFramePreference() => _styleWindow?.SetPhoneFrameEnabled(PhoneFramePreference?.Invoke() ?? _phoneFramePreferred);
     internal bool CanShowPhoneFrame => _managedContent is null && _sessionHandle != 0 && DeviceFrame is not null;
     internal bool PhoneFrameEnabled => _phoneFrameEnabled;
+    internal bool PhoneFramePreferred => _phoneFramePreferred;
     internal event Action? PhoneFrameChanged;
+
+    private bool EffectivePhoneFrame => TemporaryBoolean(PreviewShortcutSetting.PhoneFrame, _phoneFramePreferred);
 
     internal bool SetPhoneFrame(bool enabled)
     {
+        if (enabled && !CanShowPhoneFrame) return false;
+        var previous = _phoneFramePreferred;
+        _phoneFramePreferred = enabled;
+        if (!ApplyPhoneFrame(EffectivePhoneFrame && CanShowPhoneFrame, notify: true))
+        {
+            _phoneFramePreferred = previous;
+            return false;
+        }
+        RefreshPhoneFramePreference();
+        return true;
+    }
+
+    private bool ApplyPhoneFrame(bool enabled, bool notify)
+    {
         if (_disposed || _handle == 0 || _sessionHandle == 0 || _managedContent is not null) return false;
+        if (_phoneFrameEnabled == enabled) return true;
         DeviceFrameHitTest? hitTest = null;
         if (enabled)
         {
@@ -1224,8 +1296,7 @@ internal sealed class NativePreviewWindow : IDisposable
         ResetTouchControlInput();
         _phoneFrameEnabled = enabled;
         _phoneFrameHitTest = hitTest;
-        _styleWindow?.SetPhoneFrameEnabled(enabled);
-        PhoneFrameChanged?.Invoke();
+        if (notify) PhoneFrameChanged?.Invoke();
         ApplyRotatedDimensions();
         return true;
     }
@@ -1234,9 +1305,10 @@ internal sealed class NativePreviewWindow : IDisposable
     {
         if (_phoneFrameEnabled && DeviceFrame is { } frame && !_isFullScreen && !IsZoomed(_handle) && input.Kind != PreviewPointerKind.Reset)
         {
+            var frameRotation = DeviceFrameRotation;
             if (input.Kind is PreviewPointerKind.ButtonDown or PreviewPointerKind.TouchDown or PreviewPointerKind.Wheel &&
-                _phoneFrameHitTest?.Contains(DeviceFrameRotation, input) != true) return;
-            input = PhoneFrameGeometry.MapPointer(frame, DeviceFrameRotation, input);
+                _phoneFrameHitTest?.Contains(frameRotation, input) != true) return;
+            input = PhoneFrameGeometry.MapPointer(frame, frameRotation, input);
         }
         _pointerInput?.Invoke(input);
     }
@@ -1255,19 +1327,28 @@ internal sealed class NativePreviewWindow : IDisposable
         _temporarySettings.Values.Where(value => value.Setting == setting)
             .OrderBy(value => value.Order).Select(value => (double?)value.Value).LastOrDefault();
 
+    private bool TemporaryBoolean(PreviewShortcutSetting setting, bool preference) =>
+        TemporaryValue(setting) is { } value ? value != 0 : preference;
+
+    private bool EffectiveOpaqueOnHover => TemporaryBoolean(PreviewShortcutSetting.OpaqueOnHover, _opaqueOnHover);
+
     private double EffectiveWindowOpacity => TemporaryValue(PreviewShortcutSetting.Opacity) is { } percent
-        ? percent / 100 : _opaqueOnHover && _isPointerOverWindow ? 1.0 : _windowOpacity;
+        ? percent / 100 : EffectiveOpaqueOnHover && _isPointerOverWindow ? 1.0 : _windowOpacity;
 
     internal Action? BeginTemporarySetting(SettingShortcutBinding binding)
     {
-        if (_disposed || _handle == 0 || !binding.IsValid) return null;
+        if (_disposed || _handle == 0 || !binding.IsValid ||
+            (binding.Setting == PreviewShortcutSetting.PhoneFrame && !CanShowPhoneFrame)) return null;
         var token = Guid.NewGuid();
         _temporarySettings[token] = (binding.Setting, binding.Value, ++_temporarySettingOrder);
-        bool Apply() => binding.Setting == PreviewShortcutSetting.Opacity
-            ? ApplyWindowOpacity(EffectiveWindowOpacity)
-            : SetWindowPos(_handle, (TemporaryValue(PreviewShortcutSetting.Topmost) is { } topmost
-                ? topmost != 0 : _isTopMost) ? HwndTopMost : HwndNoTopMost,
-                0, 0, 0, 0, SwpNoSize | SwpNoMove | SwpNoActivate);
+        bool Apply() => binding.Setting switch
+        {
+            PreviewShortcutSetting.Opacity => ApplyWindowOpacity(EffectiveWindowOpacity),
+            PreviewShortcutSetting.Topmost => ApplyTopmost(),
+            PreviewShortcutSetting.OpaqueOnHover => ApplyHoverOpacity(),
+            PreviewShortcutSetting.PhoneFrame => ApplyPhoneFrame(EffectivePhoneFrame && CanShowPhoneFrame, notify: false),
+            _ => false,
+        };
         if (!Apply()) { _temporarySettings.Remove(token); return null; }
         return () =>
         {
@@ -1280,12 +1361,19 @@ internal sealed class NativePreviewWindow : IDisposable
     {
         if (_disposed) return false;
         var wasEnabled = _opaqueOnHover;
-        var wasHovered = _isPointerOverWindow;
         _opaqueOnHover = enabled;
+        if (ApplyHoverOpacity()) return true;
+        _opaqueOnHover = wasEnabled;
+        return false;
+    }
+
+    private bool ApplyHoverOpacity()
+    {
+        var enabled = EffectiveOpaqueOnHover;
+        var wasHovered = _isPointerOverWindow;
         _isPointerOverWindow = enabled && IsPointerOverPreview();
         if (!ApplyWindowOpacity(EffectiveWindowOpacity))
         {
-            _opaqueOnHover = wasEnabled;
             _isPointerOverWindow = wasHovered;
             return false;
         }
@@ -1304,7 +1392,7 @@ internal sealed class NativePreviewWindow : IDisposable
 
     private void UpdateHoverState(bool hovered)
     {
-        if (_disposed || !_opaqueOnHover) return;
+        if (_disposed || !EffectiveOpaqueOnHover) return;
         _isPointerOverWindow = hovered;
         _ = ApplyWindowOpacity(EffectiveWindowOpacity);
     }
@@ -1350,13 +1438,15 @@ internal sealed class NativePreviewWindow : IDisposable
     {
         if (_disposed || _handle == 0) return;
         _isTopMost = !_isTopMost;
-        _ = SetWindowPos(_handle, (TemporaryValue(PreviewShortcutSetting.Topmost) is { } topmost
-            ? topmost != 0 : _isTopMost) ? HwndTopMost : HwndNoTopMost,
-            0, 0, 0, 0, SwpNoSize | SwpNoMove | SwpNoActivate);
+        _ = ApplyTopmost();
         UpdateContextMenuLabels();
         Log("independent_window_topmost",
             ("mode", WindowMode), ("enabled", _isTopMost));
     }
+
+    private bool ApplyTopmost() => SetWindowPos(_handle,
+        TemporaryBoolean(PreviewShortcutSetting.Topmost, _isTopMost) ? HwndTopMost : HwndNoTopMost,
+        0, 0, 0, 0, SwpNoSize | SwpNoMove | SwpNoActivate);
 
     private void ToggleFixedWindow()
     {
@@ -1523,7 +1613,7 @@ internal sealed class NativePreviewWindow : IDisposable
             ("mode", WindowMode), ("enabled", _cornersEnabled));
     }
 
-    private void Rotate(int delta)
+    internal void Rotate(int delta)
     {
         if (_handle == 0) return;
         _pointerInput?.Invoke(new PreviewPointerEventArgs(PreviewPointerKind.Reset, 0, 0, 0, 0));
@@ -1543,8 +1633,8 @@ internal sealed class NativePreviewWindow : IDisposable
         if (_phoneFrameEnabled && DeviceFrame is { } frame)
         {
             _aspectController.SetSourceDimensions(
-                (uint)((DeviceFrameRotation & 1) == 0 ? frame.FrameWidth : frame.FrameHeight),
-                (uint)((DeviceFrameRotation & 1) == 0 ? frame.FrameHeight : frame.FrameWidth));
+                (uint)((DefaultFrameRotation & 1) == 0 ? frame.FrameWidth : frame.FrameHeight),
+                (uint)((DefaultFrameRotation & 1) == 0 ? frame.FrameHeight : frame.FrameWidth));
             return;
         }
         if ((_rotation & 1) != 0)
@@ -1586,6 +1676,8 @@ internal sealed class NativePreviewWindow : IDisposable
             catch (Exception ex) { Log("detach_preview_failed", ("error", ex.Message)); }
             _attached = false;
         }
+        _ = RemovePropW(_handle, PendingPreviewGeometry);
+        _ = RemovePropW(_handle, AppliedPreviewGeometry);
         if (_managedContentRoot is not null)
         {
             if (_managedContent is not null)
@@ -1694,6 +1786,9 @@ internal sealed class NativePreviewWindow : IDisposable
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool SetPropW(nint window, string name, nint data);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern nint GetPropW(nint window, string name);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern nint RemovePropW(nint window, string name);

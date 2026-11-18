@@ -17,20 +17,32 @@ internal sealed class DeviceAppearanceCache
     private bool _dirty;
     internal DeviceAppearanceCache(string path) => _path = path;
 
+    internal DeviceAppearance ForProjection(DeviceViewModel device, DeviceBindingManager bindings)
+    {
+        var appearance = device.Appearance;
+        if (!device.IsWireless || string.IsNullOrWhiteSpace(device.ProductType) ||
+            !string.IsNullOrWhiteSpace(appearance.EnclosureColor) ||
+            !string.IsNullOrWhiteSpace(appearance.HousingColor)) return appearance;
+        var wiredId = bindings.FindByIdentity(DeviceIdentityType.AirPlay, device.Udid)?.WiredIdentity?.Udid;
+        if (string.IsNullOrWhiteSpace(wiredId)) return appearance;
+
+        lock (_gate)
+        {
+            return ReadEntries().TryGetValue(CacheKey(wiredId), out var saved) &&
+                saved is { Appearance: { } savedAppearance } && saved.ProductType == device.ProductType
+                ? savedAppearance : appearance;
+        }
+    }
+
     internal DeviceAppearance Remember(string? identity, string? model, DeviceAppearance current)
     {
         if (string.IsNullOrWhiteSpace(identity) || string.IsNullOrWhiteSpace(model) ||
             DeviceViewModel.IsWirelessUdid(identity) || DeviceViewModel.IsMediaCastUdid(identity)) return current;
         lock (_gate)
         {
-            if (_entries is null)
-            {
-                try { _entries = JsonSerializer.Deserialize<Dictionary<string, Entry>>(File.ReadAllText(_path)); }
-                catch (Exception error) when (error is IOException or JsonException or UnauthorizedAccessException) { }
-                _entries ??= new();
-            }
-            var key = identity.Replace("-", "").ToLowerInvariant();
-            _entries.TryGetValue(key, out var saved);
+            var entries = ReadEntries();
+            var key = CacheKey(identity);
+            entries.TryGetValue(key, out var saved);
             if (saved?.ProductType != model || saved.Appearance is null) saved = null;
             var hasHousingRead = !string.IsNullOrWhiteSpace(current.EnclosureColor) || !string.IsNullOrWhiteSpace(current.HousingColor);
             var merged = new DeviceAppearance(
@@ -41,7 +53,7 @@ internal sealed class DeviceAppearanceCache
             var entry = new Entry(model, merged);
             if (entry != saved)
             {
-                _entries[key] = entry;
+                entries[key] = entry;
                 _dirty = true;
             }
             if (_dirty)
@@ -49,7 +61,7 @@ internal sealed class DeviceAppearanceCache
                 try
                 {
                     Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(_path))!);
-                    File.WriteAllText(_path + ".tmp", JsonSerializer.Serialize(_entries));
+                    File.WriteAllText(_path + ".tmp", JsonSerializer.Serialize(entries));
                     File.Move(_path + ".tmp", _path, overwrite: true);
                     _dirty = false;
                 }
@@ -61,4 +73,16 @@ internal sealed class DeviceAppearanceCache
             return merged;
         }
     }
+
+    private Dictionary<string, Entry> ReadEntries()
+    {
+        if (_entries is null)
+        {
+            try { _entries = JsonSerializer.Deserialize<Dictionary<string, Entry>>(File.ReadAllText(_path)); }
+            catch (Exception error) when (error is IOException or JsonException or UnauthorizedAccessException) { }
+        }
+        return _entries ??= new();
+    }
+
+    private static string CacheKey(string identity) => identity.Replace("-", "").ToLowerInvariant();
 }

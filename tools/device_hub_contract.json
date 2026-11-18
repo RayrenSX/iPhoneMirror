@@ -31,6 +31,11 @@
       "public": true,
       "timeout": 35
     },
+    "restart_with_metal_hud": {
+      "readOnly": false,
+      "public": true,
+      "timeout": 35
+    },
     "list_processes": {
       "readOnly": true,
       "public": true,

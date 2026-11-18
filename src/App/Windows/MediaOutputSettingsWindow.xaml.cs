@@ -363,7 +363,7 @@ public partial class MediaOutputSettingsWindow : IPhoneMirror.UI.Controls.Rounde
 
     private void OnCloseClick(object sender, RoutedEventArgs e) => Close();
 
-    private async Task PromptToSaveRecordingAsync(bool force = false)
+    internal async Task PromptToSaveRecordingAsync(bool force = false)
     {
         if (_savePromptOpen || _discardPromptOpen || !IsLoaded || _viewModel.IsRecordingMediaOutput) return;
         var pending = _viewModel.PendingRecordingPath;

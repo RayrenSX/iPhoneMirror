@@ -31,6 +31,7 @@ internal sealed class DeviceBindingManager
     private readonly string _path;
     private readonly Dictionary<Guid, DeviceBindingProfile> _profiles = [];
     internal Exception? LoadError { get; private set; }
+    internal event Action? ProfilesChanged;
     private readonly bool _readOnly;
 
     internal DeviceBindingManager(string? path = null, bool readOnly = false)
@@ -53,6 +54,7 @@ internal sealed class DeviceBindingManager
             _profiles.Clear();
             foreach (var profile in snapshot.Profiles) _profiles[profile.Id] = profile;
         }
+        ProfilesChanged?.Invoke();
     }
 
     /// <summary>Creates a usable profile from its first observed identity.
@@ -279,6 +281,7 @@ internal sealed class DeviceBindingManager
         if (_readOnly || !TryPersist(updated.Values)) return false;
         _profiles.Clear();
         foreach (var profile in updated.Values) _profiles.Add(profile.Id, profile);
+        ProfilesChanged?.Invoke();
         return true;
     }
 

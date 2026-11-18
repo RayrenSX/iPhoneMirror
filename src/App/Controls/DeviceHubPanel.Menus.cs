@@ -9,6 +9,7 @@ namespace IPhoneMirror.App.Controls;
 internal sealed partial class DeviceHubPanel
 {
     internal Action<string> CopyText { get; set; } = Clipboard.SetText;
+    private ContextMenu? _rowMenu;
 
     private void InitializeMenus()
     {
@@ -16,12 +17,28 @@ internal sealed partial class DeviceHubPanel
         {
             // The menu must exist before the first ContextMenuOpening event.
             list.ContextMenu = NewMenu();
-            list.PreviewMouseRightButtonDown += (_, e) => SelectContextRow(list, e.OriginalSource as DependencyObject);
-            list.ContextMenuOpening += (_, _) =>
+            list.AddHandler(ScrollViewer.ScrollChangedEvent, new ScrollChangedEventHandler((_, e) =>
             {
-                var menu = PopulateListMenu(list);
-                menu.PlacementTarget = list;
-                menu.Placement = PlacementMode.MousePoint;
+                if ((e.HorizontalChange != 0 || e.VerticalChange != 0) &&
+                    _rowMenu?.PlacementTarget is { } anchor &&
+                    (ReferenceEquals(anchor, list) || FindRowContainer(list, anchor) is not null))
+                    _rowMenu.IsOpen = false;
+            }));
+            list.ContextMenuOpening += (_, e) =>
+            {
+                var fromKeyboard = e.CursorLeft == -1 && e.CursorTop == -1;
+                var item = FindRowContainer(list, e.OriginalSource as DependencyObject);
+                if (item is not null || !fromKeyboard)
+                    list.SelectedItem = item is null ? null : list.ItemContainerGenerator.ItemFromContainer(item);
+                else if (list.SelectedItem is { } selected)
+                    item = list.ItemContainerGenerator.ContainerFromItem(selected) as ListBoxItem;
+
+                if (fromKeyboard && list.IsEnabled)
+                {
+                    e.Handled = true;
+                    OpenAnchoredMenu(list, (FrameworkElement?)item ?? list, list.SelectedItem as HubRow);
+                }
+                else PopulateListMenu(list);
             };
         }
         AppsList.SetResourceReference(ToolTipProperty, "DeviceHubPanelAppHint");
@@ -34,13 +51,43 @@ internal sealed partial class DeviceHubPanel
         foreach (var list in new[] { AppsList, ProfilesList, FilesList })
         {
             if (ItemsControl.ContainerFromElement(list, button) is not ListBoxItem item) continue;
-            CloseMenus();
-            list.SelectedItem = list.ItemContainerGenerator.ItemFromContainer(item);
-            var menu = PopulateListMenu(list);
-            menu.PlacementTarget = button; menu.Placement = PlacementMode.Bottom;
-            menu.IsOpen = true;
+            if (list.ItemContainerGenerator.ItemFromContainer(item) is not HubRow row) return;
+            list.SelectedItem = row;
+            OpenAnchoredMenu(list, button, row);
             break;
         }
+    }
+
+    private void OpenAnchoredMenu(ListBox list, FrameworkElement anchor, HubRow? row)
+    {
+        CloseMenus();
+        // A separate menu keeps WPF's list-level cursor placement from overriding the anchor.
+        var menu = PopulateMenu(list, NewMenu(), row);
+        menu.PlacementTarget = anchor;
+        menu.Placement = PlacementMode.Bottom;
+        if (anchor is Button)
+        {
+            menu.Placement = PlacementMode.Custom;
+            menu.CustomPopupPlacementCallback = static (popup, target, _) =>
+            [
+                new(new Point(target.Width - popup.Width, target.Height), PopupPrimaryAxis.Horizontal),
+                new(new Point(target.Width - popup.Width, -popup.Height), PopupPrimaryAxis.Horizontal),
+            ];
+        }
+        anchor.Unloaded += CloseOnAnchorUnloaded;
+        anchor.DataContextChanged += CloseOnAnchorChanged;
+        menu.Closed += (_, _) =>
+        {
+            anchor.Unloaded -= CloseOnAnchorUnloaded;
+            anchor.DataContextChanged -= CloseOnAnchorChanged;
+            menu.PlacementTarget = null;
+            if (ReferenceEquals(_rowMenu, menu)) _rowMenu = null;
+        };
+        _rowMenu = menu;
+        menu.IsOpen = true;
+
+        void CloseOnAnchorUnloaded(object sender, RoutedEventArgs args) => menu.IsOpen = false;
+        void CloseOnAnchorChanged(object sender, DependencyPropertyChangedEventArgs args) => menu.IsOpen = false;
     }
 
     private static bool IsRowActionSource(DependencyObject source)
@@ -58,19 +105,19 @@ internal sealed partial class DeviceHubPanel
         return menu;
     }
 
-    private void SelectContextRow(ListBox list, DependencyObject? origin)
-    {
-        // A right click acts on the pointed row, without an extra left click.
-        // Blank space must never reuse an earlier selection for removal.
-        list.SelectedItem = origin is not null && ItemsControl.ContainerFromElement(list, origin) is ListBoxItem item
-            ? list.ItemContainerGenerator.ItemFromContainer(item) : null;
-    }
+    private static ListBoxItem? FindRowContainer(ListBox list, DependencyObject? origin) => origin is null
+        ? null : ItemsControl.ContainerFromElement(list, origin) as ListBoxItem;
 
-    private ContextMenu PopulateListMenu(ListBox list)
+    private static HubRow? DoubleClickedRow(ListBox list, MouseButtonEventArgs e) =>
+        e.ChangedButton == MouseButton.Left && e.OriginalSource is DependencyObject origin && !IsRowActionSource(origin) &&
+        FindRowContainer(list, origin) is { } item ? list.ItemContainerGenerator.ItemFromContainer(item) as HubRow : null;
+
+    private ContextMenu PopulateListMenu(ListBox list) =>
+        PopulateMenu(list, list.ContextMenu!, list.SelectedItem as HubRow);
+
+    private ContextMenu PopulateMenu(ListBox list, ContextMenu menu, HubRow? row)
     {
-        var menu = list.ContextMenu!;
         menu.Items.Clear();
-        var row = list.SelectedItem as HubRow;
         var process = Option(AppFilter) == "processes";
         var generation = _generation;
         var device = _device;
@@ -115,7 +162,11 @@ internal sealed partial class DeviceHubPanel
         {
             if (row is not null)
             {
-                if (!process) Action("PanelOpenApp", "app-launch", true);
+                if (!process)
+                {
+                    Action("PanelOpenApp", "app-launch", true);
+                    Action("PanelRestartMetalHud", "app-metal-hud-restart", true);
+                }
                 Copy(process ? "PanelCopyPid" : "PanelCopyBundleId");
                 AddMenuSeparator(menu);
                 Action(process ? "Terminate" : "PanelUninstall", "app-remove", true);
@@ -150,6 +201,8 @@ internal sealed partial class DeviceHubPanel
         return menu;
     }
 
+    private bool CanReconnectFromHeader => _hasConnected && !_ready && !_connecting && CanConnect(_device);
+
     private void OnMoreClick(object sender, RoutedEventArgs e)
     {
         CloseMenus();
@@ -170,10 +223,10 @@ internal sealed partial class DeviceHubPanel
         if (_developerMode && _page == 2) Action("PanelInstallProfile", "profile-install", available);
         if (_page == 3 && Option(FileRoot) == "crashes") Action("ExportCrashes", "file-export", available);
         if (_developerMode && _page == 4) Action("SaveLog", "log-save", available && LogText.Text.Length > 0);
-        if (!_ready && _connectionFailed && _canConnect)
+        if (CanReconnectFromHeader)
         {
             if (menu.Items.Count > 0) AddMenuSeparator(menu);
-            Action("PanelRetryConnection", "prepare", !_busy);
+            Action(_connectionFailed ? "PanelRetryConnection" : "PanelConnectControl", "prepare", !_busy);
         }
         if (menu.Items.Count == 0) return;
         HeaderMore.ContextMenu = menu;
@@ -199,6 +252,7 @@ internal sealed partial class DeviceHubPanel
 
     private void CloseMenus()
     {
+        if (_rowMenu is { } rowMenu) rowMenu.IsOpen = false;
         foreach (var menu in new[] { AppsList.ContextMenu, ProfilesList.ContextMenu, FilesList.ContextMenu, HeaderMore.ContextMenu })
             if (menu is not null) menu.IsOpen = false;
     }

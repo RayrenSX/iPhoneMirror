@@ -61,6 +61,8 @@
 | 外接键盘状态 | [连接注册、定时更新与取消清理审查](diagnostics/keyboard-attach-review-20261116.md) |
 | 有线恢复 | [WIRED_RECOVERY_FIX](WIRED_RECOVERY_FIX.md) · [WIRED_RECOVERY_REAUDIT](WIRED_RECOVERY_REAUDIT.md) · [WIRED_RECOVERY_LATENCY](WIRED_RECOVERY_LATENCY.md) · [WIRED_CONTROL_COUNTDOWN_FIX](WIRED_CONTROL_COUNTDOWN_FIX.md) |
 | 近期反控与预览排查 | [API 截图与反控稳定性](diagnostics/api-screenshot-stability-20261115.md) · [最后一次完整重试](diagnostics/wired-final-retry-20261115.md) · [预览黑屏](diagnostics/preview-black-screen-20261115.md) |
+| 原画横竖屏与方形画布 | [能力协商、实际帧和有效区域调查](diagnostics/original-quality-rotation-geometry-20261118.zh-CN.md) |
+| Metal 性能 HUD | [应用重启接入、自动化验证及 USB／AirPlay 实机边界](diagnostics/metal-hud-integration-20261118.zh-CN.md) |
 | 启动与设置绑定 | [隐藏启动绑定](diagnostics/hidden-startup-binding-review-20261115.md) · [托盘启动设置页](diagnostics/tray-startup-settings-20261115.md) |
 | 启动布局闪退 | [v1.8.5-pre5 Grid 数组越界复现与修复](diagnostics/startup-grid-crash-20261116.md) |
 | 设备实验室调研 | [rPlayHub 调研记录](RPLAYHUB_RESEARCH_2026-11-15.zh-CN.md) |

@@ -2,6 +2,7 @@
 
 #include "Capture/ICaptureSession.h"
 #include "IpcProtocol.h"
+#include "Media/ScreenContentGeometry.h"
 
 #include <atomic>
 #include <chrono>
@@ -11,6 +12,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <span>
 #include <string>
 #include <thread>
@@ -119,9 +121,13 @@ private:
     bool connected_{};
     wireless::MirrorSenderState mirror_state_{wireless::MirrorSenderState::Active};
     std::uint32_t source_width_{}, source_height_{}, output_width_{}, output_height_{};
+    media::ScreenContentGeometry screen_content_geometry_;
+    std::optional<media::ScreenContentRect> active_screen_content_;
+    std::uint32_t active_screen_canvas_width_{}, active_screen_canvas_height_{};
     std::uint32_t attachments_{};
     Snapshot snapshot_;
     std::shared_ptr<const media::DecodedFrame> latest_frame_;
+    std::uint64_t landscape_run_{};
     std::atomic_uint32_t target_fps_{60};
     std::atomic_bool play_audio_{true};
     std::atomic<float> local_audio_volume_{1.0F};
@@ -133,6 +139,7 @@ private:
     std::uint32_t audio_sample_rate_{};
     std::uint16_t audio_channels_{};
     std::uint16_t audio_bits_{};
+    bool audio_has_video_{};
     bool audio_renderer_failed_{};
     std::chrono::steady_clock::time_point started_at_{std::chrono::steady_clock::now()};
     std::chrono::steady_clock::time_point fps_sample_time_{started_at_};

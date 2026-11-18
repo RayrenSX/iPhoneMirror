@@ -19,9 +19,33 @@ internal sealed record DeviceFrameProfile(string Id, string Name, string[] Produ
         {
             if (_pixels?.TryGetTarget(out var cached) == true) return cached;
             var pixels = ReadPixels(Id + ".png", PixelFormats.Pbgra32, 4);
+            if (Id == "iphone-17")
+            {
+                // The visible span of each row excludes the metal above and
+                // beside rounded screen corners, while enclosing the island.
+                var mask = Mask;
+                for (int y = 0; y < FrameHeight; y++)
+                {
+                    var row = y * FrameWidth;
+                    var left = Array.FindIndex(mask, row, FrameWidth, IsScreen);
+                    if (left < 0) left = row + FrameWidth;
+                    var right = Array.FindLastIndex(mask, row + FrameWidth - 1, FrameWidth, IsScreen);
+                    DarkenHousing(pixels, row, left);
+                    if (right >= row) DarkenHousing(pixels, right + 1, row + FrameWidth);
+                }
+            }
             _pixels = new(pixels);
             return pixels;
         }
+    }
+
+    private static bool IsScreen(byte coverage) => coverage != 0;
+
+    private static void DarkenHousing(byte[] pixels, int start, int end)
+    {
+        for (int pixel = start * 4; pixel < end * 4; pixel += 4)
+        for (int channel = 0; channel < 3; channel++)
+            pixels[pixel + channel] = (byte)((pixels[pixel + channel] * 9 + 10) / 20);
     }
     internal byte[] Mask
     {

@@ -48,6 +48,12 @@ var diagnosticTestRoot = args is ["--component-public-uxplay", var componentPubl
 Environment.SetEnvironmentVariable("IPHONE_MIRROR_APP_LOG_DIRECTORY",
     diagnosticTestRoot, EnvironmentVariableTarget.Process);
 
+if (args is ["--diagnostic-log-maintenance"])
+{
+    await DiagnosticLogMaintenanceTests.RunAsync();
+    return;
+}
+
 if (args is ["--updater-handoff"])
 {
     await UpdaterHandoffTests.RunAsync(verifyFailureDialog: true);
@@ -4304,6 +4310,7 @@ Equal(0, DeviceCornerProfile.Rectangular.GetGdiRadius(1206),
     "rectangular fallback radius");
 
 WirelessRuntimeAvailabilityTests.Run();
+WirelessOriginalCapabilityTests.Run();
 await AppProxyPolicyTests.RunAsync();
 
 Equal("iPhoneMirror AirPlay",
@@ -6065,6 +6072,7 @@ Equal(WirelessStallRecoveryAction.None,
 ExplorerWebDavLocksTests.Run();
 await ExplorerWebDavTests.RunAsync();
 await ExplorerFileStoreTests.Run();
+await DiagnosticLogMaintenanceTests.RunAsync();
 Console.WriteLine("App logic tests passed.");
 if (Directory.Exists(diagnosticTestRoot))
     Directory.Delete(diagnosticTestRoot, recursive: true);

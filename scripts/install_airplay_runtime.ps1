@@ -22,7 +22,8 @@ $receiverText = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($receiv
 foreach ($marker in @('IPHONE_MIRROR_FFMPEG_AAC_ELD','IPHONE_MIRROR_VIDEO_STATE',
         'IPHONE_MIRROR_VIDEO_GEOMETRY','IPHONE_MIRROR_AUDIO_CODEC_NEGOTIATION',
         'IPHONE_MIRROR_ORIENTATION_ACCESS_UNIT','IPHONE_MIRROR_MIRROR_CTR_SKIP',
-        'IPHONE_MIRROR_MIRROR_SETUP_RESTART','IPHONE_MIRROR_VIDEO_DIAG 32')) {
+        'IPHONE_MIRROR_MIRROR_SETUP_RESTART','IPHONE_MIRROR_VIDEO_DIAG 32',
+        'Mirror TCP keepalive configured')) {
     if (-not $receiverText.Contains($marker)) { throw "Receiver capability is missing: $marker" }
 }
 $assets = @(@{ Name = 'airplay2dll.dll'; Source = $receiver })
@@ -46,6 +47,8 @@ $build.ReceiverPatchSha256 = (Get-FileHash -LiteralPath (
     Join-Path $vendored 'patches\airplay-upstream-125.patch')).Hash.ToLowerInvariant()
 $additionalPatches = @{}
 foreach ($name in @('airplay-hevc.patch', 'airplay-hevc-config.h',
+        'Apply-DiagnosticMirrorCodecPatch.ps1', 'airplay-mirror-codec-policy.h',
+        'Apply-AirPlayDisconnectGracePatch.ps1',
         'Apply-AirPlayRequestPolicyPatch.ps1', 'airplay-request-policy.h', 'airplay-play-request.h',
         'Apply-AirPlayControlPatch.ps1', 'airplay-control.h', 'airplay-control-httpd.h', 'airplay-control-media.h',
         'airplay-scrub-request.h')) {

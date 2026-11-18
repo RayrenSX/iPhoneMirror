@@ -1737,11 +1737,14 @@ BluetoothとAssistiveTouchが必要です。
     <system:String x:Key="SettingsApplyBluetoothSensitivity">感度を適用</system:String>
     <system:String x:Key="SettingsGroupPendingHint">このグループに未適用の変更があります。</system:String>
     <system:String x:Key="SettingShortcutsTitle">その他の設定のショートカット</system:String>
-    <system:String x:Key="SettingShortcutsDescription">設定ごとにショートカットを割り当て、切り替えまたは長押しを選択します。独立プレビューに適用され、逆操作は不要です。</system:String>
+    <system:String x:Key="SettingShortcutsDescription">独立したプレビューウィンドウにショートカットを割り当てます。録画、スクリーンショット、全画面はメインウィンドウでも使えます。ウィンドウ設定は切り替えまたは押している間だけ適用できます。</system:String>
+    <system:String x:Key="SettingShortcutsRecording">画面録画を開始・停止</system:String>
+    <system:String x:Key="SettingShortcutsMuteWindow">このウィンドウのミュートを切り替え</system:String>
     <system:String x:Key="SettingShortcutsSetting">設定項目</system:String>
     <system:String x:Key="SettingShortcutsRemove">ショートカットを削除</system:String>
     <system:String x:Key="SettingShortcutsHeldValue">押している間の不透明度</system:String>
-    <system:String x:Key="SettingShortcutsHeldEnabled">押している間は最前面に表示</system:String>
+    <system:String x:Key="SettingShortcutsHeldEnabled">押している間は有効</system:String>
+    <system:String x:Key="SettingShortcutsPhoneFrame">スマートフォンのフレームを表示</system:String>
     <system:String x:Key="SettingShortcutsAdd">設定のショートカットを追加</system:String>
     <system:String x:Key="SettingShortcutsKey">ショートカット</system:String>
     <system:String x:Key="SettingShortcutsTrigger">操作方法</system:String>
@@ -1750,7 +1753,7 @@ BluetoothとAssistiveTouchが必要です。
     <system:String x:Key="SettingShortcutsHoldHint">押している間だけ適用し、離すかフォーカスを失うと元に戻ります。</system:String>
     <system:String x:Key="SettingShortcutsToggleHint">一度押すと適用し、もう一度押すと元に戻ります。キーを離したり別のウィンドウに切り替えても維持します。</system:String>
     <system:String x:Key="SettingShortcutsToggleValue">切り替え後の不透明度</system:String>
-    <system:String x:Key="SettingShortcutsToggleEnabled">切り替え後は最前面に表示</system:String>
+    <system:String x:Key="SettingShortcutsToggleEnabled">切り替え後は有効</system:String>
     <sys:String x:Key="ToolbarCustomize">上部ツールバーのカスタマイズ</sys:String>
     <sys:String x:Key="ToolbarEarlier">前へ移動</sys:String>
     <sys:String x:Key="ToolbarLater">後ろへ移動</sys:String>
@@ -1936,7 +1939,9 @@ BluetoothとAssistiveTouchが必要です。
     <sys:String x:Key="DeviceHubPanelOffline">デバイスの準備ができていません</sys:String>
     <sys:String x:Key="DeviceHubPanelReconnectHint">iPhone を接続してロックを解除し、このコンピュータを信頼してから再試行してください。</sys:String>
     <sys:String x:Key="DeviceHubPanelConnectTitle">デバイスに接続しています</sys:String>
-    <sys:String x:Key="DeviceHubPanelConnectHint">デバイスを選ぶと自動で接続します。iPhone のロックを解除し、初回は信頼とデバイスの登録を完了してください。一部の機能にはデベロッパモードが必要です。</sys:String>
+    <sys:String x:Key="DeviceHubPanelConnectRequired">この iPhone に接続</sys:String>
+    <sys:String x:Key="DeviceHubPanelConnectControl">リモート操作を有効にして接続</sys:String>
+    <sys:String x:Key="DeviceHubPanelConnectHint">App やファイルの管理にはリモート操作の接続を使います。iPhone のロックを解除し、必要に応じてこのコンピュータを信頼してデバイスを登録してください。</sys:String>
     <sys:String x:Key="DeviceHubPanelConnecting">接続中…</sys:String>
     <sys:String x:Key="DeviceHubPanelConnectFailed">デバイスに接続できませんでした</sys:String>
     <sys:String x:Key="DeviceHubPanelConnectRetryHint">iPhone のロックを解除してこのコンピュータを信頼し、デバイスの登録またはデベロッパモードの設定を完了してから再試行してください。</sys:String>
@@ -2032,6 +2037,9 @@ BluetoothとAssistiveTouchが必要です。
     <sys:String x:Key="DeviceHubPanelMore">その他の操作</sys:String>
     <sys:String x:Key="DeviceHubPanelRecoveryShort">再接続後に自動更新します。デバイスの切り替えは不要です。</sys:String>
     <sys:String x:Key="DeviceHubPanelOpenApp">開く</sys:String>
+    <sys:String x:Key="DeviceHubPanelRestartMetalHud">Metal パフォーマンス HUD で再起動</sys:String>
+    <sys:String x:Key="DeviceHubPanelRestartMetalHudWarning">選択した App を終了して再起動します。未保存の内容が失われる可能性があります。Metal パフォーマンス HUD は対応する App でのみ表示されます。</sys:String>
+    <sys:String x:Key="DeviceHubPanelMetalHudRestarted">{0} を Metal パフォーマンス HUD で再起動するよう要求しました。端末またはミラーリング画面で HUD の表示を確認してください。</sys:String>
     <sys:String x:Key="DeviceHubPanelCopyBundleId">Bundle ID をコピー</sys:String>
     <sys:String x:Key="DeviceHubPanelCopyPid">プロセス ID をコピー</sys:String>
     <sys:String x:Key="DeviceHubPanelCopyIdentifier">識別子をコピー</sys:String>
