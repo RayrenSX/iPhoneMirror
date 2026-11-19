@@ -2116,7 +2116,9 @@
     <sys:String x:Key="DeviceHubExplorerOpenFailedFormat">無法開啟對應位置：{0}</sys:String>
     <sys:String x:Key="DeviceHubSharedDocuments">應用程式文件</sys:String>
     <system:String x:Key="IndependentWindowLayoutTitle">獨立視窗啟動版面</system:String>
-    <system:String x:Key="IndependentWindowLayoutHelp">以螢幕像素為所選裝置設定啟動版面。將一組座標或尺寸留空即可使用自動版面。</system:String>
+    <system:String x:Key="IndependentWindowLayoutUseLast">每次開啟時以上次版面為準</system:String>
+    <system:String x:Key="IndependentWindowLayoutUseLastHelp">恢復上次關閉前的位置、大小及固定狀態。沒有上次版面時會自動配置。</system:String>
+    <system:String x:Key="IndependentWindowLayoutHelp">自訂座標和大小以螢幕像素為單位。留空一組即可自動定位或調整大小。</system:String>
     <system:String x:Key="IndependentWindowLayoutX">X 座標</system:String>
     <system:String x:Key="IndependentWindowLayoutY">Y 座標</system:String>
     <system:String x:Key="IndependentWindowLayoutWidth">闊度</system:String>

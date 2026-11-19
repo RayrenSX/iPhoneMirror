@@ -12,3 +12,6 @@ internal sealed record IndependentWindowLayout(int? X = null, int? Y = null,
         Y is null or (>= -1_000_000 and <= 1_000_000) &&
         Width is null or (>= 96 and <= 32767) && Height is null or (>= 96 and <= 32767);
 }
+
+internal sealed record IndependentWindowLayoutHistory(bool UseLastLayout = false,
+    IndependentWindowLayout? LastLayout = null);

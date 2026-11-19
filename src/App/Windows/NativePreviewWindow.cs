@@ -57,6 +57,7 @@ internal sealed class NativePreviewWindow : IDisposable
     private const int WmSysKeyUp = 0x0105;
     private const int WmSysCommand = 0x0112;
     private const int WmDpiChanged = 0x02E0;
+    private const int WmWindowPosChanged = 0x0047;
     private const int ScSize = 0xF000;
     private const int ScMove = 0xF010;
     private const int ScMaximize = 0xF030;
@@ -273,6 +274,7 @@ internal sealed class NativePreviewWindow : IDisposable
         Interval = TimeSpan.FromMilliseconds(80),
     };
     private WindowRect _restoreRectangle;
+    private WindowRect? _lastNormalBounds;
     private nint _restoreStyle;
 
     internal bool IsFullScreen => _isFullScreen;
@@ -493,6 +495,7 @@ internal sealed class NativePreviewWindow : IDisposable
     }
 
     internal event EventHandler? Closed;
+    internal IndependentWindowLayout? ClosedLayout { get; private set; }
     internal event Action<bool>? ActivationChanged;
     internal ulong SessionHandle => _sessionHandle;
     internal nint Handle => _handle;
@@ -682,9 +685,18 @@ internal sealed class NativePreviewWindow : IDisposable
             _ = SetWindowPos(_handle, HwndNoTopMost, 0, 0, 0, 0,
                 SwpNoSize | SwpNoMove | SwpNoActivate);
         }
+        ObserveNormalBounds();
         Log("independent_window_initial_layout",
             ("mode", WindowMode), ("bounds_applied", boundsApplied),
             ("top_most", _isTopMost));
+    }
+
+    private void ObserveNormalBounds()
+    {
+        if (_managedContent is null && !_disposed && !_isFullScreen && _handle != 0 &&
+            IsWindowVisible(_handle) && !IsIconic(_handle) && !IsZoomed(_handle) &&
+            GetWindowRect(_handle, out var bounds))
+            _lastNormalBounds = bounds;
     }
 
     private bool ApplyInitialLayout(IndependentWindowLayout? layout)
@@ -756,6 +768,7 @@ internal sealed class NativePreviewWindow : IDisposable
     internal void HideForShutdown()
     {
         if (_disposed || _handle == 0) return;
+        ObserveNormalBounds();
         _styleWindow?.Close();
         _contextMenu.IsOpen = false;
         _contextMenu.PlacementTarget = null;
@@ -1155,6 +1168,9 @@ internal sealed class NativePreviewWindow : IDisposable
             case WmDpiChanged:
                 _source.Dispatcher.BeginInvoke(DispatcherPriority.Loaded,
                     _aspectController.Reflow);
+                break;
+            case WmWindowPosChanged:
+                ObserveNormalBounds();
                 break;
         }
         return 0;
@@ -1727,6 +1743,13 @@ internal sealed class NativePreviewWindow : IDisposable
     public void Dispose()
     {
         if (_disposed) return;
+        ObserveNormalBounds();
+        if ((_isFullScreen ? _restoreRectangle : _lastNormalBounds) is { } bounds)
+        {
+            var layout = new IndependentWindowLayout(bounds.Left, bounds.Top,
+                bounds.Right - bounds.Left, bounds.Bottom - bounds.Top, _isFixed);
+            if (layout.IsValid) ClosedLayout = layout;
+        }
         Log("independent_window_dispose_begin",
             ("mode", WindowMode), ("attached", _attached),
             ("full_screen", _isFullScreen));

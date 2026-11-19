@@ -2577,32 +2577,49 @@
                                                 </Style>
                                             </TextBlock.Style>
                                         </TextBlock>
-                                        <TextBlock Text="{DynamicResource IndependentWindowLayoutHelp}" Style="{StaticResource DetailLabel}"
-                                                   TextWrapping="Wrap" Margin="0,4,0,0"/>
-                                        <StackPanel x:Name="IndependentWindowLayoutEditor" IsEnabled="False" Margin="0,6,0,0">
-                                            <UniformGrid Columns="2">
-                                                <StackPanel Margin="0,0,4,6">
-                                                    <TextBlock Text="{DynamicResource IndependentWindowLayoutX}" Style="{StaticResource DetailLabel}"/>
-                                                    <TextBox x:Name="IndependentLayoutX" Style="{StaticResource ReceiverTextBox}" MaxLength="8"
-                                                             AutomationProperties.Name="{DynamicResource IndependentWindowLayoutX}"/>
-                                                </StackPanel>
-                                                <StackPanel Margin="4,0,0,6">
-                                                    <TextBlock Text="{DynamicResource IndependentWindowLayoutY}" Style="{StaticResource DetailLabel}"/>
-                                                    <TextBox x:Name="IndependentLayoutY" Style="{StaticResource ReceiverTextBox}" MaxLength="8"
-                                                             AutomationProperties.Name="{DynamicResource IndependentWindowLayoutY}"/>
-                                                </StackPanel>
-                                                <StackPanel Margin="0,0,4,0">
-                                                    <TextBlock Text="{DynamicResource IndependentWindowLayoutWidth}" Style="{StaticResource DetailLabel}"/>
-                                                    <TextBox x:Name="IndependentLayoutWidth" Style="{StaticResource ReceiverTextBox}" MaxLength="5"
-                                                             AutomationProperties.Name="{DynamicResource IndependentWindowLayoutWidth}"/>
-                                                </StackPanel>
-                                                <StackPanel Margin="4,0,0,0">
-                                                    <TextBlock Text="{DynamicResource IndependentWindowLayoutHeight}" Style="{StaticResource DetailLabel}"/>
-                                                    <TextBox x:Name="IndependentLayoutHeight" Style="{StaticResource ReceiverTextBox}" MaxLength="5"
-                                                             AutomationProperties.Name="{DynamicResource IndependentWindowLayoutHeight}"/>
-                                                </StackPanel>
-                                            </UniformGrid>
-                                            <CheckBox x:Name="IndependentLayoutFixed" Content="{DynamicResource IndependentWindowLayoutFixed}" Margin="0,8,0,0"/>
+                                        <StackPanel x:Name="IndependentWindowLayoutEditor" IsEnabled="False" Margin="0,8,0,0">
+                                            <CheckBox x:Name="IndependentLayoutUseLast"
+                                                      Click="OnIndependentLayoutModeClick"
+                                                      AutomationProperties.Name="{DynamicResource IndependentWindowLayoutUseLast}"
+                                                      ToolTip="{DynamicResource IndependentWindowLayoutUseLastHelp}">
+                                                <TextBlock Text="{DynamicResource IndependentWindowLayoutUseLast}" TextWrapping="Wrap"/>
+                                            </CheckBox>
+                                            <StackPanel x:Name="IndependentLayoutCustomFields" Margin="0,8,0,0">
+                                                <StackPanel.Style>
+                                                    <Style TargetType="StackPanel">
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsChecked, ElementName=IndependentLayoutUseLast}" Value="True">
+                                                                <Setter Property="IsEnabled" Value="False"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </StackPanel.Style>
+                                                <TextBlock Text="{DynamicResource IndependentWindowLayoutHelp}" Style="{StaticResource DetailLabel}"
+                                                           TextWrapping="Wrap" Margin="0,0,0,6"/>
+                                                <UniformGrid Columns="2">
+                                                    <StackPanel Margin="0,0,4,6">
+                                                        <TextBlock Text="{DynamicResource IndependentWindowLayoutX}" Style="{StaticResource DetailLabel}"/>
+                                                        <TextBox x:Name="IndependentLayoutX" Style="{StaticResource ReceiverTextBox}" MaxLength="8"
+                                                                 AutomationProperties.Name="{DynamicResource IndependentWindowLayoutX}"/>
+                                                    </StackPanel>
+                                                    <StackPanel Margin="4,0,0,6">
+                                                        <TextBlock Text="{DynamicResource IndependentWindowLayoutY}" Style="{StaticResource DetailLabel}"/>
+                                                        <TextBox x:Name="IndependentLayoutY" Style="{StaticResource ReceiverTextBox}" MaxLength="8"
+                                                                 AutomationProperties.Name="{DynamicResource IndependentWindowLayoutY}"/>
+                                                    </StackPanel>
+                                                    <StackPanel Margin="0,0,4,0">
+                                                        <TextBlock Text="{DynamicResource IndependentWindowLayoutWidth}" Style="{StaticResource DetailLabel}"/>
+                                                        <TextBox x:Name="IndependentLayoutWidth" Style="{StaticResource ReceiverTextBox}" MaxLength="5"
+                                                                 AutomationProperties.Name="{DynamicResource IndependentWindowLayoutWidth}"/>
+                                                    </StackPanel>
+                                                    <StackPanel Margin="4,0,0,0">
+                                                        <TextBlock Text="{DynamicResource IndependentWindowLayoutHeight}" Style="{StaticResource DetailLabel}"/>
+                                                        <TextBox x:Name="IndependentLayoutHeight" Style="{StaticResource ReceiverTextBox}" MaxLength="5"
+                                                                 AutomationProperties.Name="{DynamicResource IndependentWindowLayoutHeight}"/>
+                                                    </StackPanel>
+                                                </UniformGrid>
+                                                <CheckBox x:Name="IndependentLayoutFixed" Content="{DynamicResource IndependentWindowLayoutFixed}" Margin="0,8,0,0"/>
+                                            </StackPanel>
                                             <Button Content="{DynamicResource Save}" Style="{StaticResource SettingsActionButton}"
                                                     Click="OnSaveIndependentWindowLayout" Margin="0,8,0,0"/>
                                             <TextBlock x:Name="IndependentLayoutStatus" Style="{StaticResource DetailLabel}" TextWrapping="Wrap"

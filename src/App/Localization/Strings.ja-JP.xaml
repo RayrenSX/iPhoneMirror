@@ -2116,7 +2116,9 @@ BluetoothとAssistiveTouchが必要です。
     <sys:String x:Key="DeviceHubExplorerOpenFailedFormat">割り当て先を開けませんでした：{0}</sys:String>
     <sys:String x:Key="DeviceHubSharedDocuments">アプリ書類</sys:String>
     <system:String x:Key="IndependentWindowLayoutTitle">独立ウィンドウの初期配置</system:String>
-    <system:String x:Key="IndependentWindowLayoutHelp">選択中のデバイスの初期配置を画面ピクセルで設定します。座標またはサイズの両欄を空欄にすると自動設定されます。</system:String>
+    <system:String x:Key="IndependentWindowLayoutUseLast">開くたびに前回の配置を復元</system:String>
+    <system:String x:Key="IndependentWindowLayoutUseLastHelp">前回の位置、サイズ、固定状態を復元します。前回の配置がない場合は自動で配置します。</system:String>
+    <system:String x:Key="IndependentWindowLayoutHelp">座標とサイズは画面ピクセルで指定します。どちらかの組を空欄にすると、その項目は自動設定になります。</system:String>
     <system:String x:Key="IndependentWindowLayoutX">X 座標</system:String>
     <system:String x:Key="IndependentWindowLayoutY">Y 座標</system:String>
     <system:String x:Key="IndependentWindowLayoutWidth">幅</system:String>

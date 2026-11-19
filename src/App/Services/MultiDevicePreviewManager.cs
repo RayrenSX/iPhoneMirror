@@ -58,6 +58,29 @@ internal sealed class MultiDevicePreviewManager : IDisposable
         (System.Windows.Application.Current as App)?.UpdateSettings.IndependentWindowLayouts
             .GetValueOrDefault(udid) is { IsValid: true } layout ? layout : null;
 
+    internal static IndependentWindowLayout? GetStartupLayout(string udid)
+    {
+        if ((System.Windows.Application.Current as App)?.UpdateSettings.IndependentWindowLayoutHistoryByDevice
+            .GetValueOrDefault(udid) is { UseLastLayout: true } history)
+            return history.LastLayout is { IsValid: true, HasPosition: true, HasSize: true } last ? last : null;
+        return GetSavedLayout(udid);
+    }
+
+    internal static void TrackLayoutHistory(string udid, NativePreviewWindow window)
+    {
+        window.Closed += (_, _) =>
+        {
+            if (window.ClosedLayout is not { } layout || System.Windows.Application.Current is not App app) return;
+            var historyByDevice = app.UpdateSettings.IndependentWindowLayoutHistoryByDevice;
+            var history = historyByDevice.GetValueOrDefault(udid) ?? new();
+            if (history.LastLayout == layout) return;
+            historyByDevice[udid] = history with { LastLayout = layout };
+            // Retain the latest snapshot in memory if a write fails. Opening
+            // again in this process and subsequent settings saves can use it.
+            _ = app.SaveUpdateSettings();
+        };
+    }
+
     internal string SelectedFrameColor => viewModel.SelectedDevice is { } device ? FrameAppearance(device).SelectedColorId ?? "" : "";
     internal bool CanSelectFrameColor => viewModel.SelectedDevice is { IsMediaCast: false } device &&
         DeviceFrameCatalog.Find(device.ProductType) is not null;
@@ -382,13 +405,14 @@ internal sealed class MultiDevicePreviewManager : IDisposable
                  {
                      _ = preview.UpdateDeviceAppearance(device.ProductType, FrameAppearance(device));
                      ApplySavedPhoneFramePreference(preview);
-                 }, layout: GetSavedLayout(device.Udid)) || window is null)
+                 }, layout: GetStartupLayout(device.Udid)) || window is null)
         {
             if (started.Created)
                 await viewModel.StopDeviceSessionAsync(
                     device.Udid, started.Handle, preserveIfSelected: true);
             return (false, LocalizationService.Get("PreviewRendererAttachFailed"));
         }
+        TrackLayoutHistory(device.Udid, window);
         window.PhoneFramePreferenceRequested = SavePhoneFramePreference;
         window.PhoneFramePreference = () => SavedPhoneFrameEnabled;
         window.PhoneFrameChanged += () => { if (!_updatingPhoneFrame) PhoneFrameChanged?.Invoke(); };

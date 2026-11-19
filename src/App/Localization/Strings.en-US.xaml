@@ -2116,7 +2116,9 @@ Pair, select and save.</system:String>
     <sys:String x:Key="DeviceHubExplorerOpenFailedFormat">Could not open the mapped location: {0}</sys:String>
     <sys:String x:Key="DeviceHubSharedDocuments">App documents</sys:String>
     <system:String x:Key="IndependentWindowLayoutTitle">Independent window startup layout</system:String>
-    <system:String x:Key="IndependentWindowLayoutHelp">Set the startup layout for the selected device in screen pixels. Leave either pair blank to use automatic placement or sizing.</system:String>
+    <system:String x:Key="IndependentWindowLayoutUseLast">Restore the last layout on open</system:String>
+    <system:String x:Key="IndependentWindowLayoutUseLastHelp">Restores the previous window position, size and lock state. Uses automatic placement and sizing when there is no previous layout.</system:String>
+    <system:String x:Key="IndependentWindowLayoutHelp">Custom coordinates and dimensions use screen pixels. Leave either pair blank for automatic placement or sizing.</system:String>
     <system:String x:Key="IndependentWindowLayoutX">X position</system:String>
     <system:String x:Key="IndependentWindowLayoutY">Y position</system:String>
     <system:String x:Key="IndependentWindowLayoutWidth">Width</system:String>

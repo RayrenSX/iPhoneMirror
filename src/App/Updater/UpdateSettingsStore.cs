@@ -25,6 +25,7 @@ internal sealed class UpdateSettings
     public Dictionary<string, bool> DeviceFrameEnabled { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, string> DeviceFrameColors { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, IndependentWindowLayout> IndependentWindowLayouts { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, IndependentWindowLayoutHistory> IndependentWindowLayoutHistoryByDevice { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, DeviceControlPreferences> DeviceControlPreferences { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public string SettingsCategory { get; set; } = "projection";
     public AppProxySettings NetworkProxy { get; set; } = new();
@@ -136,6 +137,7 @@ internal sealed class UpdateSettings
         DeviceFrameEnabled = new(DeviceFrameEnabled ?? [], StringComparer.OrdinalIgnoreCase),
         DeviceFrameColors = new(DeviceFrameColors ?? [], StringComparer.OrdinalIgnoreCase),
         IndependentWindowLayouts = new(IndependentWindowLayouts ?? [], StringComparer.OrdinalIgnoreCase),
+        IndependentWindowLayoutHistoryByDevice = new(IndependentWindowLayoutHistoryByDevice ?? [], StringComparer.OrdinalIgnoreCase),
         DeviceVideoPreferences = new(DeviceVideoPreferences ?? [], StringComparer.OrdinalIgnoreCase),
         KeyboardMapping = KeyboardMapping.Clone(),
         CheckOnStartup = CheckOnStartup,
@@ -314,6 +316,7 @@ internal sealed class UpdateSettingsStore
             }
             settings.DeviceControlPreferences = new(settings.DeviceControlPreferences ?? [], StringComparer.OrdinalIgnoreCase);
             settings.IndependentWindowLayouts = new(settings.IndependentWindowLayouts ?? [], StringComparer.OrdinalIgnoreCase);
+            settings.IndependentWindowLayoutHistoryByDevice = new(settings.IndependentWindowLayoutHistoryByDevice ?? [], StringComparer.OrdinalIgnoreCase);
             settings.BluetoothControlDeviceBindings = NormalizeBluetoothBindings(
                 settings.BluetoothControlDeviceBindings);
             if (settings.BluetoothMouseSensitivitySchema < 1)

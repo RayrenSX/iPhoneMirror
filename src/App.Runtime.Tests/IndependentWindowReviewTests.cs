@@ -92,6 +92,7 @@ internal static partial class Program
             InteractionAssert(UnfixGetWindowRect(media.Handle, out var mediaAfter) && mediaAfter.Equals(mediaBefore),
                 "Maximizing a locked media window changed the bounds.");
             Console.WriteLine("PASS independent-window startup restored after reopen, source rotation and fullscreen roundtrip.");
+            VerifyRememberedWindowLayout(main, app, phone.Udid, store);
             return 0;
         }
         finally
@@ -144,6 +145,11 @@ internal static partial class Program
         projection.ScrollToVerticalOffset(projection.VerticalOffset +
             ((FrameworkElement)layout.Parent).TranslatePoint(new Point(), projection).Y - 6);
         CapturePanel("92-startup-layout.png");
+        var useLast = Find<CheckBox>("IndependentLayoutUseLast");
+        useLast.IsChecked = true;
+        useLast.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+        CapturePanel("92-restore-last-layout.png");
+        useLast.IsChecked = false;
 
         Find<RadioButton>("ControlSettingsTab").IsChecked = true;
         AdvanceDispatcher(TimeSpan.FromMilliseconds(150));
@@ -224,6 +230,103 @@ internal static partial class Program
             arguments[Array.FindIndex(ctor.GetParameters(), parameter => parameter.Name == "managedContent")] =
                 new Border { Background = Brushes.Black };
         return (NativePreviewWindow)ctor.Invoke(arguments);
+    }
+
+    private static void VerifyRememberedWindowLayout(MainWindow main, App app, string udid, UpdateSettingsStore store)
+    {
+        var useLast = (CheckBox)main.FindName("IndependentLayoutUseLast");
+        var custom = (StackPanel)main.FindName("IndependentLayoutCustomFields");
+        var customX = (TextBox)main.FindName("IndependentLayoutX");
+        var preset = store.Load().IndependentWindowLayouts[udid];
+        var firstBounds = new IndependentWindowLayout(145, 125, 450, 575);
+        var fullscreenBounds = new IndependentWindowLayout(160, 130, 470, 600, Fixed: true);
+        var minimizedBounds = new IndependentWindowLayout(175, 145, 480, 610);
+
+        app.IsUiPreviewMode = false;
+        try
+        {
+            useLast.IsChecked = true;
+            customX.Text = "invalid";
+            Save();
+            InteractionAssert(!custom.IsEnabled && store.Load().IndependentWindowLayouts[udid] == preset &&
+                MultiDevicePreviewManager.GetStartupLayout(udid) is null,
+                "Restore mode did not disable custom inputs, retain the preset, or fall back to automatic placement.");
+
+            KeyboardCall(main, "RefreshIndependentWindowLayoutEditor");
+            useLast.IsChecked = false;
+            Save();
+            InteractionAssert(custom.IsEnabled && MultiDevicePreviewManager.GetStartupLayout(udid) == preset,
+                "Switching back did not restore the saved custom layout.");
+            using (var first = Open())
+            {
+                first.ToggleFixedWindow();
+                Move(first, firstBounds);
+            }
+            InteractionAssert(store.Load().IndependentWindowLayoutHistoryByDevice[udid] == new IndependentWindowLayoutHistory(false, firstBounds),
+                "Closing in custom mode did not save the actual bounds separately.");
+
+            useLast.IsChecked = true;
+            Save();
+            app.RestoreUpdateSettings(store.Load());
+            InteractionAssert(MultiDevicePreviewManager.GetStartupLayout(udid.ToUpperInvariant()) == firstBounds &&
+                MultiDevicePreviewManager.GetStartupLayout(udid + "-other") is null,
+                "Remembered per-device mode and bounds did not survive a disk reload.");
+            using (var fromHistory = Open())
+            {
+                AssertBounds(fromHistory, firstBounds);
+                Move(fromHistory, fullscreenBounds);
+                fromHistory.ToggleFixedWindow();
+                fromHistory.ToggleFullScreen();
+                InteractionAssert(fromHistory.IsFullScreen, "The test window was not full screen.");
+            }
+            InteractionAssert(store.Load().IndependentWindowLayoutHistoryByDevice[udid].LastLayout == fullscreenBounds,
+                "Closing full screen did not keep the normal bounds and lock state.");
+            using (var fromFullscreen = Open())
+            {
+                AssertBounds(fromFullscreen, fullscreenBounds);
+                fromFullscreen.ToggleFixedWindow();
+                Move(fromFullscreen, minimizedBounds);
+                _ = MappingSendMessage(fromFullscreen.Handle, 0x0112, (nint)0xF020, 0);
+                InteractionAssert((bool)typeof(NativePreviewWindow).GetMethod("IsIconic",
+                    System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!
+                    .Invoke(null, [fromFullscreen.Handle])!, "The test window was not minimized.");
+                fromFullscreen.HideForShutdown();
+            }
+            InteractionAssert(store.Load().IndependentWindowLayoutHistoryByDevice[udid].LastLayout == minimizedBounds,
+                "Closing a minimized and hidden preview overwrote its normal bounds.");
+            using (var restored = Open())
+                AssertBounds(restored, minimizedBounds);
+
+            KeyboardCall(main, "RefreshIndependentWindowLayoutEditor");
+            InteractionAssert(useLast.IsChecked == true && !custom.IsEnabled, "Selection did not restore the remembered mode.");
+            useLast.IsChecked = false;
+            Save();
+            InteractionAssert(MultiDevicePreviewManager.GetStartupLayout(udid) == preset &&
+                store.Load().IndependentWindowLayoutHistoryByDevice[udid].LastLayout == minimizedBounds,
+                "Custom mode did not take precedence over the stored last bounds.");
+            Console.WriteLine("PASS independent-window layout mode: mutually exclusive fields, automatic fallback, disk reload, two device keys, normal/fullscreen/minimized closure.");
+        }
+        finally { app.IsUiPreviewMode = true; }
+
+        void Save() => KeyboardCall(main, "OnSaveIndependentWindowLayout", main, new RoutedEventArgs());
+
+        NativePreviewWindow Open()
+        {
+            var window = CreateIndependentReviewPreview();
+            KeyboardCall(window, "ShowWithInitialLayout", MultiDevicePreviewManager.GetStartupLayout(udid));
+            MultiDevicePreviewManager.TrackLayoutHistory(udid, window);
+            return window;
+        }
+
+        static void Move(NativePreviewWindow window, IndependentWindowLayout target) =>
+            InteractionAssert(InteractionSetWindowPos(window.Handle, 0,
+                target.X!.Value, target.Y!.Value, target.Width!.Value, target.Height!.Value, 0x14),
+                "Could not move the test window.");
+
+        static void AssertBounds(NativePreviewWindow window, IndependentWindowLayout target) =>
+            InteractionAssert(UnfixGetWindowRect(window.Handle, out var rect) && rect.Left == target.X && rect.Top == target.Y &&
+                rect.Right - rect.Left == target.Width && rect.Bottom - rect.Top == target.Height &&
+                (bool)KeyboardField(window, "_isFixed") == target.Fixed, "Opening did not restore the actual saved layout.");
     }
 
     private static void VerifyIndependentReviewBounds(NativePreviewWindow preview)

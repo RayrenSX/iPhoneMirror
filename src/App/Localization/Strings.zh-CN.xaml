@@ -2116,7 +2116,9 @@
     <sys:String x:Key="DeviceHubExplorerOpenFailedFormat">无法打开映射位置：{0}</sys:String>
     <sys:String x:Key="DeviceHubSharedDocuments">应用文档</sys:String>
     <system:String x:Key="IndependentWindowLayoutTitle">独立窗口启动布局</system:String>
-    <system:String x:Key="IndependentWindowLayoutHelp">为当前设备设置启动布局，单位为屏幕像素。将一组坐标或尺寸留空可使用自动布局。</system:String>
+    <system:String x:Key="IndependentWindowLayoutUseLast">每次打开时以上次布局为准</system:String>
+    <system:String x:Key="IndependentWindowLayoutUseLastHelp">恢复上次关闭前的位置、尺寸和固定状态。没有上次布局时使用自动布局。</system:String>
+    <system:String x:Key="IndependentWindowLayoutHelp">自定义坐标和尺寸以屏幕像素为单位。留空一组可使用自动定位或自动尺寸。</system:String>
     <system:String x:Key="IndependentWindowLayoutX">X 坐标</system:String>
     <system:String x:Key="IndependentWindowLayoutY">Y 坐标</system:String>
     <system:String x:Key="IndependentWindowLayoutWidth">宽度</system:String>
