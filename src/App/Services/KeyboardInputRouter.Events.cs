@@ -25,6 +25,8 @@ internal sealed partial class KeyboardInputRouter
         internal bool WindowDownObserved;
         internal WindowsHotkeyDisposition StandaloneHotkey;
         internal bool JoinedChord;
+        internal bool ConsumedByBlockedChord;
+        internal bool ReplayedWindowsModifier;
     }
     private readonly Dictionary<(int Code, bool Extended), Press> _presses = [];
     private readonly Dictionary<int, RoutedShortcut> _heldMouseShortcuts = [];
@@ -72,8 +74,12 @@ internal sealed partial class KeyboardInputRouter
             }
             var wasCandidate = existing.Route.Owner == KeyboardEventOwner.ShortcutCandidate;
             if (wasCandidate)
-                Deliver(existing, chord: _presses.Count > 1, delayed: true,
-                    forced: existing.JoinedChord ? null : HotkeyRoute(existing.StandaloneHotkey));
+            {
+                var route = existing.ConsumedByBlockedChord
+                    ? HotkeyRoute(WindowsHotkeyDisposition.Block)
+                    : existing.JoinedChord ? null : HotkeyRoute(existing.StandaloneHotkey);
+                Deliver(existing, chord: _presses.Count > 1, delayed: true, forced: route);
+            }
             _presses.Remove(id); // remove before callbacks that may reset/close
             _retired.Remove(key.VirtualKey);
             existing.Route.Dispatch?.Invoke(false);
@@ -98,7 +104,8 @@ internal sealed partial class KeyboardInputRouter
         }
         var press = new Press(key, resolve, replay) { LastDownMessageTime = hookTime };
         _presses.Add(id, press);
-        if (_retired.Contains(key.VirtualKey) || (Mode == KeyboardInputMode.None && RequestedMode != KeyboardInputMode.None))
+        var handoffPending = Mode == KeyboardInputMode.None && RequestedMode != KeyboardInputMode.None;
+        if (_retired.Contains(key.VirtualKey) || (handoffPending && windowsHotkeys is null))
         {
             press.Route = new(KeyboardEventOwner.Retired, false);
             diagnose?.Invoke(new(_retired.Contains(key.VirtualKey) ? "retired_key" : "handoff_pending", press.Route.Owner));
@@ -119,8 +126,8 @@ internal sealed partial class KeyboardInputRouter
         }
         if (modifier != 0)
         {
-            if ((bufferShortcutModifiers && Shortcuts.IsCandidate(modifiers)) ||
-                (deferStandaloneModifier && _presses.Count == 1) ||
+            if ((!handoffPending && bufferShortcutModifiers && Shortcuts.IsCandidate(modifiers)) ||
+                (!handoffPending && deferStandaloneModifier && _presses.Count == 1) ||
                 windowsHotkeys?.HasModifierPrefix(modifiers) == true ||
                 press.StandaloneHotkey != WindowsHotkeyDisposition.Default)
             {
@@ -130,6 +137,14 @@ internal sealed partial class KeyboardInputRouter
             var replayedPrefix = FlushCandidates(chord: _presses.Count > 1, except: press);
             Deliver(press, chord: _presses.Count > 1, delayed: replayedPrefix);
             return replayedPrefix || press.Route.Suppress;
+        }
+        if (handoffPending)
+        {
+            var replayedPrefix = FlushCandidates(chord: true, except: press);
+            Deliver(press, chord: modifiers != 0, delayed: replayedPrefix,
+                forced: new(KeyboardEventOwner.Windows, false));
+            diagnose?.Invoke(new("handoff_pending", press.Route.Owner));
+            return replayedPrefix;
         }
         // Never steal a modifier whose down already reached another owner.
         var match = MatchOwnedShortcut(key.VirtualKey, out var reason);
@@ -147,8 +162,10 @@ internal sealed partial class KeyboardInputRouter
             match.Execute(); // disposition committed before reentrant UI work
             return true;
         }
+        var fallback = windowsHotkeys is not null && modifiers != 0
+            ? RestoreDeviceModifiers(press) : null;
         var replayed = FlushCandidates(chord: true, except: press);
-        Deliver(press, chord: modifiers != 0, delayed: replayed);
+        Deliver(press, chord: modifiers != 0, delayed: replayed, forced: fallback);
         diagnose?.Invoke(new(reason, press.Route.Owner));
         return replayed || press.Route.Suppress;
     }
@@ -168,15 +185,23 @@ internal sealed partial class KeyboardInputRouter
             if (ReferenceEquals(held, press) || KeyboardShortcutRecognizer.Modifier(held.Key.VirtualKey) == 0) continue;
             if (held.Route.Owner == KeyboardEventOwner.ShortcutCandidate)
             {
+                if (route.Suppress)
+                {
+                    // A blocked key consumes the tap, but the same held
+                    // modifier can still prefix a later allowed or normal key.
+                    held.ConsumedByBlockedChord = true;
+                    continue;
+                }
+                held.ReplayedWindowsModifier = true;
                 Deliver(held, chord: true, delayed: true, forced: route);
-                replayedPrefix |= !route.Suppress;
+                replayedPrefix = true;
             }
-            else if (!route.Suppress &&
-                held.Route.Owner is KeyboardEventOwner.Direct or KeyboardEventOwner.Mapping or KeyboardEventOwner.Shortcut)
+            else if (!route.Suppress && held.Route.Suppress)
             {
                 // A second chord can reuse a modifier already sent to the phone.
                 // Close that press before replaying its down to Windows.
                 var release = held.Route.Dispatch;
+                held.ReplayedWindowsModifier = true;
                 Deliver(held, chord: true, delayed: false, forced: route);
                 release?.Invoke(false);
                 held.Replay(held.Key, true);
@@ -186,6 +211,29 @@ internal sealed partial class KeyboardInputRouter
         Deliver(press, chord: true, delayed: replayedPrefix, forced: route);
         diagnose?.Invoke(new(route.Suppress ? "preview_windows_hotkey_blocked" : "preview_windows_hotkey_allowed", route.Owner));
         return replayedPrefix || route.Suppress;
+    }
+
+    private KeyboardPressRoute? RestoreDeviceModifiers(Press press)
+    {
+        if (!_presses.Values.Any(held => held.ReplayedWindowsModifier && held.Route.Owner == KeyboardEventOwner.Windows))
+            return null;
+        var route = press.Resolve(press.Key, true);
+        if (route.Owner != KeyboardEventOwner.Direct) return route;
+
+        // A Windows hotkey may finish while its modifiers remain held. The
+        // next ordinary device chord must receive those modifiers too.
+        foreach (var held in _presses.Values.ToArray())
+        {
+            if (!held.ReplayedWindowsModifier || held.Route.Owner != KeyboardEventOwner.Windows) continue;
+            var deviceRoute = press.Resolve(held.Key, true);
+            if (deviceRoute.Owner != KeyboardEventOwner.Direct) continue;
+            held.ReplayedWindowsModifier = false;
+            held.Route = deviceRoute;
+            held.Replay(held.Key, false);
+            held.Route.Dispatch?.Invoke(true);
+            TraceEvent("InputDispatched", held);
+        }
+        return route;
     }
 
     private RoutedShortcut? MatchOwnedShortcut(int virtualKey, out string reason)

@@ -55,7 +55,11 @@ internal sealed class NativePreviewWindow : IDisposable
     private const int WmKeyUp = 0x0101;
     private const int WmSysKeyDown = 0x0104;
     private const int WmSysKeyUp = 0x0105;
+    private const int WmSysCommand = 0x0112;
     private const int WmDpiChanged = 0x02E0;
+    private const int ScSize = 0xF000;
+    private const int ScMove = 0xF010;
+    private const int ScMaximize = 0xF030;
     // Shared with the native D3D11 preview. Properties carry packed source dimensions.
     private const int WmPreviewGeometryChanged = 0x8140;
     private const string PendingPreviewGeometry = "iPhoneMirrorPendingPreviewGeometry";
@@ -169,6 +173,8 @@ internal sealed class NativePreviewWindow : IDisposable
     private bool _closeQueued;
     private bool _isTopMost;
     private bool _isFixed;
+    private bool _freezeFixedBounds;
+    private bool _fitFirstFixedSource;
     private bool _cornersEnabled = true;
     private bool _phoneFramePreferred;
     private bool _phoneFrameEnabled;
@@ -463,7 +469,7 @@ internal sealed class NativePreviewWindow : IDisposable
 
         _aspectController = new AspectRatioWindowController(_source,
             sourceWidth, sourceHeight,
-            () => !_disposed && !_isFullScreen && _handle != 0 &&
+            () => !_disposed && !_isFullScreen && (!_freezeFixedBounds || _fitFirstFixedSource) && _handle != 0 &&
                 !IsIconic(_handle) && !IsZoomed(_handle),
             minWidthDips: 96, minHeightDips: 96);
         // Install the instance hook only after every callback dependency is
@@ -710,6 +716,10 @@ internal sealed class NativePreviewWindow : IDisposable
                     y = Math.Clamp(y, area.Top, Math.Max(area.Top, area.Bottom - height));
                 }
             }
+            // Finish the monitor/DPI transition while hidden before setting
+            // the final physical-pixel size on the destination display.
+            if (monitor != 0 && monitor != MonitorFromWindow(_handle, MonitorDefaultToNearest))
+                _ = SetWindowPos(_handle, 0, x, y, 0, 0, SwpNoSize | SwpNoZOrder | SwpNoActivate);
             if (SetWindowPos(_handle, 0, x, y, width, height, SwpNoZOrder | SwpNoActivate))
             {
                 _aspectController.AutomaticResizeEnabled = !layout.HasSize;
@@ -718,7 +728,11 @@ internal sealed class NativePreviewWindow : IDisposable
             }
             else if (!applied) applied = _aspectController.ApplyInitialBounds();
         }
-        if (layout.Fixed) SetFixedWindow(true);
+        if (layout.Fixed)
+        {
+            _fitFirstFixedSource = !layout.HasSize && _sessionHandle != 0 && !_hasRendererDimensions;
+            SetFixedWindow(true);
+        }
         return applied;
     }
 
@@ -811,6 +825,11 @@ internal sealed class NativePreviewWindow : IDisposable
         if (changed && _managedContent is null)
             _ = UpdateDeviceAppearance(DeviceProductType, _deviceAppearance);
         ApplyRotatedDimensions();
+        if (_fitFirstFixedSource && width != 0 && height != 0)
+        {
+            _aspectController.ApplyPendingResize();
+            _fitFirstFixedSource = false;
+        }
         if (changed)
             Log("independent_window_dimensions",
                 ("mode", WindowMode), ("size", $"{width}x{height}"),
@@ -1123,6 +1142,11 @@ internal sealed class NativePreviewWindow : IDisposable
             case WmClose:
                 handled = true;
                 QueueClose();
+                return 0;
+            case WmSysCommand when _isFixed && (wParam.ToInt32() & 0xFFF0) is ScSize or ScMove or ScMaximize:
+                // Media casting retains the system title bar when fixed.
+                // Swallow size/move/maximize, keeping close and minimize.
+                handled = true;
                 return 0;
             case WmSysKeyDown when wParam.ToInt32() == VkReturn && GetKeyState(VkMenu) < 0:
                 handled = true;
@@ -1495,14 +1519,17 @@ internal sealed class NativePreviewWindow : IDisposable
 
     internal void ToggleFixedWindow() => SetFixedWindow(!_isFixed);
 
-    private void SetFixedWindow(bool enabled)
+    private void SetFixedWindow(bool enabled, bool freezeBounds = true)
     {
         if (_disposed || _handle == 0 || _isFullScreen || _isFixed == enabled) return;
         _isFixed = enabled;
+        _freezeFixedBounds = enabled && freezeBounds;
+        if (!_isFixed) _fitFirstFixedSource = false;
         if (!_isFixed && UsesWindowPointerControl)
             ResetTouchControlInput();
         var style = GetWindowLongPtrW(_handle, GwlStyle).ToInt64();
-        style = _isFixed ? style & ~WsThickFrame : style | WsThickFrame;
+        var resizeStyle = (uint)(_managedContent is null ? WsThickFrame : WsThickFrame | WsMaximizeBox);
+        style = _isFixed ? style & ~resizeStyle : style | resizeStyle;
         _ = SetWindowLongPtrW(_handle, GwlStyle, (nint)style);
         _ = SetWindowPos(_handle, 0, 0, 0, 0, 0,
             SwpNoSize | SwpNoMove | SwpNoZOrder | SwpNoActivate | SwpFrameChanged);
@@ -1594,7 +1621,7 @@ internal sealed class NativePreviewWindow : IDisposable
     internal void PrepareForUsbControl()
     {
         if (_disposed || _handle == 0) return;
-        if (!_isFixed) ToggleFixedWindow();
+        if (!_isFixed) SetFixedWindow(true, freezeBounds: false);
         if (!_isTopMost) ToggleTopMost();
         _ = SetForegroundWindow(_handle);
         UpdateContextMenuLabels();
@@ -1603,7 +1630,7 @@ internal sealed class NativePreviewWindow : IDisposable
     internal void PrepareForBluetoothControl()
     {
         if (_disposed || _handle == 0 || !UsesBluetoothWindowMouse) return;
-        if (!_isFixed && !_isFullScreen) ToggleFixedWindow();
+        if (!_isFixed && !_isFullScreen) SetFixedWindow(true, freezeBounds: false);
     }
 
     internal void ReleasePointerCapture()

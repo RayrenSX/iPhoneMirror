@@ -15,6 +15,7 @@ public partial class MainWindow
     {
         var device = _viewModel.SelectedDevice;
         IndependentWindowLayoutEditor.IsEnabled = device is { IsMediaCast: false };
+        IndependentLayoutDevice.Text = IndependentWindowLayoutEditor.IsEnabled ? device?.DisplayName ?? "" : "";
         var layout = device is null ? null : MultiDevicePreviewManager.GetSavedLayout(device.Udid);
         IndependentLayoutX.Text = Format(layout?.X);
         IndependentLayoutY.Text = Format(layout?.Y);

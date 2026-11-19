@@ -2565,6 +2565,18 @@
                                 <Border Style="{StaticResource ControlSectionCard}">
                                     <StackPanel>
                                         <TextBlock Text="{DynamicResource IndependentWindowLayoutTitle}" Style="{StaticResource ControlSectionTitle}"/>
+                                        <TextBlock x:Name="IndependentLayoutDevice"
+                                                   TextTrimming="CharacterEllipsis" Margin="0,4,0,0">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock" BasedOn="{StaticResource DetailLabel}">
+                                                    <Style.Triggers>
+                                                        <Trigger Property="Text" Value="">
+                                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                                        </Trigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
                                         <TextBlock Text="{DynamicResource IndependentWindowLayoutHelp}" Style="{StaticResource DetailLabel}"
                                                    TextWrapping="Wrap" Margin="0,4,0,0"/>
                                         <StackPanel x:Name="IndependentWindowLayoutEditor" IsEnabled="False" Margin="0,6,0,0">

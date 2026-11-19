@@ -134,6 +134,7 @@ public partial class MainWindow
         var key = new MappedKey(ModifierKeyIdentity((int)data.VirtualKey, scan | (extended ? 0x100 : 0)), scan, extended);
         var diagnose = ObserveFunctionKey(key, down, ActiveInputDeviceUdid, "hook", data.Flags);
         if ((data.Flags & 0x12) != 0 &&
+            PreviewWindowsHotkeysFor(_keyboardForegroundWindow()) is null &&
             !CanForwardControlKeyboard(ActiveInputDeviceUdid, GetControlKeyboardWindow(ActiveInputDeviceUdid)) &&
             (down || (!_keyboardRouter.HasPressedKey(key) && !_mappingCapture.HasHeldKeys)))
         {

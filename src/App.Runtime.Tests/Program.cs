@@ -105,6 +105,8 @@ internal static partial class Program
                 return RunWirelessBackendSelectionTests(wirelessSelectionOutput);
             if (args is ["--setting-shortcuts", var settingShortcutsOutput])
                 return RunSettingShortcutTests(settingShortcutsOutput);
+            if (args is ["--independent-window-review", var independentReviewOutput])
+                return RunIndependentWindowReview(independentReviewOutput);
             if (args is ["--device-control-settings", var controlSettingsOutput]) return RunDeviceControlPreferencesTests(controlSettingsOutput);
             if (args is ["--settings-categories", var settingsOutput])
                 return RunSettingsCategoryTests(settingsOutput);

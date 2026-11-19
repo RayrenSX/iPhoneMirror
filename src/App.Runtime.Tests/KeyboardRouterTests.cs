@@ -61,14 +61,31 @@ internal static partial class Program
         Key(control, true); Key(alt, true); Key('B', true); Key('B', true);
         Key('B', false); Key(alt, false); Key(control, false);
         MappingAssert(device.Count == 0 && windows.Count == 0, "A blocked chord leaked to the phone or Windows.");
+        Key(control, true); Key(alt, true); Key('B', true); Key('B', false); Key('A', true);
+        Key('A', false); Key(alt, false); Key(control, false);
+        MappingAssert(device.SequenceEqual([(control, true), (alt, true), ('A', true), ('A', false), (alt, false), (control, false)]) &&
+            windows.Count == 0, "A block left a held modifier missing from the next ordinary device chord.");
+        device.Clear();
         Key(control, true); Key('A', true); Key('A', false);
         Key(shift, true); Key('S', true); Key('S', false); Key(shift, false); Key(control, false);
         MappingAssert(device.SequenceEqual([(control, true), ('A', true), ('A', false), (control, false)]) &&
             windows.SequenceEqual([(control, true), (shift, true), ('S', true), ('S', false), (shift, false), (control, false)]) &&
             router.PressedKeyCount == 0, "The second chord did not release the first modifier owner before Windows received it.");
+        device.Clear(); windows.Clear();
+        Key(control, true); Key(shift, true); Key('S', true); Key('S', false); Key('A', true); Key('A', false);
+        Key(shift, false); Key(control, false);
+        MappingAssert(device.SequenceEqual([(control, true), (shift, true), ('A', true), ('A', false), (shift, false), (control, false)]) &&
+            windows.SequenceEqual([(control, true), (shift, true), ('S', true), ('S', false), (control, false), (shift, false)]),
+            "A normal device chord lost its modifiers after an allowed Windows hotkey with the same held keys.");
         Key(alt, true, independent: false); Key(tab, true, independent: false);
         Key(tab, false, independent: false); Key(alt, false, independent: false);
         MappingAssert(appShortcut == 1, "The independent-window allowlist overrode an app shortcut outside that window.");
+        windows.Clear(); device.Clear();
+        router.BeginHandoff(KeyboardInputMode.Mapping);
+        Key(control, true); Key(alt, true); Key('B', true); Key('B', false); Key(alt, false); Key(control, false);
+        Key(alt, true); Key(tab, true); Key(tab, false); Key(alt, false);
+        MappingAssert(windows.SequenceEqual([(alt, true), (tab, true), (tab, false), (alt, false)]) && device.Count == 0 &&
+            appShortcut == 1, "The allow/block rules stopped applying while keyboard ownership changed.");
         Console.WriteLine("PASS independent-window hotkey rules, modifier handoff, focus loss and scoping.");
     }
 
