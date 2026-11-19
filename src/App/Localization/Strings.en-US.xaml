@@ -2115,4 +2115,19 @@ Pair, select and save.</system:String>
     <sys:String x:Key="DeviceHubExplorerHelp">Read and write the selected media or shared app documents in Windows File Explorer. This does not expose the entire iPhone file system. The drive disconnects when control disconnects, you switch devices, or the app exits.</sys:String>
     <sys:String x:Key="DeviceHubExplorerOpenFailedFormat">Could not open the mapped location: {0}</sys:String>
     <sys:String x:Key="DeviceHubSharedDocuments">App documents</sys:String>
+    <system:String x:Key="IndependentWindowLayoutTitle">Independent window startup layout</system:String>
+    <system:String x:Key="IndependentWindowLayoutHelp">Set the startup layout for the selected device in screen pixels. Leave either pair blank to use automatic placement or sizing.</system:String>
+    <system:String x:Key="IndependentWindowLayoutX">X position</system:String>
+    <system:String x:Key="IndependentWindowLayoutY">Y position</system:String>
+    <system:String x:Key="IndependentWindowLayoutWidth">Width</system:String>
+    <system:String x:Key="IndependentWindowLayoutHeight">Height</system:String>
+    <system:String x:Key="IndependentWindowLayoutFixed">Lock position and size on open</system:String>
+    <system:String x:Key="IndependentWindowLayoutInvalid">Enter X and Y together (−1,000,000 to 1,000,000) and width and height together (96 to 32,767).</system:String>
+    <system:String x:Key="IndependentWindowLayoutSaved">Saved. The layout applies the next time the window opens.</system:String>
+    <system:String x:Key="PreviewWindowsHotkeysTitle">Windows hotkeys in independent windows</system:String>
+    <system:String x:Key="PreviewWindowsHotkeysHelp">Enter one hotkey per line, for example Win, Alt+Tab or Ctrl+Shift+S. Keys you leave unlisted keep their usual behavior.</system:String>
+    <system:String x:Key="PreviewWindowsHotkeysAllow">Allow in Windows</system:String>
+    <system:String x:Key="PreviewWindowsHotkeysBlock">Block</system:String>
+    <system:String x:Key="PreviewWindowsHotkeysInvalid">Invalid or duplicate hotkey “{0}”.</system:String>
+    <system:String x:Key="PreviewWindowsHotkeysSaved">Hotkey rules saved.</system:String>
 </ResourceDictionary>

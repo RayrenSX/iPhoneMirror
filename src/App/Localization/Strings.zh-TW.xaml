@@ -2115,4 +2115,19 @@
     <sys:String x:Key="DeviceHubExplorerHelp">在 Windows 檔案總管中讀寫所選媒體或應用程式共享文件，而非整個 iPhone 檔案系統。中斷控制連線、切換裝置或結束程式時會自動中斷對應。</sys:String>
     <sys:String x:Key="DeviceHubExplorerOpenFailedFormat">無法開啟對應位置：{0}</sys:String>
     <sys:String x:Key="DeviceHubSharedDocuments">應用程式文件</sys:String>
+    <system:String x:Key="IndependentWindowLayoutTitle">獨立視窗啟動版面</system:String>
+    <system:String x:Key="IndependentWindowLayoutHelp">以螢幕像素設定所選裝置的啟動版面。將一組座標或尺寸留空即可使用自動版面。</system:String>
+    <system:String x:Key="IndependentWindowLayoutX">X 座標</system:String>
+    <system:String x:Key="IndependentWindowLayoutY">Y 座標</system:String>
+    <system:String x:Key="IndependentWindowLayoutWidth">寬度</system:String>
+    <system:String x:Key="IndependentWindowLayoutHeight">高度</system:String>
+    <system:String x:Key="IndependentWindowLayoutFixed">開啟時固定位置和大小</system:String>
+    <system:String x:Key="IndependentWindowLayoutInvalid">X 和 Y 須成對輸入（−1,000,000 至 1,000,000），寬度和高度也須成對輸入（96 至 32,767）。</system:String>
+    <system:String x:Key="IndependentWindowLayoutSaved">已儲存，下次開啟獨立視窗時生效。</system:String>
+    <system:String x:Key="PreviewWindowsHotkeysTitle">獨立視窗中的 Windows 快速鍵</system:String>
+    <system:String x:Key="PreviewWindowsHotkeysHelp">每行輸入一個快速鍵，例如 Win、Alt+Tab 或 Ctrl+Shift+S。未列出的快速鍵會沿用原有行為。</system:String>
+    <system:String x:Key="PreviewWindowsHotkeysAllow">放行至 Windows</system:String>
+    <system:String x:Key="PreviewWindowsHotkeysBlock">攔截</system:String>
+    <system:String x:Key="PreviewWindowsHotkeysInvalid">快速鍵「{0}」無效或重複。</system:String>
+    <system:String x:Key="PreviewWindowsHotkeysSaved">快速鍵規則已儲存。</system:String>
 </ResourceDictionary>

@@ -54,6 +54,10 @@ internal sealed class MultiDevicePreviewManager : IDisposable
     internal bool HasAnyOpen => _windows.Count != 0;
     internal event Action? PhoneFrameChanged;
 
+    internal static IndependentWindowLayout? GetSavedLayout(string udid) =>
+        (System.Windows.Application.Current as App)?.UpdateSettings.IndependentWindowLayouts
+            .GetValueOrDefault(udid) is { IsValid: true } layout ? layout : null;
+
     internal string SelectedFrameColor => viewModel.SelectedDevice is { } device ? FrameAppearance(device).SelectedColorId ?? "" : "";
     internal bool CanSelectFrameColor => viewModel.SelectedDevice is { IsMediaCast: false } device &&
         DeviceFrameCatalog.Find(device.ProductType) is not null;
@@ -378,7 +382,7 @@ internal sealed class MultiDevicePreviewManager : IDisposable
                  {
                      _ = preview.UpdateDeviceAppearance(device.ProductType, FrameAppearance(device));
                      ApplySavedPhoneFramePreference(preview);
-                 }) || window is null)
+                 }, layout: GetSavedLayout(device.Udid)) || window is null)
         {
             if (started.Created)
                 await viewModel.StopDeviceSessionAsync(

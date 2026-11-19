@@ -2115,4 +2115,19 @@
     <sys:String x:Key="DeviceHubExplorerHelp">在 Windows 资源管理器中读写所选媒体或应用共享文档，不是整个 iPhone 文件系统。断开控制连接、切换设备或退出程序时会自动断开映射。</sys:String>
     <sys:String x:Key="DeviceHubExplorerOpenFailedFormat">无法打开映射位置：{0}</sys:String>
     <sys:String x:Key="DeviceHubSharedDocuments">应用文档</sys:String>
+    <system:String x:Key="IndependentWindowLayoutTitle">独立窗口启动布局</system:String>
+    <system:String x:Key="IndependentWindowLayoutHelp">为当前设备设置启动布局，单位为屏幕像素。将一组坐标或尺寸留空可使用自动布局。</system:String>
+    <system:String x:Key="IndependentWindowLayoutX">X 坐标</system:String>
+    <system:String x:Key="IndependentWindowLayoutY">Y 坐标</system:String>
+    <system:String x:Key="IndependentWindowLayoutWidth">宽度</system:String>
+    <system:String x:Key="IndependentWindowLayoutHeight">高度</system:String>
+    <system:String x:Key="IndependentWindowLayoutFixed">打开时固定位置和尺寸</system:String>
+    <system:String x:Key="IndependentWindowLayoutInvalid">X 和 Y 需成对填写（−1,000,000 至 1,000,000），宽度和高度也需成对填写（96 至 32,767）。</system:String>
+    <system:String x:Key="IndependentWindowLayoutSaved">已保存，下次打开独立窗口时生效。</system:String>
+    <system:String x:Key="PreviewWindowsHotkeysTitle">独立窗口中的 Windows 热键</system:String>
+    <system:String x:Key="PreviewWindowsHotkeysHelp">每行输入一个热键，例如 Win、Alt+Tab 或 Ctrl+Shift+S。未列出的热键沿用原有行为。</system:String>
+    <system:String x:Key="PreviewWindowsHotkeysAllow">放行到 Windows</system:String>
+    <system:String x:Key="PreviewWindowsHotkeysBlock">拦截</system:String>
+    <system:String x:Key="PreviewWindowsHotkeysInvalid">热键“{0}”无效或重复。</system:String>
+    <system:String x:Key="PreviewWindowsHotkeysSaved">热键规则已保存。</system:String>
 </ResourceDictionary>

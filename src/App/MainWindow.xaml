@@ -2562,6 +2562,42 @@
                                                    Foreground="{DynamicResource ErrorBrush}" TextWrapping="Wrap"/>
                                     </StackPanel>
                                 </Border>
+                                <Border Style="{StaticResource ControlSectionCard}">
+                                    <StackPanel>
+                                        <TextBlock Text="{DynamicResource IndependentWindowLayoutTitle}" Style="{StaticResource ControlSectionTitle}"/>
+                                        <TextBlock Text="{DynamicResource IndependentWindowLayoutHelp}" Style="{StaticResource DetailLabel}"
+                                                   TextWrapping="Wrap" Margin="0,4,0,0"/>
+                                        <StackPanel x:Name="IndependentWindowLayoutEditor" IsEnabled="False" Margin="0,6,0,0">
+                                            <UniformGrid Columns="2">
+                                                <StackPanel Margin="0,0,4,6">
+                                                    <TextBlock Text="{DynamicResource IndependentWindowLayoutX}" Style="{StaticResource DetailLabel}"/>
+                                                    <TextBox x:Name="IndependentLayoutX" Style="{StaticResource ReceiverTextBox}" MaxLength="8"
+                                                             AutomationProperties.Name="{DynamicResource IndependentWindowLayoutX}"/>
+                                                </StackPanel>
+                                                <StackPanel Margin="4,0,0,6">
+                                                    <TextBlock Text="{DynamicResource IndependentWindowLayoutY}" Style="{StaticResource DetailLabel}"/>
+                                                    <TextBox x:Name="IndependentLayoutY" Style="{StaticResource ReceiverTextBox}" MaxLength="8"
+                                                             AutomationProperties.Name="{DynamicResource IndependentWindowLayoutY}"/>
+                                                </StackPanel>
+                                                <StackPanel Margin="0,0,4,0">
+                                                    <TextBlock Text="{DynamicResource IndependentWindowLayoutWidth}" Style="{StaticResource DetailLabel}"/>
+                                                    <TextBox x:Name="IndependentLayoutWidth" Style="{StaticResource ReceiverTextBox}" MaxLength="5"
+                                                             AutomationProperties.Name="{DynamicResource IndependentWindowLayoutWidth}"/>
+                                                </StackPanel>
+                                                <StackPanel Margin="4,0,0,0">
+                                                    <TextBlock Text="{DynamicResource IndependentWindowLayoutHeight}" Style="{StaticResource DetailLabel}"/>
+                                                    <TextBox x:Name="IndependentLayoutHeight" Style="{StaticResource ReceiverTextBox}" MaxLength="5"
+                                                             AutomationProperties.Name="{DynamicResource IndependentWindowLayoutHeight}"/>
+                                                </StackPanel>
+                                            </UniformGrid>
+                                            <CheckBox x:Name="IndependentLayoutFixed" Content="{DynamicResource IndependentWindowLayoutFixed}" Margin="0,8,0,0"/>
+                                            <Button Content="{DynamicResource Save}" Style="{StaticResource SettingsActionButton}"
+                                                    Click="OnSaveIndependentWindowLayout" Margin="0,8,0,0"/>
+                                            <TextBlock x:Name="IndependentLayoutStatus" Style="{StaticResource DetailLabel}" TextWrapping="Wrap"
+                                                       AutomationProperties.LiveSetting="Polite"/>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
                                 <Button x:Name="AdvancedSettingsCard" Content="{DynamicResource AdvancedSettings}"
                                     Command="{Binding AdvancedSettingsCommand}" Style="{StaticResource SettingsActionButton}"
                                     Margin="0,14,0,0" Visibility="{Binding AdvancedSettingsVisibility}"/>
@@ -2620,6 +2656,25 @@
                                         <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource MirroringAutoControlDescription}" Style="{StaticResource DetailLabel}" TextWrapping="Wrap"/>
                                         <TextBlock Text="{Binding MirroringAutoControlStatus}" Foreground="{DynamicResource ErrorBrush}"
                                                    FontSize="{DynamicResource CaptionFontSize}" TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                </Border>
+                                <Border Style="{StaticResource ControlSectionCard}">
+                                    <StackPanel>
+                                        <TextBlock Text="{DynamicResource PreviewWindowsHotkeysTitle}" Style="{StaticResource ControlSectionTitle}"/>
+                                        <TextBlock Text="{DynamicResource PreviewWindowsHotkeysHelp}" Style="{StaticResource DetailLabel}"
+                                                   TextWrapping="Wrap" Margin="0,4,0,0"/>
+                                        <TextBlock Text="{DynamicResource PreviewWindowsHotkeysAllow}" Style="{StaticResource DetailLabel}" Margin="0,8,0,3"/>
+                                        <TextBox x:Name="PreviewHotkeysAllow" Style="{StaticResource RoundedTextBox}" AcceptsReturn="True"
+                                                 TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" MinLines="2" MaxLines="5"
+                                                 MaxLength="4096" AutomationProperties.Name="{DynamicResource PreviewWindowsHotkeysAllow}"/>
+                                        <TextBlock Text="{DynamicResource PreviewWindowsHotkeysBlock}" Style="{StaticResource DetailLabel}" Margin="0,8,0,3"/>
+                                        <TextBox x:Name="PreviewHotkeysBlock" Style="{StaticResource RoundedTextBox}" AcceptsReturn="True"
+                                                 TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" MinLines="2" MaxLines="5"
+                                                 MaxLength="4096" AutomationProperties.Name="{DynamicResource PreviewWindowsHotkeysBlock}"/>
+                                        <Button Content="{DynamicResource Save}" Style="{StaticResource SettingsActionButton}"
+                                                Click="OnSavePreviewWindowsHotkeys" Margin="0,8,0,0"/>
+                                        <TextBlock x:Name="PreviewHotkeysStatus" Style="{StaticResource DetailLabel}" TextWrapping="Wrap"
+                                                   AutomationProperties.LiveSetting="Polite"/>
                                     </StackPanel>
                                 </Border>
                                 <Border Style="{StaticResource ControlSectionCard}">

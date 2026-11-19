@@ -201,7 +201,7 @@ public partial class MainWindow
             _mappingSettings.Mappings.Any(m => m.Enabled && m.Key!.SamePhysicalKey(key));
         return _keyboardRouter.RouteEvent(key, down, Resolve, ReplayKeyboardEvent, defer,
             bufferShortcutModifiers: CanForwardControlKeyboard(target, window) && _keyboardRouter.Mode != KeyboardInputMode.None,
-            diagnose: diagnose, hookTime: hookTime);
+            diagnose: diagnose, hookTime: hookTime, windowsHotkeys: PreviewWindowsHotkeysFor(sourceForeground));
     }
 
     private bool RecoverShortcutPressFromWindow(PreviewKeyboardEventArgs e, string? target, nint window)
@@ -213,6 +213,8 @@ public partial class MainWindow
             !CanForwardControlKeyboard(target, window)) return false;
         var key = new MappedKey(ModifierKeyIdentity(e.VirtualKey, e.ScanCode),
             e.ScanCode & 0xFF, (e.ScanCode & 0x100) != 0);
+        if (PreviewWindowsHotkeysFor(_keyboardForegroundWindow()) is { } hotkeys &&
+            hotkeys.Match(key.VirtualKey, _keyboardRouter.PressedModifiers) != WindowsHotkeyDisposition.Default) return false;
         return _keyboardRouter.RecoverShortcutPressFromWindow(key, time,
             unchecked((uint)Environment.TickCount), e.IsRepeat,
             decision => ObserveFunctionKey(key, true, target, "window_press")?.Invoke(decision));

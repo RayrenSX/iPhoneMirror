@@ -8,6 +8,7 @@ using System.Windows.Threading;
 using IPhoneMirror.App.Controls;
 using IPhoneMirror.App.Interop;
 using IPhoneMirror.App.Localization;
+using IPhoneMirror.App.Models;
 using IPhoneMirror.App.Services;
 
 namespace IPhoneMirror.App.Windows;
@@ -567,7 +568,8 @@ internal sealed class NativePreviewWindow : IDisposable
         Func<bool>? isUsbControlEnabled = null,
         Action<nint>? requestUsbControl = null,
         Action<nint>? requestWirelessControl = null,
-        Action<NativePreviewWindow>? beforeShow = null)
+        Action<NativePreviewWindow>? beforeShow = null,
+        IndependentWindowLayout? layout = null)
     {
         window = null;
         NativePreviewWindow? candidate = null;
@@ -593,7 +595,7 @@ internal sealed class NativePreviewWindow : IDisposable
             }
             candidate._attached = true;
             beforeShow?.Invoke(candidate);
-            candidate.ShowInitially();
+            candidate.ShowWithInitialLayout(layout);
             if (Volatile.Read(ref BossKeyHidden) != 0)
                 candidate.SetBossKeyHidden(true);
             else
@@ -658,9 +660,11 @@ internal sealed class NativePreviewWindow : IDisposable
         }
     }
 
-    private void ShowInitially()
+    private void ShowInitially() => ShowWithInitialLayout(null);
+
+    private void ShowWithInitialLayout(IndependentWindowLayout? layout)
     {
-        var boundsApplied = _aspectController.ApplyInitialBounds();
+        var boundsApplied = ApplyInitialLayout(layout);
         _isTopMost = false;
         if (!SetWindowPos(_handle, HwndNoTopMost, 0, 0, 0, 0,
                 SwpNoSize | SwpNoMove | SwpNoActivate | SwpShowWindow))
@@ -675,6 +679,47 @@ internal sealed class NativePreviewWindow : IDisposable
         Log("independent_window_initial_layout",
             ("mode", WindowMode), ("bounds_applied", boundsApplied),
             ("top_most", _isTopMost));
+    }
+
+    private bool ApplyInitialLayout(IndependentWindowLayout? layout)
+    {
+        if (layout is not { IsValid: true }) return _aspectController.ApplyInitialBounds();
+
+        if (layout.HasPosition && !layout.HasSize)
+            _ = SetWindowPos(_handle, 0, layout.X!.Value, layout.Y!.Value, 0, 0,
+                SwpNoSize | SwpNoZOrder | SwpNoActivate);
+        var applied = (!layout.HasSize || !layout.HasPosition) && _aspectController.ApplyInitialBounds();
+        if ((layout.HasPosition || layout.HasSize) && GetWindowRect(_handle, out var current))
+        {
+            var width = layout.Width ?? (current.Right - current.Left);
+            var height = layout.Height ?? (current.Bottom - current.Top);
+            var x = layout.X ?? (current.Left + current.Right - width) / 2;
+            var y = layout.Y ?? (current.Top + current.Bottom - height) / 2;
+            var desired = new WindowRect { Left = x, Top = y, Right = x + width, Bottom = y + height };
+            var monitor = MonitorFromRect(ref desired, MonitorDefaultToNearest);
+            var monitorInfo = new MonitorInfo { Size = (uint)Marshal.SizeOf<MonitorInfo>() };
+            if (monitor != 0 && GetMonitorInfoW(monitor, ref monitorInfo))
+            {
+                var area = monitorInfo.WorkArea;
+                // Keep the requested bounds when the window is reachable, even
+                // across monitors. Recover a layout saved on a removed display.
+                if (Math.Min(desired.Right, area.Right) - Math.Max(x, area.Left) < 48 ||
+                    Math.Min(desired.Bottom, area.Bottom) - Math.Max(y, area.Top) < 48)
+                {
+                    x = Math.Clamp(x, area.Left, Math.Max(area.Left, area.Right - width));
+                    y = Math.Clamp(y, area.Top, Math.Max(area.Top, area.Bottom - height));
+                }
+            }
+            if (SetWindowPos(_handle, 0, x, y, width, height, SwpNoZOrder | SwpNoActivate))
+            {
+                _aspectController.AutomaticResizeEnabled = !layout.HasSize;
+                _aspectController.KeepPositionOnAutomaticResize = layout.HasPosition;
+                applied = true;
+            }
+            else if (!applied) applied = _aspectController.ApplyInitialBounds();
+        }
+        if (layout.Fixed) SetFixedWindow(true);
+        return applied;
     }
 
     internal void Activate()
@@ -1448,10 +1493,12 @@ internal sealed class NativePreviewWindow : IDisposable
         TemporaryBoolean(PreviewShortcutSetting.Topmost, _isTopMost) ? HwndTopMost : HwndNoTopMost,
         0, 0, 0, 0, SwpNoSize | SwpNoMove | SwpNoActivate);
 
-    private void ToggleFixedWindow()
+    internal void ToggleFixedWindow() => SetFixedWindow(!_isFixed);
+
+    private void SetFixedWindow(bool enabled)
     {
-        if (_disposed || _handle == 0 || _isFullScreen) return;
-        _isFixed = !_isFixed;
+        if (_disposed || _handle == 0 || _isFullScreen || _isFixed == enabled) return;
+        _isFixed = enabled;
         if (!_isFixed && UsesWindowPointerControl)
             ResetTouchControlInput();
         var style = GetWindowLongPtrW(_handle, GwlStyle).ToInt64();
@@ -1867,6 +1914,9 @@ internal sealed class NativePreviewWindow : IDisposable
 
     [DllImport("user32.dll")]
     private static extern nint MonitorFromWindow(nint window, uint flags);
+
+    [DllImport("user32.dll")]
+    private static extern nint MonitorFromRect(ref WindowRect rectangle, uint flags);
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]

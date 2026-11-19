@@ -97,6 +97,7 @@ internal static partial class Program
             Find<Border>("ControlPanelContent").DataContext = vm;
             Console.WriteLine("Offline fixture ready.");
             var frameManager = (MultiDevicePreviewManager)KeyboardField(window, "_secondaryMirrors");
+            TestIndependentWindowSettings(window, app, vm, device, store);
             app.IsUiPreviewMode = false;
             try
             {
@@ -329,6 +330,56 @@ internal static partial class Program
             CloseWorkspaceTestWindow(window);
             app.RestoreUpdateSettings(original);
             app.Shutdown();
+        }
+    }
+
+    private static void TestIndependentWindowSettings(MainWindow window, App app, MainViewModel vm,
+        DeviceViewModel device, UpdateSettingsStore store)
+    {
+        T Find<T>(string name) where T : FrameworkElement => (T)window.FindName(name);
+        var priorPreviewMode = app.IsUiPreviewMode;
+        app.IsUiPreviewMode = false;
+        try
+        {
+            KeyboardCall(window, "RefreshIndependentWindowLayoutEditor");
+            InteractionAssert(Find<StackPanel>("IndependentWindowLayoutEditor").IsEnabled,
+                "Selecting a phone must enable its startup layout fields.");
+            Find<TextBox>("IndependentLayoutX").Text = "-1200";
+            Find<TextBox>("IndependentLayoutY").Text = "180";
+            Find<CheckBox>("IndependentLayoutFixed").IsChecked = true;
+            KeyboardCall(window, "OnSaveIndependentWindowLayout", window, new RoutedEventArgs());
+            var expected = new IndependentWindowLayout(-1200, 180, Fixed: true);
+            InteractionAssert(store.Load().IndependentWindowLayouts.GetValueOrDefault(device.Udid.ToUpperInvariant()) == expected &&
+                app.UpdateSettings.Clone().IndependentWindowLayouts.GetValueOrDefault(device.Udid) == expected,
+                "Layout values or case-insensitive per-device lookups did not survive save/load/clone.");
+            Find<TextBox>("IndependentLayoutWidth").Text = "500";
+            KeyboardCall(window, "OnSaveIndependentWindowLayout", window, new RoutedEventArgs());
+            InteractionAssert(Find<TextBlock>("IndependentLayoutStatus").Text == LocalizationService.Get("IndependentWindowLayoutInvalid") &&
+                store.Load().IndependentWindowLayouts.GetValueOrDefault(device.Udid) == expected,
+                "An incomplete width/height pair changed the saved layout.");
+            SetKeyboardField(vm, "_selectedDevice", DeviceViewModel.CreateMediaCast());
+            KeyboardCall(window, "RefreshIndependentWindowLayoutEditor");
+            InteractionAssert(!Find<StackPanel>("IndependentWindowLayoutEditor").IsEnabled &&
+                Find<TextBox>("IndependentLayoutX").Text.Length == 0, "The device layout leaked to another source.");
+            SetKeyboardField(vm, "_selectedDevice", device);
+            KeyboardCall(window, "RefreshIndependentWindowLayoutEditor");
+            InteractionAssert(Find<TextBox>("IndependentLayoutX").Text == "-1200", "Switching back lost the saved layout.");
+
+            Find<TextBox>("PreviewHotkeysAllow").Text = "Win\nAlt+Tab";
+            Find<TextBox>("PreviewHotkeysBlock").Text = "PrintScreen";
+            KeyboardCall(window, "OnSavePreviewWindowsHotkeys", window, new RoutedEventArgs());
+            var loaded = store.Load();
+            InteractionAssert(loaded.PreviewWindowsHotkeyAllowList.Split('\n').Length == 2 &&
+                loaded.Clone().PreviewWindowsHotkeyBlockList == "PrintScreen", "Hotkey lists did not survive save/load/clone.");
+            Find<TextBox>("PreviewHotkeysBlock").Text = "alt+tab";
+            KeyboardCall(window, "OnSavePreviewWindowsHotkeys", window, new RoutedEventArgs());
+            InteractionAssert(store.Load().PreviewWindowsHotkeyBlockList == "PrintScreen",
+                "A duplicate hotkey overwrote the saved policy.");
+        }
+        finally
+        {
+            SetKeyboardField(vm, "_selectedDevice", device);
+            app.IsUiPreviewMode = priorPreviewMode;
         }
     }
 }

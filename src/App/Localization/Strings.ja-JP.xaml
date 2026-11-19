@@ -2115,4 +2115,19 @@ BluetoothとAssistiveTouchが必要です。
     <sys:String x:Key="DeviceHubExplorerHelp">Windows エクスプローラーで、選択したメディアやアプリの共有書類を読み書きできます。iPhone のファイルシステム全体は公開されません。操作接続の切断、端末の切り替え、アプリの終了時にドライブを自動的に切断します。</sys:String>
     <sys:String x:Key="DeviceHubExplorerOpenFailedFormat">割り当て先を開けませんでした：{0}</sys:String>
     <sys:String x:Key="DeviceHubSharedDocuments">アプリ書類</sys:String>
+    <system:String x:Key="IndependentWindowLayoutTitle">独立ウィンドウの初期配置</system:String>
+    <system:String x:Key="IndependentWindowLayoutHelp">選択中のデバイスの初期配置を画面ピクセルで設定します。座標またはサイズの両欄を空欄にすると自動設定されます。</system:String>
+    <system:String x:Key="IndependentWindowLayoutX">X 座標</system:String>
+    <system:String x:Key="IndependentWindowLayoutY">Y 座標</system:String>
+    <system:String x:Key="IndependentWindowLayoutWidth">幅</system:String>
+    <system:String x:Key="IndependentWindowLayoutHeight">高さ</system:String>
+    <system:String x:Key="IndependentWindowLayoutFixed">開くときに位置とサイズを固定</system:String>
+    <system:String x:Key="IndependentWindowLayoutInvalid">X と Y（−1,000,000～1,000,000）、幅と高さ（96～32,767）はそれぞれ両方入力してください。</system:String>
+    <system:String x:Key="IndependentWindowLayoutSaved">保存しました。次にウィンドウを開くと反映されます。</system:String>
+    <system:String x:Key="PreviewWindowsHotkeysTitle">独立ウィンドウでの Windows ホットキー</system:String>
+    <system:String x:Key="PreviewWindowsHotkeysHelp">1 行に 1 つ入力します。例として Win、Alt+Tab、Ctrl+Shift+S が使えます。記載していないキーは従来どおり動作します。</system:String>
+    <system:String x:Key="PreviewWindowsHotkeysAllow">Windows に渡す</system:String>
+    <system:String x:Key="PreviewWindowsHotkeysBlock">ブロック</system:String>
+    <system:String x:Key="PreviewWindowsHotkeysInvalid">ホットキー「{0}」が無効か、重複しています。</system:String>
+    <system:String x:Key="PreviewWindowsHotkeysSaved">ホットキーの設定を保存しました。</system:String>
 </ResourceDictionary>

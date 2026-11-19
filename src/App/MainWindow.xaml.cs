@@ -379,6 +379,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                     app.UpdateSettings, action);
         }
         InitializeProxySettings();
+        InitializePreviewWindowsHotkeys();
         _themeControlReady = true;
         _workspaceControlsReady = true;
         _viewModel = new MainViewModel();
@@ -401,6 +402,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         _secondaryMirrors.KeyboardInput += OnIndependentKeyboardInput;
         _secondaryMirrors.KeyboardFocusChanged += OnIndependentKeyboardFocusChanged;
         DataContext = _viewModel;
+        RefreshIndependentWindowLayoutEditor();
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
         _secondaryMirrors.PhoneFrameChanged += RefreshProjectionPhoneFrame;
         _viewModel.PropertyChanged += (_, _) => RefreshProjectionPhoneFrame();
@@ -6479,6 +6481,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         {
             if (e.PropertyName == nameof(MainViewModel.SelectedDevice))
             {
+                RefreshIndependentWindowLayoutEditor();
                 if (_protectedContentNoticeWindow is not null &&
                     !DeviceViewModel.UdidEquals(_protectedContentNoticeUdid,
                         _viewModel.SelectedDevice?.Udid))

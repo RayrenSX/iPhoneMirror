@@ -40,6 +40,8 @@ internal static partial class Program
         using var first = Preview("Settings shortcut A", readAudio: () => firstAudio, writeAudio: enabled => firstAudio = enabled);
         using var second = Preview("Settings shortcut B");
         using var unavailable = Preview("Settings shortcut unavailable", managed: false);
+        using (var positioned = Preview("Position-only preview", managed: false))
+            TestIndependentWindowLayout(unavailable, positioned);
         windows["setting-test-a"] = first;
         windows["setting-test-b"] = second;
         nint foreground = first.Handle;
@@ -203,8 +205,9 @@ internal static partial class Program
     {
         var previous = app.UpdateSettings.SettingShortcuts;
         app.UpdateSettings.SettingShortcuts = new[] { PreviewShortcutSetting.FullScreen, PreviewShortcutSetting.MuteWindow,
-            PreviewShortcutSetting.RotateLeft, PreviewShortcutSetting.RotateRight }.Select((setting, index) =>
-                new SettingShortcutBinding { Setting = setting, Trigger = SettingShortcutTrigger.Toggle, VirtualKey = index == 3 ? 0x79 : 0x75 + index, Value = 0 }).ToList();
+            PreviewShortcutSetting.RotateLeft, PreviewShortcutSetting.RotateRight, PreviewShortcutSetting.FixWindow }
+            .Zip(new[] { 0x75, 0x76, 0x77, 0x79, 0x74 }, (setting, virtualKey) =>
+                new SettingShortcutBinding { Setting = setting, Trigger = SettingShortcutTrigger.Toggle, VirtualKey = virtualKey, Value = 0 }).ToList();
         KeyboardCall(main, "ConfigureKeyboardShortcuts", keys);
         try
         {
@@ -228,6 +231,11 @@ internal static partial class Program
                 "Rotate left must affect only the foreground preview.");
             Press(0x79);
             InteractionAssert((int)KeyboardField(first, "_rotation") == 0, "Rotate right must undo a single left rotation.");
+            Press(0x74);
+            InteractionAssert((bool)KeyboardField(first, "_isFixed") && !(bool)KeyboardField(second, "_isFixed") &&
+                !(bool)KeyboardField(first, "_isTopMost"), "Fixing a window with a shortcut must lock just that window.");
+            Press(0x74);
+            InteractionAssert(!(bool)KeyboardField(first, "_isFixed"), "The next press must unlock the window.");
             key(0x77, true); key(0x77, false);
             foreground(second.Handle);
             DrainDispatcher();
@@ -239,6 +247,35 @@ internal static partial class Program
             app.UpdateSettings.SettingShortcuts = previous;
             KeyboardCall(main, "ConfigureKeyboardShortcuts", keys);
         }
+    }
+
+    private static void TestIndependentWindowLayout(NativePreviewWindow preview, NativePreviewWindow positioned)
+    {
+        var preset = new IndependentWindowLayout(50, 80, 432, 654, true);
+        InteractionAssert((bool)KeyboardCall(preview, "ApplyInitialLayout", preset)! &&
+            (bool)KeyboardField(preview, "_isFixed"), "The window did not apply its saved size and lock before showing.");
+        void AssertBounds()
+        {
+            InteractionAssert(UnfixGetWindowRect(preview.Handle, out var bounds) &&
+                bounds.Left == 50 && bounds.Top == 80 && bounds.Right - bounds.Left == 432 &&
+                bounds.Bottom - bounds.Top == 654, "The saved position or size was replaced by automatic layout.");
+        }
+        AssertBounds();
+        preview.SetSourceDimensions(844, 390);
+        DrainDispatcher();
+        AssertBounds();
+        InteractionAssert((bool)KeyboardCall(preview, "ApplyInitialLayout", preset with { X = -900000, Y = -900000 })! &&
+            UnfixGetWindowRect(preview.Handle, out var restored) && restored.Left > -900000 && restored.Top > -900000,
+            "An unavailable display left the preview unreachable.");
+        InteractionAssert((bool)KeyboardCall(positioned, "ApplyInitialLayout", new IndependentWindowLayout(20, 40))!,
+            "The position-only preset did not apply.");
+        InteractionAssert(UnfixGetWindowRect(positioned.Handle, out var before),
+            "The positioned preview has no bounds.");
+        positioned.SetSourceDimensions(844, 390);
+        DrainDispatcher();
+        InteractionAssert(UnfixGetWindowRect(positioned.Handle, out var after) &&
+            after.Left == before.Left && after.Top == before.Top && after.Right - after.Left != before.Right - before.Left,
+            "Automatic resizing must honor the top-left anchor of the position-only preset.");
     }
 
     private static void TestSettingShortcutToggle(MainWindow main, App app, NativePreviewWindow first,
@@ -357,7 +394,9 @@ internal static partial class Program
                 InteractionAssert(editor.TryAssignSettingShortcut(row, new(KeyboardShortcut.Control, 0x75)), "The editor rejected a fresh key.");
                 var legacy = editor.Rows.Single(item => item.Action == BluetoothShortcutAction.Home);
                 InteractionAssert(!editor.TryAssignShortcut(legacy, row.Shortcut), "An existing action stole a settings shortcut.");
-                InteractionAssert(row.SettingLabels.Count == 10 && row.SettingLabels[4] != "SettingShortcutsRecording",
+                InteractionAssert(row.SettingLabels.Count == Enum.GetValues<PreviewShortcutSetting>().Length &&
+                    row.SettingLabels[4] != "SettingShortcutsRecording" &&
+                    row.SettingLabels[(int)PreviewShortcutSetting.FixWindow] != "IndependentWindowFix",
                     "Every preview setting must have a localized label.");
                 foreach (var setting in new[] { PreviewShortcutSetting.Topmost, PreviewShortcutSetting.OpaqueOnHover, PreviewShortcutSetting.PhoneFrame })
                 {

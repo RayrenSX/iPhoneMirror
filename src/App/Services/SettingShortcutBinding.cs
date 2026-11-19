@@ -4,6 +4,7 @@ public enum PreviewShortcutSetting
 {
     Opacity = 0, Topmost = 1, OpaqueOnHover = 2, PhoneFrame = 3,
     Recording = 4, Screenshot = 5, FullScreen = 6, MuteWindow = 7, RotateLeft = 8, RotateRight = 9,
+    FixWindow = 10,
 }
 public enum SettingShortcutTrigger { Hold, Toggle }
 
@@ -19,7 +20,7 @@ public sealed record SettingShortcutBinding
     public double Value { get; init; } = 100;
     internal bool IsAction => Setting is PreviewShortcutSetting.Recording or PreviewShortcutSetting.Screenshot or
         PreviewShortcutSetting.FullScreen or PreviewShortcutSetting.MuteWindow or
-        PreviewShortcutSetting.RotateLeft or PreviewShortcutSetting.RotateRight;
+        PreviewShortcutSetting.RotateLeft or PreviewShortcutSetting.RotateRight or PreviewShortcutSetting.FixWindow;
     internal bool UsesMainPreview => Setting is PreviewShortcutSetting.Recording or PreviewShortcutSetting.Screenshot or PreviewShortcutSetting.FullScreen;
     internal KeyboardShortcut Shortcut => new((uint)Modifiers, (uint)VirtualKey);
     internal bool IsValid => Id != Guid.Empty && Enum.IsDefined(Setting) && Enum.IsDefined(Trigger) &&

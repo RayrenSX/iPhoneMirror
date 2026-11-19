@@ -17,7 +17,59 @@ internal static partial class Program
         TestCaptureRecoveryPhysicalIdentity();
         TestUnifiedKeyboardLifetimes();
         TestUnifiedKeyboardDispatch();
+        TestPreviewWindowsHotkeys();
         return 0;
+    }
+
+    private static void TestPreviewWindowsHotkeys()
+    {
+        var rules = PreviewWindowsHotkeyPolicy.Parse("Win\r\nAlt+Tab\r\nShift+Ctrl+S\r\nWin+R", "Ctrl+Alt+B\r\nPrintScreen", out var invalid);
+        MappingAssert(rules is { HasRules: true } && invalid is null &&
+            PreviewWindowsHotkeyPolicy.Parse("Ctrl+S", "control+s", out invalid) is null && invalid == "control+s" &&
+            PreviewWindowsHotkeyPolicy.Parse("Ctrl+", "", out _) is null &&
+            rules.Match(0x2C, 0) == WindowsHotkeyDisposition.Block,
+            "Hotkey parsing did not normalize chords or reject invalid and duplicate entries.");
+
+        var router = new KeyboardInputRouter();
+        router.CompleteHandoff(router.BeginHandoff(KeyboardInputMode.Direct));
+        var device = new List<(int Key, bool Down)>();
+        var windows = new List<(int Key, bool Down)>();
+        var appShortcut = 0;
+        router.Shortcuts.Configure([new(new(KeyboardShortcut.Alt, 0x09), "app", () => true, () => appShortcut++)]);
+        bool Key(int vk, bool down, bool independent = true)
+        {
+            var swallowed = router.RouteEvent(new(vk, 0, false), down,
+                (key, _) => new(KeyboardEventOwner.Direct, true, pressed => device.Add((key.VirtualKey, pressed))),
+                (key, pressed) => windows.Add((key.VirtualKey, pressed)),
+                windowsHotkeys: independent ? rules : null);
+            if (!swallowed) windows.Add((vk, down));
+            return swallowed;
+        }
+        const int win = 0x5C, alt = 0xA4, tab = 0x09, control = 0xA2, shift = 0xA0;
+        Key(win, true); Key(win, false);
+        Key(alt, true); Key(tab, true);
+        router.ReleaseAllPressedKeys(); // Alt+Tab moved the foreground away.
+        Key(tab, false, independent: false); Key(alt, false, independent: false);
+        MappingAssert(windows.SequenceEqual([(win, true), (win, false), (alt, true), (tab, true), (tab, false), (alt, false)]) &&
+            device.Count == 0 && appShortcut == 0 && router.PressedKeyCount == 0,
+            "Win or Alt+Tab did not reach Windows with complete, ordered releases.");
+        windows.Clear();
+        Key(win, true); Key('R', true); Key('R', false); Key(win, false);
+        MappingAssert(windows.SequenceEqual([(win, true), ('R', true), ('R', false), (win, false)]),
+            "A Win chord was mistaken for a standalone Win press.");
+        windows.Clear();
+        Key(control, true); Key(alt, true); Key('B', true); Key('B', true);
+        Key('B', false); Key(alt, false); Key(control, false);
+        MappingAssert(device.Count == 0 && windows.Count == 0, "A blocked chord leaked to the phone or Windows.");
+        Key(control, true); Key('A', true); Key('A', false);
+        Key(shift, true); Key('S', true); Key('S', false); Key(shift, false); Key(control, false);
+        MappingAssert(device.SequenceEqual([(control, true), ('A', true), ('A', false), (control, false)]) &&
+            windows.SequenceEqual([(control, true), (shift, true), ('S', true), ('S', false), (shift, false), (control, false)]) &&
+            router.PressedKeyCount == 0, "The second chord did not release the first modifier owner before Windows received it.");
+        Key(alt, true, independent: false); Key(tab, true, independent: false);
+        Key(tab, false, independent: false); Key(alt, false, independent: false);
+        MappingAssert(appShortcut == 1, "The independent-window allowlist overrode an app shortcut outside that window.");
+        Console.WriteLine("PASS independent-window hotkey rules, modifier handoff, focus loss and scoping.");
     }
 
     private static void TestLostKeyUpReconciliation()

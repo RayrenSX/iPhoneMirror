@@ -88,6 +88,7 @@ public sealed class SettingShortcutRow : INotifyPropertyChanged
         LocalizationService.Get("SettingShortcutsMuteWindow"),
         LocalizationService.Get("IndependentWindowRotateLeft"),
         LocalizationService.Get("IndependentWindowRotateRight"),
+        LocalizationService.Get("IndependentWindowFix"),
     ];
     public string CardTitle => SettingLabels[SettingIndex];
     public IReadOnlyList<string> TriggerLabels =>

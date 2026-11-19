@@ -24,10 +24,13 @@ internal sealed class UpdateSettings
     public bool PhoneFrameEnabled { get; set; }
     public Dictionary<string, bool> DeviceFrameEnabled { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, string> DeviceFrameColors { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, IndependentWindowLayout> IndependentWindowLayouts { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, DeviceControlPreferences> DeviceControlPreferences { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public string SettingsCategory { get; set; } = "projection";
     public AppProxySettings NetworkProxy { get; set; } = new();
     public List<SettingShortcutBinding> SettingShortcuts { get; set; } = [];
+    public string PreviewWindowsHotkeyAllowList { get; set; } = "";
+    public string PreviewWindowsHotkeyBlockList { get; set; } = "";
     public ReverseControlMode MirroringAutoControlMode { get; set; } = ReverseControlMode.None;
     public bool ShowNativeKeyboard { get; set; } = true;
     public Services.Automation.AutomationSettings AutomationApi { get; set; } = new();
@@ -124,12 +127,15 @@ internal sealed class UpdateSettings
         NetworkProxy = (NetworkProxy ?? new()).Clone(),
         SettingShortcuts = (SettingShortcuts ?? []).Where(binding => binding is not null && binding.IsValid)
             .Select(binding => binding with { }).ToList(),
+        PreviewWindowsHotkeyAllowList = PreviewWindowsHotkeyAllowList ?? "",
+        PreviewWindowsHotkeyBlockList = PreviewWindowsHotkeyBlockList ?? "",
         MirroringAutoControlMode = MirroringAutoControlMode,
         ShowNativeKeyboard = ShowNativeKeyboard,
         AutomationApi = (AutomationApi ?? new()).Clone(),
         PhoneFrameEnabled = PhoneFrameEnabled,
         DeviceFrameEnabled = new(DeviceFrameEnabled ?? [], StringComparer.OrdinalIgnoreCase),
         DeviceFrameColors = new(DeviceFrameColors ?? [], StringComparer.OrdinalIgnoreCase),
+        IndependentWindowLayouts = new(IndependentWindowLayouts ?? [], StringComparer.OrdinalIgnoreCase),
         DeviceVideoPreferences = new(DeviceVideoPreferences ?? [], StringComparer.OrdinalIgnoreCase),
         KeyboardMapping = KeyboardMapping.Clone(),
         CheckOnStartup = CheckOnStartup,
@@ -307,6 +313,7 @@ internal sealed class UpdateSettingsStore
                 migrationChanged = true;
             }
             settings.DeviceControlPreferences = new(settings.DeviceControlPreferences ?? [], StringComparer.OrdinalIgnoreCase);
+            settings.IndependentWindowLayouts = new(settings.IndependentWindowLayouts ?? [], StringComparer.OrdinalIgnoreCase);
             settings.BluetoothControlDeviceBindings = NormalizeBluetoothBindings(
                 settings.BluetoothControlDeviceBindings);
             if (settings.BluetoothMouseSensitivitySchema < 1)

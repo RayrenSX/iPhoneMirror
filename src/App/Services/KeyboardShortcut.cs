@@ -14,6 +14,7 @@ internal readonly record struct KeyboardShortcut(uint Modifiers, uint VirtualKey
     internal const uint Alt = 0x0001;
     internal const uint Control = 0x0002;
     internal const uint Shift = 0x0004;
+    internal const uint Windows = 0x0008;
     internal const uint NoRepeat = 0x4000;
     internal const uint MouseRight = 0x100;
     internal const uint MouseMiddle = 0x101;

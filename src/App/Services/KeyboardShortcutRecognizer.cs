@@ -43,7 +43,7 @@ internal sealed class KeyboardShortcutRecognizer
         0xA2 or 0xA3 or 0x11 => KeyboardShortcut.Control,
         0xA0 or 0xA1 or 0x10 => KeyboardShortcut.Shift,
         0xA4 or 0xA5 or 0x12 => KeyboardShortcut.Alt,
-        0x5B or 0x5C => 8, // Win is deliberately excluded by current shortcut settings
+        0x5B or 0x5C => KeyboardShortcut.Windows,
         _ => 0,
     };
 }

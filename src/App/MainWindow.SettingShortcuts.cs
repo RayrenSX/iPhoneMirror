@@ -85,6 +85,9 @@ public partial class MainWindow
             case PreviewShortcutSetting.RotateRight:
                 preview?.Rotate(1);
                 break;
+            case PreviewShortcutSetting.FixWindow:
+                preview?.ToggleFixedWindow();
+                break;
         }
     }
 

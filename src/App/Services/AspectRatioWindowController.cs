@@ -30,6 +30,8 @@ internal sealed class AspectRatioWindowController : IDisposable
     private double _aspectRatio;
     private bool _disposed;
     private DispatcherOperation? _queuedResize;
+    internal bool AutomaticResizeEnabled { get; set; } = true;
+    internal bool KeepPositionOnAutomaticResize { get; set; }
 
     internal AspectRatioWindowController(Window window, uint sourceWidth, uint sourceHeight)
     {
@@ -135,7 +137,7 @@ internal sealed class AspectRatioWindowController : IDisposable
 
     private bool ResizeWindowToAspect(bool fitToWorkArea)
     {
-        if (_disposed || _handle == 0 || !_canResize() ||
+        if (_disposed || _handle == 0 || !AutomaticResizeEnabled || !_canResize() ||
             !GetWindowRect(_handle, out var current) || !TryGetWorkArea(out var workArea)) return false;
 
         GetFrameSize(out var frameWidth, out var frameHeight);
@@ -194,9 +196,10 @@ internal sealed class AspectRatioWindowController : IDisposable
         var centerY = fitToWorkArea
             ? (workArea.Top + workArea.Bottom) / 2
             : (current.Top + current.Bottom) / 2;
-        var left = Math.Clamp(centerX - targetWidth / 2,
+        var keepPosition = KeepPositionOnAutomaticResize && !fitToWorkArea;
+        var left = Math.Clamp(keepPosition ? current.Left : centerX - targetWidth / 2,
             workArea.Left, Math.Max(workArea.Left, workArea.Right - targetWidth));
-        var top = Math.Clamp(centerY - targetHeight / 2,
+        var top = Math.Clamp(keepPosition ? current.Top : centerY - targetHeight / 2,
             workArea.Top, Math.Max(workArea.Top, workArea.Bottom - targetHeight));
 
         return SetWindowPos(_handle, 0, left, top, targetWidth, targetHeight,
