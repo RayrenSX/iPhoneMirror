@@ -2129,5 +2129,4 @@ Pair, select and save.</system:String>
     <system:String x:Key="PreviewWindowsHotkeysAllow">Allow in Windows</system:String>
     <system:String x:Key="PreviewWindowsHotkeysBlock">Block</system:String>
     <system:String x:Key="PreviewWindowsHotkeysInvalid">Invalid or duplicate hotkey “{0}”.</system:String>
-    <system:String x:Key="PreviewWindowsHotkeysSaved">Hotkey rules saved.</system:String>
 </ResourceDictionary>

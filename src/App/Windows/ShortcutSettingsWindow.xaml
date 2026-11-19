@@ -83,7 +83,7 @@
             <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource ShortcutSettingsDescription}"
                        Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"
                        TextWrapping="Wrap" Margin="0,0,0,12"/>
-            <ScrollViewer Grid.Row="1"
+            <ScrollViewer x:Name="ShortcutListScrollViewer" Grid.Row="1"
                           Margin="0,0,0,12"
                           VerticalScrollBarVisibility="Auto"
                           HorizontalScrollBarVisibility="Disabled">
@@ -197,6 +197,22 @@
             </ItemsControl>
             <Button Content="{DynamicResource SettingShortcutsAdd}" Click="OnAddSettingShortcut"
                     IsEnabled="{Binding CanAddSettingShortcut}" HorizontalAlignment="Left" Margin="0,0,0,12"/>
+            <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Margin="0,4,0,16"/>
+            <TextBlock x:Name="PreviewHotkeysHeading" Text="{DynamicResource PreviewWindowsHotkeysTitle}" FontWeight="SemiBold"
+                       FontSize="{DynamicResource FontSize16}" Foreground="{DynamicResource AccentBrush}"
+                       Margin="0,0,0,8" TextWrapping="Wrap"/>
+            <TextBlock Text="{DynamicResource PreviewWindowsHotkeysHelp}" TextWrapping="Wrap"
+                       Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}" Margin="0,0,0,12"/>
+            <TextBlock Text="{DynamicResource PreviewWindowsHotkeysAllow}" Margin="0,0,0,4"/>
+            <TextBox x:Name="PreviewHotkeysAllow" Style="{StaticResource RoundedTextBox}" AcceptsReturn="True"
+                     TextWrapping="Wrap" VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto"
+                     MinLines="3" MaxLines="5" MaxLength="4096"
+                     AutomationProperties.Name="{DynamicResource PreviewWindowsHotkeysAllow}"/>
+            <TextBlock Text="{DynamicResource PreviewWindowsHotkeysBlock}" Margin="0,12,0,4"/>
+            <TextBox x:Name="PreviewHotkeysBlock" Style="{StaticResource RoundedTextBox}" AcceptsReturn="True"
+                     TextWrapping="Wrap" VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto"
+                     MinLines="3" MaxLines="5" MaxLength="4096" Margin="0,0,0,8"
+                     AutomationProperties.Name="{DynamicResource PreviewWindowsHotkeysBlock}"/>
             </StackPanel>
             </ScrollViewer>
             <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource ShortcutSettingsCaptureHint}"
@@ -205,6 +221,7 @@
                        TextWrapping="Wrap" Margin="0,2,0,0"/>
             <TextBlock Text="{Binding StatusText}" Foreground="{DynamicResource ErrorBrush}"
                        Grid.Row="3"
+                       AutomationProperties.LiveSetting="Polite"
                        FontSize="{DynamicResource CaptionFontSize}" TextWrapping="Wrap" Margin="0,8,0,0"/>
         </Grid>
 
@@ -217,7 +234,7 @@
             </Grid.ColumnDefinitions>
             <Button Grid.Column="1" Content="{DynamicResource Cancel}" Click="OnCloseClick"
                     MinWidth="84"/>
-            <Button Grid.Column="3" Content="{DynamicResource Save}" IsDefault="True" Click="OnSaveClick"
+            <Button x:Name="SaveButton" Grid.Column="3" Content="{DynamicResource Save}" IsDefault="True" Click="OnSaveClick"
                     Style="{StaticResource PrimaryButton}" MinWidth="96"/>
         </Grid>
     </Grid>

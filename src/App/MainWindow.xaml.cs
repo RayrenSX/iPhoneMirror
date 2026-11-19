@@ -566,8 +566,10 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             return;
         }
 
+        var settings = (Application.Current as App)?.UpdateSettings;
         var window = new ShortcutSettingsWindow(GetConfiguredShortcuts(),
-            ApplyBluetoothShortcuts, ConfiguredSettingShortcuts, ApplyShortcutSettings)
+            ApplyBluetoothShortcuts, ConfiguredSettingShortcuts, ApplyShortcutSettingsWithHotkeys,
+            (settings?.PreviewWindowsHotkeyAllowList, settings?.PreviewWindowsHotkeyBlockList))
         {
             Owner = this,
         };
@@ -591,8 +593,19 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private string? ApplyShortcutSettings(
         IReadOnlyDictionary<BluetoothShortcutAction, KeyboardShortcut> shortcuts,
-        IReadOnlyList<SettingShortcutBinding> settingShortcuts)
+        IReadOnlyList<SettingShortcutBinding> settingShortcuts) =>
+        ApplyShortcutSettingsWithHotkeys(shortcuts, settingShortcuts, null);
+
+    private string? ApplyShortcutSettingsWithHotkeys(
+        IReadOnlyDictionary<BluetoothShortcutAction, KeyboardShortcut> shortcuts,
+        IReadOnlyList<SettingShortcutBinding> settingShortcuts, (string Allow, string Block)? hotkeys)
     {
+        PreviewWindowsHotkeyPolicy? hotkeyPolicy = null;
+        if (hotkeys is { } rules)
+        {
+            hotkeyPolicy = PreviewWindowsHotkeyPolicy.Parse(rules.Allow, rules.Block, out var invalid);
+            if (hotkeyPolicy is null) return LocalizationService.Format("PreviewWindowsHotkeysInvalid", invalid);
+        }
         if (settingShortcuts.Count > 16 || settingShortcuts.Any(binding => binding is null || !binding.IsValid) ||
             settingShortcuts.Select(binding => binding.Id).Distinct().Count() != settingShortcuts.Count)
             return LocalizationService.Get("ShortcutSettingsInvalid");
@@ -605,7 +618,12 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         var previous = GetConfiguredShortcuts();
         if (!KeyboardShortcut.HaveUniqueBoundValues(allKeys))
             return LocalizationService.Get("ShortcutSettingsDuplicate");
-        if (!TryRegisterShortcutSetCore(shortcuts, out var failedAction, validateAll: true))
+        // Windows hotkey routing can deliberately share a key with another
+        // program. Probe app bindings only when the dialog changes them.
+        var appBindingsChanged = hotkeys is null ||
+            Enum.GetValues<BluetoothShortcutAction>().Any(action => action != BluetoothShortcutAction.ReverseControl &&
+                (!shortcuts.TryGetValue(action, out var next) || !previous.TryGetValue(action, out var old) || old != next));
+        if (appBindingsChanged && !TryRegisterShortcutSetCore(shortcuts, out var failedAction, validateAll: true))
         {
             _ = TryRegisterShortcutSet(previous, out _);
             return LocalizationService.Format("ShortcutRegistrationFailedFormat",
@@ -616,6 +634,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         {
             var snapshot = app.UpdateSettings.Clone();
             app.UpdateSettings.SettingShortcuts = settingShortcuts.Select(binding => binding with { }).ToList();
+            if (hotkeys is { } hotkeyText)
+                (app.UpdateSettings.PreviewWindowsHotkeyAllowList, app.UpdateSettings.PreviewWindowsHotkeyBlockList) = hotkeyText;
             app.UpdateSettings.BluetoothModeShortcutVirtualKey = (int)shortcuts[BluetoothShortcutAction.BluetoothControl].VirtualKey;
             app.UpdateSettings.BluetoothModeShortcutModifiers = (int)shortcuts[BluetoothShortcutAction.BluetoothControl].Modifiers;
             app.UpdateSettings.BluetoothModeShortcutSchema = 1;
@@ -652,6 +672,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             }
         }
 
+        if (hotkeyPolicy is not null) _previewWindowsHotkeys = hotkeyPolicy;
         _bluetoothShortcuts.Clear();
         foreach (var pair in shortcuts) _bluetoothShortcuts[pair.Key] = pair.Value;
         _ = TryRegisterShortcutSet(shortcuts, out _);

@@ -2129,5 +2129,4 @@
     <system:String x:Key="PreviewWindowsHotkeysAllow">放行到 Windows</system:String>
     <system:String x:Key="PreviewWindowsHotkeysBlock">拦截</system:String>
     <system:String x:Key="PreviewWindowsHotkeysInvalid">热键“{0}”无效或重复。</system:String>
-    <system:String x:Key="PreviewWindowsHotkeysSaved">热键规则已保存。</system:String>
 </ResourceDictionary>

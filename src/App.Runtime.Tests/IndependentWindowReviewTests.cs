@@ -2,7 +2,6 @@ using System.Collections;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
-using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -34,6 +33,7 @@ internal static partial class Program
         {
             Setting = PreviewShortcutSetting.FixWindow, Trigger = SettingShortcutTrigger.Toggle, VirtualKey = 0x75, Value = 0,
         }];
+        store.Save(app.UpdateSettings);
         var main = CreateWorkspaceTestWindow(app, includeNativePreview: false);
         var vm = (MainViewModel)KeyboardField(main, "_viewModel");
         var phone = DeviceViewModel.FromNative(new NativeDeviceInfo
@@ -132,17 +132,11 @@ internal static partial class Program
         Find<TextBox>("IndependentLayoutWidth").Text = "420";
         Find<TextBox>("IndependentLayoutHeight").Text = "620";
         Find<CheckBox>("IndependentLayoutFixed").IsChecked = true;
-        Find<TextBox>("PreviewHotkeysAllow").Text = "Win\nAlt+Tab\nCtrl+Shift+F8";
-        Find<TextBox>("PreviewHotkeysBlock").Text = "Ctrl+Shift+F7";
         app.IsUiPreviewMode = false;
-        try
-        {
-            Click(FindVisualDescendants<Button>(layout).Single());
-            Click(FindVisualDescendants<Button>((StackPanel)Find<TextBox>("PreviewHotkeysAllow").Parent).Single());
-        }
+        try { Click(FindVisualDescendants<Button>(layout).Single()); }
         finally { app.IsUiPreviewMode = true; }
-        InteractionAssert(store.Load().IndependentWindowLayouts[phone.Udid] == new IndependentWindowLayout(100, 180, 420, 620, true) &&
-            store.Load().PreviewWindowsHotkeyAllowList.Contains("Ctrl+Shift+F8"), "The visible save buttons did not persist the review fixture.");
+        InteractionAssert(store.Load().IndependentWindowLayouts[phone.Udid] == new IndependentWindowLayout(100, 180, 420, 620, true),
+            "The layout save button did not persist the review fixture.");
         AdvanceDispatcher(TimeSpan.FromMilliseconds(350));
         layout.BringIntoView();
         AdvanceDispatcher(TimeSpan.FromMilliseconds(200));
@@ -152,21 +146,62 @@ internal static partial class Program
         CapturePanel("92-startup-layout.png");
 
         Find<RadioButton>("ControlSettingsTab").IsChecked = true;
+        AdvanceDispatcher(TimeSpan.FromMilliseconds(150));
         Find<ScrollViewer>("ControlSettingsScrollViewer").ScrollToTop();
-        CapturePanel("93-windows-hotkeys.png");
-        var open = FindVisualDescendants<Button>(Find<ScrollViewer>("ControlSettingsScrollViewer"))
-            .Single(button => AutomationProperties.GetAutomationId(button) == "OpenShortcutSettingsButton");
+        var open = Find<Button>("OpenShortcutSettingsButton");
+        open.BringIntoView();
+        CapturePanel("shortcut-entry.png");
         Click(open);
         var editor = (ShortcutSettingsWindow)KeyboardField(main, "_shortcutSettingsWindow");
         try
         {
             AdvanceDispatcher(TimeSpan.FromMilliseconds(200));
-            foreach (var scroller in FindVisualDescendants<ScrollViewer>(editor).Where(viewport => viewport.ScrollableHeight > 0))
-                scroller.ScrollToEnd();
+            var moreSettings = (TextBlock)editor.FindName("MoreSettingsHeading");
+            var scroller = (ScrollViewer)editor.FindName("ShortcutListScrollViewer");
+            scroller.ScrollToVerticalOffset(scroller.VerticalOffset + moreSettings.TranslatePoint(new Point(), scroller).Y - 6);
             AdvanceDispatcher(TimeSpan.FromMilliseconds(200));
             SaveWindowRender(editor, Path.Combine(output, "91-lock-shortcut.png"));
+            var allow = (TextBox)editor.FindName("PreviewHotkeysAllow");
+            var block = (TextBox)editor.FindName("PreviewHotkeysBlock");
+            var save = (Button)editor.FindName("SaveButton");
+            allow.Text = "Win\nAlt+Tab\nCtrl+Shift+F8";
+            block.Text = "alt+tab";
+            Click(save);
+            InteractionAssert(editor.IsVisible && editor.StatusText == LocalizationService.Format("PreviewWindowsHotkeysInvalid", "alt+tab") &&
+                store.Load().PreviewWindowsHotkeyBlockList.Length == 0, "A duplicate rule closed the editor or modified the saved hotkeys.");
+            block.Text = "Ctrl+Shift+F7";
+            using var externalBinding = new HwndSource(new HwndSourceParameters("Existing global F9")
+                { ParentWindow = new nint(-3) });
+            var registered = ReviewRegisterHotKey(externalBinding.Handle, 1, 0, KeyboardShortcut.Default.VirtualKey);
+            app.IsUiPreviewMode = false;
+            try { Click(save); }
+            finally
+            {
+                app.IsUiPreviewMode = true;
+                if (registered) _ = ReviewUnregisterHotKey(externalBinding.Handle, 1);
+            }
+            var saved = store.Load();
+            InteractionAssert(!editor.IsVisible && saved.PreviewWindowsHotkeyAllowList.Split('\n').Length == 3 &&
+                saved.Clone().PreviewWindowsHotkeyBlockList == "Ctrl+Shift+F7" &&
+                saved.SettingShortcuts.Single().Setting == PreviewShortcutSetting.FixWindow,
+                $"The shortcut dialog did not save both types of shortcuts: {editor.StatusText}.");
         }
-        finally { editor.Close(); }
+        finally { if (editor.IsVisible) editor.Close(); }
+
+        Click(open);
+        var reopened = (ShortcutSettingsWindow)KeyboardField(main, "_shortcutSettingsWindow");
+        try
+        {
+            var block = (TextBox)reopened.FindName("PreviewHotkeysBlock");
+            InteractionAssert(block.Text == "Ctrl+Shift+F7", "Reopening the shortcut dialog lost the saved hotkey rules.");
+            AdvanceDispatcher(TimeSpan.FromMilliseconds(200));
+            ((ScrollViewer)reopened.FindName("ShortcutListScrollViewer")).ScrollToEnd();
+            AdvanceDispatcher(TimeSpan.FromMilliseconds(200));
+            SaveWindowRender(reopened, Path.Combine(output, "93-windows-hotkeys.png"));
+            block.Text = "PrintScreen";
+        }
+        finally { reopened.Close(); }
+        InteractionAssert(store.Load().PreviewWindowsHotkeyBlockList == "Ctrl+Shift+F7", "Closing the dialog persisted an unsaved edit.");
 
         static void Click(Button button)
         {

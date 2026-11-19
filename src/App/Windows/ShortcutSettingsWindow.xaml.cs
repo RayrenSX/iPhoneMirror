@@ -12,7 +12,8 @@ public partial class ShortcutSettingsWindow : IPhoneMirror.UI.Controls.RoundedWi
     INotifyPropertyChanged
 {
     private readonly Func<IReadOnlyDictionary<BluetoothShortcutAction, KeyboardShortcut>, string?> _apply;
-    private readonly Func<IReadOnlyDictionary<BluetoothShortcutAction, KeyboardShortcut>, IReadOnlyList<SettingShortcutBinding>, string?>? _applySettings;
+    private readonly Func<IReadOnlyDictionary<BluetoothShortcutAction, KeyboardShortcut>,
+        IReadOnlyList<SettingShortcutBinding>, (string Allow, string Block)?, string?>? _applySettings;
     private string _statusText = string.Empty;
     public ObservableCollection<ShortcutBindingRow> Rows { get; } = [];
     public ObservableCollection<ShortcutBindingSection> Sections { get; } = [];
@@ -21,7 +22,9 @@ public partial class ShortcutSettingsWindow : IPhoneMirror.UI.Controls.RoundedWi
         IReadOnlyDictionary<BluetoothShortcutAction, KeyboardShortcut> shortcuts,
         Func<IReadOnlyDictionary<BluetoothShortcutAction, KeyboardShortcut>, string?> apply,
         IEnumerable<SettingShortcutBinding>? settingShortcuts = null,
-        Func<IReadOnlyDictionary<BluetoothShortcutAction, KeyboardShortcut>, IReadOnlyList<SettingShortcutBinding>, string?>? applySettings = null)
+        Func<IReadOnlyDictionary<BluetoothShortcutAction, KeyboardShortcut>,
+            IReadOnlyList<SettingShortcutBinding>, (string Allow, string Block)?, string?>? applySettings = null,
+        (string? Allow, string? Block) hotkeys = default)
     {
         _apply = apply;
         _applySettings = applySettings;
@@ -44,6 +47,8 @@ public partial class ShortcutSettingsWindow : IPhoneMirror.UI.Controls.RoundedWi
             section.Rows.Add(row);
         }
         InitializeComponent();
+        PreviewHotkeysAllow.Text = hotkeys.Allow ?? "";
+        PreviewHotkeysBlock.Text = hotkeys.Block ?? "";
         DataContext = this;
         LocalizationService.LanguageChanged += OnLanguageChanged;
         Closed += (_, _) => LocalizationService.LanguageChanged -= OnLanguageChanged;
@@ -164,7 +169,8 @@ public partial class ShortcutSettingsWindow : IPhoneMirror.UI.Controls.RoundedWi
             return;
         }
         var error = _applySettings is null ? _apply(shortcuts) :
-            _applySettings(shortcuts, SettingRows.Select(row => row.ToBinding()).ToArray());
+            _applySettings(shortcuts, SettingRows.Select(row => row.ToBinding()).ToArray(),
+                (PreviewHotkeysAllow.Text.Trim(), PreviewHotkeysBlock.Text.Trim()));
         if (!string.IsNullOrWhiteSpace(error))
         {
             StatusText = error;

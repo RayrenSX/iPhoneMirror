@@ -2129,5 +2129,4 @@
     <system:String x:Key="PreviewWindowsHotkeysAllow">允許傳送至 Windows</system:String>
     <system:String x:Key="PreviewWindowsHotkeysBlock">攔截</system:String>
     <system:String x:Key="PreviewWindowsHotkeysInvalid">快速鍵「{0}」無效或重複。</system:String>
-    <system:String x:Key="PreviewWindowsHotkeysSaved">已儲存快速鍵規則。</system:String>
 </ResourceDictionary>

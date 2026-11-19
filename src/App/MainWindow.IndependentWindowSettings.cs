@@ -64,32 +64,9 @@ public partial class MainWindow
     private void InitializePreviewWindowsHotkeys()
     {
         if (Application.Current is not App app) return;
-        PreviewHotkeysAllow.Text = app.UpdateSettings.PreviewWindowsHotkeyAllowList ?? "";
-        PreviewHotkeysBlock.Text = app.UpdateSettings.PreviewWindowsHotkeyBlockList ?? "";
-        _previewWindowsHotkeys = PreviewWindowsHotkeyPolicy.Parse(PreviewHotkeysAllow.Text, PreviewHotkeysBlock.Text, out var invalid);
-        if (invalid is not null)
-            ShowSettingsFeedback(PreviewHotkeysStatus, LocalizationService.Format("PreviewWindowsHotkeysInvalid", invalid), false);
-    }
-
-    private void OnSavePreviewWindowsHotkeys(object sender, RoutedEventArgs e)
-    {
-        if (Application.Current is not App app) return;
-        var allow = PreviewHotkeysAllow.Text.Trim();
-        var block = PreviewHotkeysBlock.Text.Trim();
-        var policy = PreviewWindowsHotkeyPolicy.Parse(allow, block, out var invalid);
-        if (policy is null)
-        {
-            ShowSettingsFeedback(PreviewHotkeysStatus, LocalizationService.Format("PreviewWindowsHotkeysInvalid", invalid), false);
-            return;
-        }
         var settings = app.UpdateSettings;
-        var previous = (settings.PreviewWindowsHotkeyAllowList, settings.PreviewWindowsHotkeyBlockList);
-        (settings.PreviewWindowsHotkeyAllowList, settings.PreviewWindowsHotkeyBlockList) = (allow, block);
-        var saved = app.SaveUpdateSettings();
-        if (saved) _previewWindowsHotkeys = policy;
-        else (settings.PreviewWindowsHotkeyAllowList, settings.PreviewWindowsHotkeyBlockList) = previous;
-        ShowSettingsFeedback(PreviewHotkeysStatus, LocalizationService.Get(saved
-            ? "PreviewWindowsHotkeysSaved" : "ShortcutSettingsSaveFailed"), saved);
+        _previewWindowsHotkeys = PreviewWindowsHotkeyPolicy.Parse(
+            settings.PreviewWindowsHotkeyAllowList, settings.PreviewWindowsHotkeyBlockList, out _);
     }
 
     private PreviewWindowsHotkeyPolicy? PreviewWindowsHotkeysFor(nint window) =>

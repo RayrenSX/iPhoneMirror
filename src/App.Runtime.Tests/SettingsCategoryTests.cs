@@ -365,16 +365,8 @@ internal static partial class Program
             KeyboardCall(window, "RefreshIndependentWindowLayoutEditor");
             InteractionAssert(Find<TextBox>("IndependentLayoutX").Text == "-1200", "Switching back lost the saved layout.");
 
-            Find<TextBox>("PreviewHotkeysAllow").Text = "Win\nAlt+Tab";
-            Find<TextBox>("PreviewHotkeysBlock").Text = "PrintScreen";
-            KeyboardCall(window, "OnSavePreviewWindowsHotkeys", window, new RoutedEventArgs());
-            var loaded = store.Load();
-            InteractionAssert(loaded.PreviewWindowsHotkeyAllowList.Split('\n').Length == 2 &&
-                loaded.Clone().PreviewWindowsHotkeyBlockList == "PrintScreen", "Hotkey lists did not survive save/load/clone.");
-            Find<TextBox>("PreviewHotkeysBlock").Text = "alt+tab";
-            KeyboardCall(window, "OnSavePreviewWindowsHotkeys", window, new RoutedEventArgs());
-            InteractionAssert(store.Load().PreviewWindowsHotkeyBlockList == "PrintScreen",
-                "A duplicate hotkey overwrote the saved policy.");
+            InteractionAssert(window.FindName("PreviewHotkeysAllow") is null && window.FindName("PreviewHotkeysBlock") is null,
+                "The Windows hotkey lists must only appear in the shortcut editor.");
         }
         finally
         {

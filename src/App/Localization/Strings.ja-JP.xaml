@@ -2129,5 +2129,4 @@ BluetoothとAssistiveTouchが必要です。
     <system:String x:Key="PreviewWindowsHotkeysAllow">Windows に渡す</system:String>
     <system:String x:Key="PreviewWindowsHotkeysBlock">ブロック</system:String>
     <system:String x:Key="PreviewWindowsHotkeysInvalid">ホットキー「{0}」が無効か、重複しています。</system:String>
-    <system:String x:Key="PreviewWindowsHotkeysSaved">ホットキーの設定を保存しました。</system:String>
 </ResourceDictionary>

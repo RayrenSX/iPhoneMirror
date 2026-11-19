@@ -2672,25 +2672,6 @@
                                 </Border>
                                 <Border Style="{StaticResource ControlSectionCard}">
                                     <StackPanel>
-                                        <TextBlock Text="{DynamicResource PreviewWindowsHotkeysTitle}" Style="{StaticResource ControlSectionTitle}"/>
-                                        <TextBlock Text="{DynamicResource PreviewWindowsHotkeysHelp}" Style="{StaticResource DetailLabel}"
-                                                   TextWrapping="Wrap" Margin="0,4,0,0"/>
-                                        <TextBlock Text="{DynamicResource PreviewWindowsHotkeysAllow}" Style="{StaticResource DetailLabel}" Margin="0,8,0,3"/>
-                                        <TextBox x:Name="PreviewHotkeysAllow" Style="{StaticResource RoundedTextBox}" AcceptsReturn="True"
-                                                 TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" MinLines="2" MaxLines="5"
-                                                 MaxLength="4096" AutomationProperties.Name="{DynamicResource PreviewWindowsHotkeysAllow}"/>
-                                        <TextBlock Text="{DynamicResource PreviewWindowsHotkeysBlock}" Style="{StaticResource DetailLabel}" Margin="0,8,0,3"/>
-                                        <TextBox x:Name="PreviewHotkeysBlock" Style="{StaticResource RoundedTextBox}" AcceptsReturn="True"
-                                                 TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" MinLines="2" MaxLines="5"
-                                                 MaxLength="4096" AutomationProperties.Name="{DynamicResource PreviewWindowsHotkeysBlock}"/>
-                                        <Button Content="{DynamicResource Save}" Style="{StaticResource SettingsActionButton}"
-                                                Click="OnSavePreviewWindowsHotkeys" Margin="0,8,0,0"/>
-                                        <TextBlock x:Name="PreviewHotkeysStatus" Style="{StaticResource DetailLabel}" TextWrapping="Wrap"
-                                                   AutomationProperties.LiveSetting="Polite"/>
-                                    </StackPanel>
-                                </Border>
-                                <Border Style="{StaticResource ControlSectionCard}">
-                                    <StackPanel>
                                         <TextBlock Text="{DynamicResource SettingsKeyboard}" Style="{StaticResource ControlSectionTitle}"/>
                                         <TextBlock x:Name="NativeKeyboardError" Text="{Binding NativeKeyboardStatus}" TextWrapping="Wrap"
                                             Foreground="{DynamicResource ErrorBrush}" FontSize="{DynamicResource CaptionFontSize}"
@@ -2712,7 +2693,7 @@
                                             ToolTip="{DynamicResource NativeKeyboardDescription}"
                                             AutomationProperties.HelpText="{Binding NativeKeyboardStatus}"
                                             AutomationProperties.AutomationId="NativeKeyboardVisibilityButton"/>
-                                        <Button Content="{DynamicResource OpenShortcutSettings}"
+                                        <Button x:Name="OpenShortcutSettingsButton" Content="{DynamicResource OpenShortcutSettings}"
                                             Click="OnShortcutSettingsClick" Style="{StaticResource SettingsActionButton}"
                                             Margin="0,10,0,0" HorizontalAlignment="Stretch"
                                             AutomationProperties.AutomationId="OpenShortcutSettingsButton"/>
