@@ -126,23 +126,29 @@ public class RoundedWindow : Window
         });
     }
 
-    private void RestoreCompositionBackground()
+    private void RestoreCompositionBackground() => RestoreCompositionBackground(this);
+
+    internal static void RestoreCompositionBackground(Window window)
     {
-        if (!AllowsTransparency || _source is null) return;
+        if (!window.AllowsTransparency) return;
+        var handle = new WindowInteropHelper(window).Handle;
+        if (handle == 0) return;
+        var source = HwndSource.FromHwnd(handle);
+        if (source is null || source.IsDisposed) return;
         // Owner theme refreshes can propagate Mica to owned HWNDs. That
         // native backdrop fills the rectangular shadow margin even when both
         // the WPF brush and HwndTarget background remain fully transparent.
         if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000))
         {
             var none = 1; // DWMSBT_NONE
-            _ = DwmSetWindowAttribute(_source.Handle, 38, ref none, sizeof(int));
+            _ = DwmSetWindowAttribute(source.Handle, 38, ref none, sizeof(int));
             if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22621))
             {
                 var disabled = 0; // legacy Windows 11 Mica
-                _ = DwmSetWindowAttribute(_source.Handle, 1029, ref disabled, sizeof(int));
+                _ = DwmSetWindowAttribute(source.Handle, 1029, ref disabled, sizeof(int));
             }
         }
-        if (_source.CompositionTarget is { } target && target.BackgroundColor.A != 0)
+        if (source.CompositionTarget is { } target && target.BackgroundColor.A != 0)
             target.BackgroundColor = Colors.Transparent;
     }
 

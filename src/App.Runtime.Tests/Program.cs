@@ -41,6 +41,8 @@ internal static partial class Program
                 return RunGridLayoutEntryProbe(layoutAssembly, layoutApplication);
             if (args is ["--grid-layout-compatibility"]) return RunGridLayoutCompatibilityTests();
             if (args is ["--explorer-mapping-lifecycle", var explorerLifecycleOutput]) return RunExplorerMappingLifecycleTests(explorerLifecycleOutput);
+            if (args is ["--rounded-window-review", var roundedReviewOutput]) return RunRoundedWindowCatalogReview(roundedReviewOutput);
+            if (args is ["--rounded-driver-review", var roundedDriverAssembly, var roundedDriverOutput]) return RunRoundedWindowCatalogReview(roundedDriverOutput, roundedDriverAssembly);
             if (args is ["--rounded-window-recovery", var roundedRecoveryOutput]) return RunRoundedWindowRecoveryTests(roundedRecoveryOutput);
             if (args is ["--about-usability", var aboutUsabilityOutput]) return RunAboutUsabilityTests(aboutUsabilityOutput);
             if (args is ["--donation-integrity", var donationIntegrityOutput]) return RunDonationIntegrityTests(donationIntegrityOutput);

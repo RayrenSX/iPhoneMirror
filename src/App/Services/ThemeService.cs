@@ -63,6 +63,14 @@ internal static class ThemeService
         window.SourceInitialized += (_, _) =>
             RefreshWindowTheme(window, CurrentApplicationTheme);
         window.StateChanged += (_, _) => ApplyBackdrop(window);
+        if (window.AllowsTransparency && window is not IPhoneMirror.UI.Controls.RoundedWindow)
+        {
+            window.Activated += (_, _) => RestoreOverlayTransparency(window);
+            window.IsVisibleChanged += (_, _) =>
+            {
+                if (window.IsVisible) RestoreOverlayTransparency(window);
+            };
+        }
         if (new WindowInteropHelper(window).Handle != IntPtr.Zero)
             RefreshWindowTheme(window, CurrentApplicationTheme);
     }
@@ -141,6 +149,11 @@ internal static class ThemeService
             window.SetResourceReference(Window.BackgroundProperty, "WindowBackgroundBrush");
             return;
         }
+        if (window.AllowsTransparency)
+        {
+            RestoreOverlayTransparency(window);
+            return;
+        }
         if (!window.AllowsTransparency)
         {
             var backdrop = window is Wpf.Ui.Controls.FluentWindow fluentWindow
@@ -151,6 +164,15 @@ internal static class ThemeService
             else WindowBackgroundManager.UpdateBackground(window, applicationTheme, backdrop);
         }
         ApplyBackdrop(window);
+    }
+
+    private static void RestoreOverlayTransparency(Window window)
+    {
+        // Floating OCR/mapping controls also use alpha HWNDs, without the
+        // RoundedWindow template. Preserve their intentional content brushes.
+        IPhoneMirror.UI.Controls.RoundedWindow.RestoreCompositionBackground(window);
+        _ = window.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Render,
+            () => IPhoneMirror.UI.Controls.RoundedWindow.RestoreCompositionBackground(window));
     }
 
     private static void EnsureSystemEvents()
@@ -170,7 +192,11 @@ internal static class ThemeService
     internal static void ApplyBackdrop(Window window)
     {
         if (window is IPhoneMirror.UI.Controls.RoundedWindow) return;
-        if (window.AllowsTransparency) return;
+        if (window.AllowsTransparency)
+        {
+            RestoreOverlayTransparency(window);
+            return;
+        }
         if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000)) return;
         var handle = new WindowInteropHelper(window).Handle;
         if (handle == IntPtr.Zero) return;
