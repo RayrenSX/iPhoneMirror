@@ -131,6 +131,11 @@ internal static class ThemeService
     private static void RefreshWindowTheme(Window window,
         ApplicationTheme applicationTheme)
     {
+        if (window is IPhoneMirror.UI.Controls.RoundedWindow { AllowsTransparency: true } rounded)
+        {
+            rounded.RestoreTransparency();
+            return;
+        }
         if (window is IPhoneMirror.UI.Controls.RoundedWindow && !window.AllowsTransparency)
         {
             window.SetResourceReference(Window.BackgroundProperty, "WindowBackgroundBrush");

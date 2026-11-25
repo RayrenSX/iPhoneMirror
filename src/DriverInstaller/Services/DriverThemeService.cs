@@ -200,6 +200,11 @@ internal static class DriverThemeService
 
     private static void ApplyBackdrop(Window window)
     {
+        if (window is IPhoneMirror.UI.Controls.RoundedWindow { AllowsTransparency: true } rounded)
+        {
+            rounded.RestoreTransparency();
+            return;
+        }
         if (window.AllowsTransparency ||
             !OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000)) return;
         var handle = new WindowInteropHelper(window).Handle;

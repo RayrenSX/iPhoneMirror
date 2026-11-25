@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.IO;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
@@ -65,9 +66,15 @@ internal static partial class Program
                         window.Show();
                         AdvanceDispatcher(TimeSpan.FromMilliseconds(300));
                         Check("first-show");
+                        // The owner's theme backend propagates its Mica backdrop
+                        // to owned HWNDs, including per-pixel-alpha dialogs.
+                        ThemeService.Apply(theme == AppTheme.Dark ? AppTheme.Light : AppTheme.Dark);
+                        AdvanceDispatcher(TimeSpan.FromMilliseconds(250));
+                        Check("owner-theme-refresh");
                         cover.Show(); cover.Activate();
                         AdvanceDispatcher(TimeSpan.FromMilliseconds(60));
                         window.Activate();
+                        RoundedRecoverySetActiveWindow(new WindowInteropHelper(window).Handle);
                         AdvanceDispatcher(TimeSpan.FromMilliseconds(100));
                         Check("background-foreground");
                         cover.Hide();
@@ -98,9 +105,11 @@ internal static partial class Program
                         for (var cycle = 0; cycle < 3; cycle++)
                         {
                             cover.Show(); cover.Activate();
+                            RoundedRecoverySetActiveWindow(new WindowInteropHelper(cover).Handle);
                             AdvanceDispatcher(TimeSpan.FromMilliseconds(60));
                             target.BackgroundColor = Colors.MediumVioletRed;
                             window.Activate();
+                            RoundedRecoverySetActiveWindow(new WindowInteropHelper(window).Handle);
                             AdvanceDispatcher(TimeSpan.FromMilliseconds(100));
                             Check($"corrupted-foreground-{cycle}");
                             cover.Hide();
@@ -132,11 +141,15 @@ internal static partial class Program
                                 cornerAlpha.Add(pixel[3]);
                             }
                             var target = HwndSource.FromHwnd(new WindowInteropHelper(window).Handle)!.CompositionTarget!;
+                            var backdropResult = RoundedRecoveryGetDwmAttribute(new WindowInteropHelper(window).Handle,
+                                38, out var backdrop, sizeof(int));
                             var transparent = window.Background is SolidColorBrush { Color.A: 0 } &&
-                                target.BackgroundColor.A == 0 && cornerAlpha.All(alpha => alpha == 0);
+                                target.BackgroundColor.A == 0 && cornerAlpha.All(alpha => alpha == 0) &&
+                                (backdropResult != 0 || backdrop == 1);
                             var context = $"{theme}-{window.GetType().Name}-{stage}";
                             samples.Add(new { context, background = window.Background?.ToString(),
                                 compositionBackground = target.BackgroundColor.ToString(), cornerAlpha, transparent,
+                                backdrop, backdropResult, active = window.IsActive,
                                 renderingTier = RenderCapability.Tier >> 16 });
                             if (!transparent) failures.Add(context + ": opaque outer background or corner.");
                             if (stage is "hidden-theme-reopen" or "theme-backend-refresh")
@@ -163,4 +176,9 @@ internal static partial class Program
         Console.WriteLine($"Rounded window recovery: {samples.Count} samples, {failures.Count} failures.");
         return failures.Count == 0 ? 0 : 1;
     }
+
+    [DllImport("dwmapi.dll", EntryPoint = "DwmGetWindowAttribute")]
+    private static extern int RoundedRecoveryGetDwmAttribute(nint window, int attribute, out int value, int size);
+    [DllImport("user32.dll", EntryPoint = "SetActiveWindow")]
+    private static extern nint RoundedRecoverySetActiveWindow(nint window);
 }
