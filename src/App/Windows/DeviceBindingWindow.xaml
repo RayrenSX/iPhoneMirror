@@ -186,8 +186,20 @@
                     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"><StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="480" Margin="24" animations:SurfaceMotion.Enabled="True">
                         <ui:SymbolIcon Symbol="Phone20" FontSize="48" Foreground="{DynamicResource AccentBrush}" HorizontalAlignment="Center" Margin="0,0,0,24"/>
                         <TextBlock Text="{DynamicResource DeviceBindingEmptyTitle}" FontSize="{DynamicResource FontSize22}" FontWeight="SemiBold" TextAlignment="Center" TextWrapping="Wrap"/>
-                        <TextBlock Text="{DynamicResource DeviceBindingEmptyHint}" Style="{StaticResource BindingNote}" TextAlignment="Center" Margin="0,12,0,20"/>
-                        <Button Content="{DynamicResource DeviceBindingAddProfileToolTip}" Click="AddAirPlayProfileClick" IsEnabled="{Binding CanInteract}" HorizontalAlignment="Center" Padding="18,10"/>
+                        <Border Style="{StaticResource BindingSectionCard}" Margin="0,20,0,0">
+                            <StackPanel>
+                                <TextBlock Text="{DynamicResource ConnectBindingUsb}" Style="{StaticResource BindingSectionTitle}"/>
+                                <TextBlock Text="{DynamicResource ConnectBindingUsbHint}" Style="{StaticResource BindingNote}" Margin="0,5,0,0"/>
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource BindingSectionCard}" Margin="0,10,0,0">
+                            <StackPanel>
+                                <TextBlock Text="{DynamicResource ConnectBindingAirPlay}" Style="{StaticResource BindingSectionTitle}"/>
+                                <TextBlock Text="{DynamicResource ConnectHomeAirPlay}" Style="{StaticResource BindingNote}" Margin="0,5,0,0"/>
+                                <Button Content="{DynamicResource ConnectBindingChooseAirPlay}" Click="AddAirPlayProfileClick"
+                                        IsEnabled="{Binding CanInteract}" HorizontalAlignment="Left" Margin="0,10,0,0"/>
+                            </StackPanel>
+                        </Border>
                     </StackPanel></ScrollViewer>
                 </Border>
             </Grid>

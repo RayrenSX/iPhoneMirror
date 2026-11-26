@@ -55,6 +55,8 @@ tools/srs-lab/.runtime/
 *.pfx
 *.p12
 *.pem
+# Public CA chain required by the bundled IPA signer.
+!tools/ipaside_engine/certs/apple_gsa_ca.pem
 *.key
 *.crt
 *.snk

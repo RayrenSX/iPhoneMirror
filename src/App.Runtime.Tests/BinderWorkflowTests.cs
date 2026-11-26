@@ -84,12 +84,13 @@ internal static partial class Program
             chooser.Show();
             try
             {
-                check(chooser.Devices.Count == 0, "Chooser contains unavailable or USB devices.");
+                var waiting = (FrameworkElement)chooser.FindName("AirPlayWaitingStatus");
+                check(chooser.Devices.Count == 0 && waiting.IsVisible, "The AirPlay chooser must show guidance instead of unavailable or USB devices.");
                 var live = Device("airplay://new", "New iPhone"); devices.Add(live); ToolsPump();
-                check(chooser.Devices.Contains(live), "An AirPlay connection made after opening the chooser did not appear.");
+                check(chooser.Devices.Contains(live) && !waiting.IsVisible, "A live connection must replace the waiting status with a selectable device.");
                 chooser.SelectedDevice = live; check(chooser.CanConfirm, "A live AirPlay device cannot be confirmed.");
                 live.UpdateFrom(Device(live.Udid, "New iPhone", ConnectionState.Disconnected)); ToolsPump();
-                check(!chooser.CanConfirm && chooser.SelectedDevice is null, "Chooser can confirm a disconnected device.");
+                check(!chooser.CanConfirm && chooser.SelectedDevice is null && waiting.IsVisible, "The AirPlay chooser must return to waiting after the selected device disconnects.");
             }
             finally { chooser.Close(); }
             // Remember an intended device that is not present yet.

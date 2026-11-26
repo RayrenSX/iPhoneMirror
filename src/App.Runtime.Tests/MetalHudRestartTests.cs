@@ -36,10 +36,10 @@ internal static partial class Program
         TaskCompletionSource<JsonElement>? pending = null;
         async Task<JsonElement> Request(DeviceViewModel device, string action, object? args, CancellationToken ct)
         {
-            if (action is "launch" or "restart_with_metal_hud")
+            if (action is "launch" or "restart_with_metal_hud" or "close_app")
             {
                 var arguments = JsonSerializer.SerializeToElement(args);
-                Verify(arguments.EnumerateObject().Count() == 1, "App launch must expose only the selected bundle ID.");
+                Verify(arguments.EnumerateObject().Count() == 1, "App operations must send only the selected bundle ID.");
                 calls.Add((device.Udid, action, arguments.GetProperty("bundleId").GetString()!));
                 if (action == "restart_with_metal_hud")
                 {
@@ -55,6 +55,7 @@ internal static partial class Program
                     new { bundleId = "com.fixture.other", name = "Other App", version = "1.0", isFirstParty = false, isDeveloper = false, isAppClip = false } } }),
                 "get_app_icon" => JsonSerializer.SerializeToElement(new { data = HubFixtureIcon("com.fixture.game") }),
                 "list_processes" => JsonSerializer.SerializeToElement(new { processes = new[] { new { processIdentifier = 251, name = "Metal Game" } } }),
+                "close_app" => JsonSerializer.SerializeToElement(new { status = "signal-sent" }),
                 _ => JsonSerializer.SerializeToElement(new { status = "launched" })
             };
         }
@@ -163,6 +164,13 @@ internal static partial class Program
             filter.SelectedIndex = 0; Finish(); list.SelectedItem = null;
             Verify(!Menu().Items.OfType<MenuItem>().Any(item => item.Tag?.ToString() == "app-metal-hud-restart"),
                 "Blank-space menus cannot reuse an earlier HUD target.");
+            Select("com.fixture.game");
+            var close = Menu().Items.OfType<MenuItem>().Single(item => item.Tag?.ToString() == "app-close");
+            Verify(close.IsEnabled && close.Header?.ToString() == "关闭应用", "Normal device management must offer Close App.");
+            close.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent)); Finish();
+            Verify(calls.Last() == (first.Udid, "close_app", "com.fixture.game") &&
+                Find<TextBlock>("StatusText").Text == LocalizationService.Format("DeviceHubPanelAppCloseRequested", "Metal Game"),
+                "Close App must run in normal device management.");
             Console.WriteLine("PASS Metal HUD UI: normal app mode, five languages, real confirmation/cancel, exact target, ordinary Open, duplicate admission, disconnects, stale menus/responses, failures and process isolation.");
         }
         finally

@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Windows;
@@ -14,13 +15,14 @@ namespace IPhoneMirror.App.Windows;
 
 internal sealed class ReverseControlStatusViewModel : INotifyPropertyChanged
 {
+    private static readonly TimeSpan CountdownDuration = TimeSpan.FromSeconds(5);
     private readonly ControlStatusService _service;
     private readonly Dispatcher _dispatcher;
     private readonly DispatcherTimer _timer;
     private readonly System.Threading.Timer _deadlineTimer;
     private ControlStatusSnapshot? _snapshot;
     private int _remaining = 5;
-    private DateTime _autoCloseAtUtc;
+    private long _countdownStartedAt;
     private int _countdownElapsed;
     private int _countdownArmed;
     private bool _details;
@@ -33,6 +35,14 @@ internal sealed class ReverseControlStatusViewModel : INotifyPropertyChanged
     public string DeviceSummary => $"{_snapshot?.DeviceName ?? "iPhone"} · {_snapshot?.Mode switch { ControlStatusMode.Usb => LocalizationService.Get("WiredControlLabel"), ControlStatusMode.Wireless => LocalizationService.Get("WirelessControlLabel"), ControlStatusMode.Bluetooth => LocalizationService.Get("BluetoothControlLabel"), _ => "" }}";
     public string StageTitle => GetStageTitle(_snapshot?.Stage);
     public string StageDescription => LocalizationService.RefreshText(_snapshot?.Error ?? _snapshot?.Description ?? LocalizationService.Get("ControlPreparing"));
+    public bool HasFailure => _snapshot is { Stage: ControlStage.Failed, Prompt: null };
+    public Visibility FailureVisibility => HasFailure ? Visibility.Visible : Visibility.Collapsed;
+    public string FailureDetails => !HasFailure ? string.Empty : _service.Diagnostics.LastOrDefault(item =>
+        item.Level == "Error" && item.Message == _snapshot?.Error &&
+        !string.Equals(item.Message, item.TechnicalMessage, StringComparison.Ordinal))
+        ?.TechnicalMessage ?? string.Empty;
+    public Visibility FailureDetailsVisibility => string.IsNullOrWhiteSpace(FailureDetails)
+        ? Visibility.Collapsed : Visibility.Visible;
     public Visibility BluetoothReleaseHintVisibility => _snapshot is
         { Mode: ControlStatusMode.Bluetooth, Stage: ControlStage.Ready, Prompt: null }
         ? Visibility.Visible : Visibility.Collapsed;
@@ -141,9 +151,9 @@ internal sealed class ReverseControlStatusViewModel : INotifyPropertyChanged
     private void ArmCountdown()
     {
         if (Interlocked.Exchange(ref _countdownArmed, 1) != 0) return;
-        _autoCloseAtUtc = DateTime.UtcNow.AddSeconds(5);
+        _countdownStartedAt = Stopwatch.GetTimestamp();
         Interlocked.Exchange(ref _countdownElapsed, 0);
-        _deadlineTimer.Change(TimeSpan.FromSeconds(5), Timeout.InfiniteTimeSpan);
+        _deadlineTimer.Change(CountdownDuration, Timeout.InfiniteTimeSpan);
         DiagnosticLogger.ReverseControl("status_window", "wired_control_auto_close_countdown_started",
             ("window_id", WindowId), ("control_mode", _snapshot?.Mode));
     }
@@ -175,8 +185,7 @@ internal sealed class ReverseControlStatusViewModel : INotifyPropertyChanged
         else if (!wasReady || hadPrompt)
         {
             ArmCountdown();
-            _remaining = Math.Max(1, (int)Math.Ceiling(
-                (_autoCloseAtUtc - DateTime.UtcNow).TotalSeconds));
+            _remaining = (int)CountdownDuration.TotalSeconds;
             _timer.Stop();
             _timer.Start();
         }
@@ -197,7 +206,8 @@ internal sealed class ReverseControlStatusViewModel : INotifyPropertyChanged
         // DispatcherTimer ticks can be delayed by a busy UI thread. Calculate
         // from an absolute deadline so delayed ticks cannot leave "5 seconds"
         // visible indefinitely or extend the close window.
-        var remaining = Math.Max(0, (int)Math.Ceiling((_autoCloseAtUtc - DateTime.UtcNow).TotalSeconds));
+        var timeLeft = CountdownDuration - Stopwatch.GetElapsedTime(_countdownStartedAt);
+        var remaining = Math.Max(0, (int)Math.Ceiling(timeLeft.TotalSeconds));
         if (_remaining != remaining)
         {
             _remaining = remaining;
@@ -230,7 +240,7 @@ internal sealed class ReverseControlStatusViewModel : INotifyPropertyChanged
         if (_disposed || !CanBeginControlAfterClose ||
             _service.Current is not { Stage: ControlStage.Ready, Prompt: null } ||
             Volatile.Read(ref _countdownArmed) == 0 ||
-            DateTime.UtcNow < _autoCloseAtUtc ||
+            Stopwatch.GetElapsedTime(_countdownStartedAt) < CountdownDuration ||
             Interlocked.Exchange(ref _countdownElapsed, 1) != 0)
             return;
         _timer.Stop();
@@ -269,7 +279,8 @@ internal sealed class ReverseControlStatusViewModel : INotifyPropertyChanged
     {
         OnPropertyChanged(nameof(BluetoothReleaseHintVisibility));
         OnPropertyChanged(nameof(BluetoothReleaseHintText));
-        foreach (var p in new[] { nameof(DeviceSummary), nameof(StageTitle), nameof(StageDescription), nameof(CountdownText), nameof(TotalDurationText), nameof(CancelVisibility), nameof(CloseVisibility), nameof(RetryVisibility), nameof(PromptVisibility), nameof(BluetoothPairingStepsVisibility), nameof(PromptTitle), nameof(PromptMessage), nameof(PromptPrimaryText), nameof(PromptSecondaryText), nameof(PromptPrimaryVisibility), nameof(PromptSecondaryVisibility), nameof(PromptOptionsVisibility), nameof(PromptTechnicalDetails), nameof(PromptTechnicalDetailsVisibility), nameof(IsPromptPrimaryEnabled), nameof(PromptTone), nameof(PromptSymbol) }) OnPropertyChanged(p);
+        OnPropertyChanged(nameof(FailureVisibility));
+        foreach (var p in new[] { nameof(DeviceSummary), nameof(StageTitle), nameof(StageDescription), nameof(HasFailure), nameof(FailureDetails), nameof(FailureDetailsVisibility), nameof(CountdownText), nameof(TotalDurationText), nameof(CancelVisibility), nameof(CloseVisibility), nameof(RetryVisibility), nameof(PromptVisibility), nameof(BluetoothPairingStepsVisibility), nameof(PromptTitle), nameof(PromptMessage), nameof(PromptPrimaryText), nameof(PromptSecondaryText), nameof(PromptPrimaryVisibility), nameof(PromptSecondaryVisibility), nameof(PromptOptionsVisibility), nameof(PromptTechnicalDetails), nameof(PromptTechnicalDetailsVisibility), nameof(IsPromptPrimaryEnabled), nameof(PromptTone), nameof(PromptSymbol) }) OnPropertyChanged(p);
     }
     public event PropertyChangedEventHandler? PropertyChanged;
     private void OnPropertyChanged([CallerMemberName] string? n = null) => PropertyChanged?.Invoke(this, new(n));
@@ -456,12 +467,18 @@ public partial class ReverseControlStatusWindow : IPhoneMirror.UI.Controls.Round
         DiagnosticLogger.ReverseControl("status_window", "wired_control_status_window_shown",
             ("window_id", _active._viewModel.WindowId), ("handle", _active._nativeHandle));
     }
-    internal static void ShowDeveloperPreview(Window owner)
+    internal static void ShowDeveloperPreview(Window owner) => ShowDeveloperPreview(owner, showFailure: false);
+
+    internal static void ShowDeveloperPreview(Window owner, bool showFailure)
     {
         var service = new ControlStatusService();
         service.Report(ControlStatusMode.Usb, ControlStage.Connecting, "iPhone",
             LocalizationService.Get("ControlPreparing"), canCancel: false);
-        new ReverseControlStatusWindow(owner, service, null, null, null, null).Show();
+        if (showFailure)
+            service.FailCurrent(LocalizationService.Get("UsbControlFailureDeviceConnectionTimeout"),
+                "USB / bridge startup timeout");
+        new ReverseControlStatusWindow(owner, service, null,
+            showFailure ? () => { } : null, null, null).Show();
     }
     internal static void CloseActive()
     {
@@ -491,7 +508,7 @@ public partial class ReverseControlStatusWindow : IPhoneMirror.UI.Controls.Round
         // Bluetooth control is intentionally gated until the status window is
         // gone. A manual close at the ready stage is an explicit equivalent of
         // waiting for the countdown to finish.
-        if (beginControl) _countdownElapsed?.Invoke();
+        if (_closed && beginControl) _countdownElapsed?.Invoke();
     }
     private void OnCancelClick(object sender, RoutedEventArgs e)
     {
@@ -508,11 +525,10 @@ public partial class ReverseControlStatusWindow : IPhoneMirror.UI.Controls.Round
         _closingOwner = Owner;
         _closingNativeOwner = _nativeOwner;
         ObserveOwner("closing");
+        if (!IsActive || GetForegroundWindow() != _nativeHandle || Dispatcher.HasShutdownStarted) return;
         if (_closingNativeOwner is { } nativeOwner)
         {
-            if (!IsActive || GetForegroundWindow() != _nativeHandle ||
-                !nativeOwner.IsValid || !IsWindowVisible(nativeOwner.Handle) ||
-                IsIconic(nativeOwner.Handle) || Dispatcher.HasShutdownStarted) return;
+            if (!nativeOwner.IsValid || !IsWindowVisible(nativeOwner.Handle) || IsIconic(nativeOwner.Handle)) return;
             var activated = SetForegroundWindow(nativeOwner.Handle);
             if (activated) _ = SetFocus(nativeOwner.Handle);
             DiagnosticLogger.ReverseControl("status_window", "control_status_owner_activated",
@@ -523,8 +539,7 @@ public partial class ReverseControlStatusWindow : IPhoneMirror.UI.Controls.Round
         // Give a foreground status window back to its visible workspace before
         // destroying the HWND. Background countdowns must not steal focus, and
         // closing a status window must never restore a hidden/minimized owner.
-        if (!IsActive || _closingOwner is not { IsVisible: true } owner ||
-            owner.WindowState == WindowState.Minimized || Dispatcher.HasShutdownStarted) return;
+        if (_closingOwner is not { IsVisible: true } owner || owner.WindowState == WindowState.Minimized) return;
         try
         {
             var activated = owner.Activate();

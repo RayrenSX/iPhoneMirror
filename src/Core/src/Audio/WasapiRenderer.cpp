@@ -144,8 +144,8 @@ WasapiEnqueuePlan plan_wasapi_enqueue(
 } // namespace detail
 
 WasapiRenderer::WasapiRenderer(const coremedia::AudioStreamBasicDescription& format,
-    bool playback_enabled, float volume, WasapiBufferingMode buffering_mode)
-    : format_(format) {
+    bool playback_enabled, float volume, WasapiBufferingMode buffering_mode, PlaybackBuffer buffer)
+    : format_(format), buffering_mode_(buffering_mode) {
     const auto network_buffering = buffering_mode == WasapiBufferingMode::NetworkJitter;
     const auto base_layout = detail::checked_wasapi_buffer_layout(format);
     if (!base_layout) {
@@ -154,26 +154,13 @@ WasapiRenderer::WasapiRenderer(const coremedia::AudioStreamBasicDescription& for
             format.format_id, format.format_flags, format.sample_rate,
             format.channels_per_frame, format.bits_per_channel, format.bytes_per_frame));
     }
-    const auto minimum_capacity_frames = network_buffering
-        ? frames_for_duration(format.sample_rate, NetworkCapacityMilliseconds)
-        : 0;
-    const auto layout = network_buffering
-        ? detail::checked_wasapi_buffer_layout(format, minimum_capacity_frames)
-        : base_layout;
+    const auto layout = detail::checked_wasapi_buffer_layout(format,
+        frames_for_duration(format.sample_rate, NetworkCapacityMilliseconds));
     if (!layout) throw std::invalid_argument("WASAPI buffer size overflow");
     block_align_ = layout->block_align;
     capacity_frames_ = layout->capacity_frames;
     ring_.resize(layout->capacity_bytes);
-    base_startup_frames_ = network_buffering
-        ? frames_for_duration(format.sample_rate, NetworkStartupMilliseconds)
-        : BaseStartupFrames;
-    base_high_water_frames_ = network_buffering
-        ? frames_for_duration(format.sample_rate, NetworkHighWaterMilliseconds)
-        : BaseHighWaterFrames;
-    const auto thresholds = detail::wasapi_queue_thresholds(0, capacity_frames_, 0,
-        base_startup_frames_, base_high_water_frames_);
-    startup_frames_ = thresholds.startup_frames;
-    high_water_frames_ = thresholds.high_water_frames;
+    set_buffer(buffer);
 
     playback_enabled_.store(playback_enabled, std::memory_order_relaxed);
     const auto initial_volume = std::isfinite(volume) ? std::clamp(volume, 0.0F, 1.0F) : 1.0F;
@@ -198,6 +185,34 @@ WasapiRenderer::WasapiRenderer(const coremedia::AudioStreamBasicDescription& for
         close_events();
         throw;
     }
+}
+
+void WasapiRenderer::set_buffer(PlaybackBuffer buffer) noexcept {
+    std::scoped_lock lock(queue_mutex_);
+    const auto previous = buffer_;
+    buffer_ = buffer;
+    const auto frames = [this](std::size_t milliseconds) {
+        return frames_for_duration(format_.sample_rate, milliseconds);
+    };
+    switch (buffer) {
+    case PlaybackBuffer::Low: base_startup_frames_ = frames(24); base_high_water_frames_ = frames(52); break;
+    case PlaybackBuffer::Normal: base_startup_frames_ = frames(64); base_high_water_frames_ = frames(100); break;
+    case PlaybackBuffer::High: base_startup_frames_ = frames(120); base_high_water_frames_ = frames(220); break;
+    default:
+        const auto network = buffering_mode_ == WasapiBufferingMode::NetworkJitter;
+        base_startup_frames_ = network ? frames(NetworkStartupMilliseconds) : BaseStartupFrames;
+        base_high_water_frames_ = network ? frames(NetworkHighWaterMilliseconds) : BaseHighWaterFrames;
+        break;
+    }
+    const auto thresholds = detail::wasapi_queue_thresholds(maximum_packet_frames_,
+        capacity_frames_, endpoint_buffer_frames_, base_startup_frames_, base_high_water_frames_);
+    startup_frames_ = thresholds.startup_frames;
+    high_water_frames_ = thresholds.high_water_frames;
+    if (previous != buffer) buffer_revision_.fetch_add(1, std::memory_order_relaxed);
+}
+
+std::uint32_t WasapiRenderer::preview_delay_ms() const noexcept {
+    return active_.load(std::memory_order_relaxed) ? preview_delay_ms_.load(std::memory_order_relaxed) : 0;
 }
 
 WasapiRenderer::~WasapiRenderer() {
@@ -455,6 +470,7 @@ void WasapiRenderer::run_endpoint(std::stop_token token) {
         if (started) (void)client->Stop();
         started = false;
         active_.store(false, std::memory_order_relaxed);
+        preview_delay_ms_.store(0, std::memory_order_relaxed);
     };
     const auto write_available = [&](bool count_underrun) {
         UINT32 padding{};
@@ -481,6 +497,12 @@ void WasapiRenderer::run_endpoint(std::stop_token token) {
         }
         check(render->ReleaseBuffer(available, copied == 0
             ? AUDCLNT_BUFFERFLAGS_SILENT : 0), "release WASAPI render buffer");
+        const auto buffered = queued_frames() + padding + copied;
+        const auto measured = static_cast<std::uint32_t>(std::min(100.0,
+            buffered * 1000.0 / format_.sample_rate));
+        const auto previous = preview_delay_ms_.load(std::memory_order_relaxed);
+        preview_delay_ms_.store(copied == 0 ? 0U : previous == 0 ? measured :
+            (previous * 7 + measured + 4) / 8, std::memory_order_relaxed);
         rendered_frames_.fetch_add(copied, std::memory_order_relaxed);
         return copied < available;
     };
@@ -488,7 +510,6 @@ void WasapiRenderer::run_endpoint(std::stop_token token) {
     try {
         const HANDLE startup_events[] = {as_handle(stop_event_), as_handle(data_event_)};
         const HANDLE render_events[] = {as_handle(stop_event_), as_handle(render_event_)};
-        std::uint64_t rebuffer_events{};
         while (!token.stop_requested()) {
             while (!token.stop_requested()) {
                 bool ready{};
@@ -512,27 +533,30 @@ void WasapiRenderer::run_endpoint(std::stop_token token) {
             std::size_t startup_target{};
             std::size_t startup_high_water{};
             std::size_t startup_packet_max{};
+            std::uint32_t startup_revision{};
             {
                 std::scoped_lock lock(queue_mutex_);
                 startup_target = startup_frames_;
                 startup_high_water = high_water_frames_;
                 startup_packet_max = maximum_packet_frames_;
                 startup_depth = queued_frames_;
+                startup_revision = buffer_revision_.load(std::memory_order_relaxed);
             }
+            if (startup_depth < startup_target) continue;
             (void)write_available(false);
             check(client->Start(), "start WASAPI client");
             started = true;
             active_.store(true, std::memory_order_relaxed);
             logging::write(std::format(
-                "wasapi playback_started queue_frames={} buffered_before_start={} startup_frames={} high_water_frames={} packet_max={} rebuffer={}",
+                "wasapi playback_started queue_frames={} buffered_before_start={} startup_frames={} high_water_frames={} packet_max={}",
                 queued_frames(), startup_depth, startup_target, startup_high_water,
-                startup_packet_max, rebuffer_events));
+                startup_packet_max));
 
-            bool needs_rebuffer{};
             while (!token.stop_requested()) {
                 const auto wait = WaitForMultipleObjects(2, render_events, FALSE, 1000);
                 if (wait == WAIT_OBJECT_0) break;
                 if (wait == WAIT_OBJECT_0 + 1) {
+                    if (startup_revision != buffer_revision_.load(std::memory_order_relaxed)) break;
                     // A network source can briefly arrive just below one
                     // endpoint buffer. write_available() already fills the
                     // remainder with silence; restarting WASAPI here causes
@@ -545,14 +569,10 @@ void WasapiRenderer::run_endpoint(std::stop_token token) {
                         "WaitForMultipleObjects failed: {}", GetLastError()));
                 }
             }
-            if (!needs_rebuffer || token.stop_requested()) break;
+            if (token.stop_requested()) break;
 
             stop_client();
-            check(client->Reset(), "reset WASAPI after underrun");
-            ++rebuffer_events;
-            logging::write(std::format(
-                "wasapi rebuffer n={} queue={} startup={}", rebuffer_events,
-                queued_frames(), startup_frames_));
+            check(client->Reset(), "reset WASAPI after playback buffer changed");
         }
         stop_client();
     } catch (...) {

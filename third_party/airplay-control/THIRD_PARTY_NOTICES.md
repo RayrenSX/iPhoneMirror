@@ -44,7 +44,10 @@ with any redistribution.
 
 The MRP protobuf subset and test fixtures in `internal/mrpwire/` come from
 [postlund/pyatv](https://github.com/postlund/pyatv); see
-[`internal/mrpwire/LICENSE.pyatv`](internal/mrpwire/LICENSE.pyatv). Much of the
+`internal/mrpwire/LICENSE.pyatv` in the full upstream tree. That MRP directory is
+not included in iPhoneMirror's vendored receiver subset; see the [subset source
+record](SOURCE.md). This paragraph preserves upstream attribution and does not
+assert that the omitted component is distributed here. Much of the upstream
 protocol implementation elsewhere is a port of pyatv's behavior.
 
 ## Go module dependencies

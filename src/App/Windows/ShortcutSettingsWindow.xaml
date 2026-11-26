@@ -11,19 +11,50 @@
         xmlns:chrome="clr-namespace:IPhoneMirror.UI.Controls"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent">
     <chrome:RoundedWindow.Resources>
+        <Thickness x:Key="ShortcutContentInset">12,0,12,0</Thickness>
         <Style x:Key="ShortcutCaptureBox" TargetType="TextBox" BasedOn="{StaticResource RoundedTextBox}">
-            <Setter Property="FontSize" Value="{DynamicResource FontSize16}"/>
+            <Setter Property="FontSize" Value="{DynamicResource BodyFontSize}"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="HorizontalContentAlignment" Value="Center"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Padding" Value="8,4"/>
+            <Setter Property="MinHeight" Value="36"/>
             <Setter Property="IsReadOnly" Value="True"/>
             <Setter Property="CaretBrush" Value="Transparent"/>
             <Style.Triggers>
                 <DataTrigger Binding="{Binding IsBound}" Value="False">
-                    <Setter Property="FontSize" Value="{DynamicResource FontSize13}"/>
+                    <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}"/>
+                    <Setter Property="Background" Value="Transparent"/>
                     <Setter Property="FontWeight" Value="Normal"/>
                 </DataTrigger>
             </Style.Triggers>
+        </Style>
+        <Style x:Key="ShortcutFilterChoice" TargetType="RadioButton">
+            <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}"/>
+            <Setter Property="Padding" Value="12,7"/>
+            <Setter Property="MinHeight" Value="34"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocusVisual}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="Segment" Background="Transparent" CornerRadius="7"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Segment" Property="Background" Value="{DynamicResource ControlHoverBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Segment" Property="Background" Value="{DynamicResource ComboItemSelectedBrush}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+                                <Setter Property="FontWeight" Value="SemiBold"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
         <Style x:Key="ShortcutClearButton" TargetType="Button" BasedOn="{StaticResource IconButton}">
             <Setter Property="Width" Value="32"/><Setter Property="Height" Value="32"/>
@@ -53,6 +84,17 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        <Style x:Key="ShortcutFilterRow" TargetType="chrome:ResponsiveFieldRow">
+            <Style.Triggers>
+                <MultiDataTrigger>
+                    <MultiDataTrigger.Conditions>
+                        <Condition Binding="{Binding IsBound}" Value="False"/>
+                        <Condition Binding="{Binding DataContext.ShowBoundOnly, RelativeSource={RelativeSource AncestorType=Window}}" Value="True"/>
+                    </MultiDataTrigger.Conditions>
+                    <Setter Property="Visibility" Value="Collapsed"/>
+                </MultiDataTrigger>
+            </Style.Triggers>
+        </Style>
     </chrome:RoundedWindow.Resources>
 
     <Grid Style="{StaticResource SubWindowPageRoot}"
@@ -64,7 +106,7 @@
             <RowDefinition Height="14"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
-        <Grid Style="{StaticResource SubWindowHeader}"
+        <Grid Style="{StaticResource SubWindowHeader}" Margin="{StaticResource ShortcutContentInset}"
               animations:WindowDragBehavior.IsEnabled="True">
             <TextBlock Text="{DynamicResource ShortcutSettingsTitle}"
                        Style="{StaticResource SubWindowTitle}" Margin="0,0,48,0"/>
@@ -80,28 +122,68 @@
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
-            <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource ShortcutSettingsDescription}"
-                       Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"
-                       TextWrapping="Wrap" Margin="0,0,0,12"/>
+            <StackPanel Margin="{StaticResource ShortcutContentInset}">
+                <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource ShortcutSettingsDescription}"
+                           Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"
+                           TextWrapping="Wrap" Margin="0,0,0,10"/>
+                <Border x:Name="ShortcutFilterSurface" HorizontalAlignment="Left" Margin="0,0,0,16"
+                        Background="{DynamicResource CardBrush}" BorderBrush="{DynamicResource BorderSoftBrush}"
+                        BorderThickness="1" CornerRadius="10" Padding="2">
+                    <UniformGrid Columns="2" AutomationProperties.Name="{DynamicResource ShortcutFilterTitle}">
+                        <RadioButton x:Name="ShortcutFilterAll" GroupName="ShortcutFilter" IsChecked="True"
+                                     Style="{StaticResource ShortcutFilterChoice}" Content="{DynamicResource ShortcutFilterAll}"/>
+                        <RadioButton x:Name="ShortcutFilterBound" GroupName="ShortcutFilter"
+                                     Style="{StaticResource ShortcutFilterChoice}" Content="{DynamicResource ShortcutFilterBound}"/>
+                    </UniformGrid>
+                </Border>
+            </StackPanel>
             <ScrollViewer x:Name="ShortcutListScrollViewer" Grid.Row="1"
-                          Margin="0,0,0,12"
-                          VerticalScrollBarVisibility="Auto"
-                          HorizontalScrollBarVisibility="Disabled">
+                          Margin="0,0,0,12" VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled" CanContentScroll="False">
+            <ScrollViewer.Style>
+                <Style TargetType="ScrollViewer" BasedOn="{StaticResource ContentScrollViewerStyle}">
+                    <Setter Property="Padding" Value="{StaticResource ShortcutContentInset}"/>
+                    <Style.Triggers>
+                        <!-- The shared template reserves 12 DIPs on both sides of
+                             the content when its scrollbar is visible. -->
+                        <Trigger Property="ComputedVerticalScrollBarVisibility" Value="Visible">
+                            <Setter Property="Padding" Value="0"/>
+                        </Trigger>
+                    </Style.Triggers>
+                </Style>
+            </ScrollViewer.Style>
             <StackPanel>
-            <ItemsControl ItemsSource="{Binding Sections}">
+            <ItemsControl x:Name="ShortcutSections" ItemsSource="{Binding Sections}">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
-                        <StackPanel Margin="0,0,0,14">
-                            <TextBlock Text="{Binding Title}" FontSize="{DynamicResource CaptionFontSize}" FontWeight="SemiBold"
-                                       Foreground="{DynamicResource AccentBrush}" Margin="0,0,0,7"/>
+                        <Border x:Name="ShortcutGroupCard" Margin="0,0,0,12" Padding="12,10,12,5" CornerRadius="10"
+                                BorderThickness="1" BorderBrush="{DynamicResource BorderSoftBrush}"
+                                Background="{DynamicResource CardBrush}">
+                            <Border.Style>
+                                <Style TargetType="Border">
+                                    <Style.Triggers>
+                                        <MultiDataTrigger>
+                                            <MultiDataTrigger.Conditions>
+                                                <Condition Binding="{Binding HasBoundRows}" Value="False"/>
+                                                <Condition Binding="{Binding DataContext.ShowBoundOnly, RelativeSource={RelativeSource AncestorType=Window}}" Value="True"/>
+                                            </MultiDataTrigger.Conditions>
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                        </MultiDataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Border.Style>
+                            <StackPanel>
+                            <TextBlock Text="{Binding Title}" FontSize="{DynamicResource BodyFontSize}" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource TextBrush}" Margin="0,0,0,6"/>
                             <ItemsControl ItemsSource="{Binding Rows}">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
-                                        <chrome:ResponsiveFieldRow Margin="0,0,0,12">
+                                        <chrome:ResponsiveFieldRow Margin="0,0,0,5" Style="{StaticResource ShortcutFilterRow}">
                                             <TextBlock Text="{Binding Label}" VerticalAlignment="Center"
                                                        TextWrapping="Wrap"/>
                                             <TextBox Grid.Column="1" Text="{Binding ShortcutText, Mode=OneWay}"
-                                                      Style="{StaticResource ShortcutCaptureBox}" MinHeight="40"
+                                                      Style="{StaticResource ShortcutCaptureBox}" Width="156" TextWrapping="Wrap"
+                                                      HorizontalAlignment="Right" AutomationProperties.Name="{Binding Label}"
                                                       PreviewKeyDown="OnShortcutPreviewKeyDown"
                                                       PreviewMouseDown="OnShortcutPreviewMouseDown"
                                                       ToolTip="{DynamicResource ShortcutSettingsCaptureHint}"
@@ -115,10 +197,21 @@
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
-                        </StackPanel>
+                            </StackPanel>
+                        </Border>
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
+            <StackPanel>
+            <StackPanel.Style>
+                <Style TargetType="StackPanel">
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding ShowSettingShortcutSection}" Value="False">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </StackPanel.Style>
             <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Margin="0,4,0,16"/>
             <TextBlock x:Name="MoreSettingsHeading" Text="{DynamicResource SettingShortcutsTitle}" FontWeight="SemiBold"
                        FontSize="{DynamicResource FontSize16}"
@@ -130,6 +223,19 @@
                     <DataTemplate>
                         <Border Background="{DynamicResource CardBrush}" BorderBrush="{DynamicResource BorderBrush}"
                                 BorderThickness="1" CornerRadius="12" Padding="16" Margin="0,0,0,16">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Style.Triggers>
+                                    <MultiDataTrigger>
+                                        <MultiDataTrigger.Conditions>
+                                            <Condition Binding="{Binding IsBound}" Value="False"/>
+                                            <Condition Binding="{Binding DataContext.ShowBoundOnly, RelativeSource={RelativeSource AncestorType=Window}}" Value="True"/>
+                                        </MultiDataTrigger.Conditions>
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                    </MultiDataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
                         <StackPanel TextBlock.FontSize="{DynamicResource FontSize14}">
                             <Grid Margin="0,0,0,12">
                                 <Grid.ColumnDefinitions>
@@ -196,9 +302,20 @@
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
             <Button Content="{DynamicResource SettingShortcutsAdd}" Click="OnAddSettingShortcut"
-                    IsEnabled="{Binding CanAddSettingShortcut}" HorizontalAlignment="Left" Margin="0,0,0,12"/>
+                    IsEnabled="{Binding CanAddSettingShortcut}" HorizontalAlignment="Left" Margin="0,0,0,12">
+                <Button.Style>
+                    <Style TargetType="Button" BasedOn="{StaticResource SecondaryButton}">
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding ShowBoundOnly}" Value="True">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Button.Style>
+            </Button>
+            </StackPanel>
             <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Margin="0,4,0,16"/>
-            <TextBlock x:Name="PreviewHotkeysHeading" Text="{DynamicResource PreviewWindowsHotkeysTitle}" FontWeight="SemiBold"
+            <TextBlock Text="{DynamicResource PreviewWindowsHotkeysTitle}" FontWeight="SemiBold"
                        FontSize="{DynamicResource FontSize16}" Foreground="{DynamicResource AccentBrush}"
                        Margin="0,0,0,8" TextWrapping="Wrap"/>
             <TextBlock Text="{DynamicResource PreviewWindowsHotkeysHelp}" TextWrapping="Wrap"
@@ -218,14 +335,14 @@
             <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource ShortcutSettingsCaptureHint}"
                        Grid.Row="2"
                        Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"
-                       TextWrapping="Wrap" Margin="0,2,0,0"/>
+                       TextWrapping="Wrap" Margin="12,2,12,0"/>
             <TextBlock Text="{Binding StatusText}" Foreground="{DynamicResource ErrorBrush}"
                        Grid.Row="3"
                        AutomationProperties.LiveSetting="Polite"
-                       FontSize="{DynamicResource CaptionFontSize}" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                       FontSize="{DynamicResource CaptionFontSize}" TextWrapping="Wrap" Margin="12,8,12,0"/>
         </Grid>
 
-        <Grid Grid.Row="4">
+        <Grid Grid.Row="4" Margin="{StaticResource ShortcutContentInset}">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>

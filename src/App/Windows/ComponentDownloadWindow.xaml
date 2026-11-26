@@ -36,12 +36,12 @@
         <Border Grid.Row="2" Style="{StaticResource SettingsSection}" Padding="16">
           <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
            <StackPanel VerticalAlignment="Center">
-            <TextBlock Text="{Binding StatusText}" Style="{StaticResource BodyText}" Margin="0,0,0,12"
+            <TextBlock Text="{Binding StatusText}" MinWidth="1" Style="{StaticResource BodyText}" Margin="0,0,0,12"
                        AutomationProperties.AutomationId="UxPlayDownloadStatus"/>
             <ProgressBar Minimum="0" Maximum="100" Height="7"
                          Value="{Binding Percentage, Mode=OneWay}" IsIndeterminate="{Binding IsIndeterminate}"
                          AutomationProperties.AutomationId="UxPlayDownloadProgress"/>
-            <TextBlock Text="{Binding DetailText}" Style="{StaticResource SecondaryText}" TextWrapping="Wrap" Margin="0,10,0,0"
+            <TextBlock Text="{Binding DetailText}" MinWidth="1" Style="{StaticResource SecondaryText}" TextWrapping="Wrap" Margin="0,10,0,0"
                        AutomationProperties.AutomationId="UxPlayDownloadDetails"/>
            </StackPanel>
           </ScrollViewer>

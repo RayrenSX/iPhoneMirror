@@ -35,4 +35,35 @@ internal static class PreviewCoordinateMapper
         var rect = ContentRect(width, height, videoWidth, videoHeight);
         return rect.IsEmpty ? new Point() : new Point(rect.Left + x * rect.Width, rect.Top + y * rect.Height);
     }
+
+    internal static Rect PlaceOverlayToolbar(Rect preview, Rect picture, Rect workArea, Size size, double gap)
+    {
+        var slots = new[] {
+            new Rect(preview.Left, preview.Top, Math.Max(0, picture.Left - preview.Left), preview.Height),
+            new Rect(picture.Right, preview.Top, Math.Max(0, preview.Right - picture.Right), preview.Height),
+            new Rect(preview.Left, preview.Top, preview.Width, Math.Max(0, picture.Top - preview.Top)),
+            new Rect(preview.Left, picture.Bottom, preview.Width, Math.Max(0, preview.Bottom - picture.Bottom)) };
+        foreach (var candidate in slots)
+        {
+            var slot = Rect.Intersect(candidate, workArea);
+            if (slot.IsEmpty) continue;
+            if (slot.Width >= size.Width + gap * 2 && slot.Height >= size.Height + gap * 2)
+                return new Rect(slot.Left + gap, slot.Top + gap, size.Width, size.Height);
+        }
+        var x = Math.Clamp(preview.Left + (preview.Width - size.Width) / 2,
+            workArea.Left, Math.Max(workArea.Left, workArea.Right - size.Width));
+        if (preview.Top - size.Height - gap >= workArea.Top)
+            return new Rect(x, preview.Top - size.Height - gap, size.Width, size.Height);
+        if (preview.Bottom + size.Height + gap <= workArea.Bottom)
+            return new Rect(x, preview.Bottom + gap, size.Width, size.Height);
+        var y = Math.Clamp(preview.Top + gap, workArea.Top, Math.Max(workArea.Top, workArea.Bottom - size.Height));
+        if (preview.Left - size.Width - gap >= workArea.Left)
+            return new Rect(preview.Left - size.Width - gap, y, size.Width, size.Height);
+        if (preview.Right + size.Width + gap <= workArea.Right)
+            return new Rect(preview.Right + gap, y, size.Width, size.Height);
+        // An edge-to-edge fullscreen picture leaves no outside space. This
+        // last-resort position leaves the preview geometry untouched.
+        return new Rect(x, Math.Clamp(preview.Bottom - size.Height - gap,
+            workArea.Top, Math.Max(workArea.Top, workArea.Bottom - size.Height)), size.Width, size.Height);
+    }
 }

@@ -24,9 +24,11 @@ internal sealed partial class MainViewModel
         internal CancellationTokenSource Lifetime { get; } = lifetime;
         internal CancellationToken Token { get; } = lifetime.Token;
         internal TaskCompletionSource Finished { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        internal string? BundleId;
         internal ExplorerWebDavServer? Server;
         internal WindowsExplorerDrive? Drive;
+        internal Task? Discovery;
+        internal Task? CacheMaintenance;
+        internal ExplorerTreeCache? Cache;
         internal Task? Cleanup;
     }
 
@@ -38,16 +40,20 @@ internal sealed partial class MainViewModel
     private bool _explorerMappingError;
     private Task _explorerCleanup = Task.CompletedTask;
     private long _explorerLimitBytes = 50_000_000;
+    private int _explorerScanCurrent;
+    private int _explorerScanTotal;
+    private bool _explorerDiscovering;
 
     public bool ExplorerMappingBusy => _explorerMappingBusy;
     public string? ExplorerMappingDeviceUdid => _explorerMapping?.Device.Udid;
-    public string? ExplorerMappingBundleId => _explorerMapping?.BundleId;
     public string ExplorerMappingDriveName => _explorerMapping?.Drive?.DriveName ?? "";
     public long ExplorerMappingLimitBytes => _explorerLimitBytes;
     public bool ExplorerMappingHasError => _explorerMappingError;
     public string ExplorerMappingStatus => _explorerStatusKey switch
     {
-        "DeviceHubExplorerMappedFormat" => LocalizationService.Format(_explorerStatusKey, ExplorerMappingDriveName),
+        "DeviceHubExplorerMappedFormat" => LocalizationService.Format(_explorerStatusKey, ExplorerMappingDriveName) +
+            (_explorerDiscovering && _explorerScanTotal > 0 ? " · " + LocalizationService.Format("DeviceHubExplorerScanningFormat", _explorerScanCurrent, _explorerScanTotal) : ""),
+        "DeviceHubExplorerScanningFormat" => LocalizationService.Format(_explorerStatusKey, _explorerScanCurrent, _explorerScanTotal),
         "DeviceHubExplorerFailedFormat" => LocalizationService.Format(_explorerStatusKey, _explorerFailure ?? ""),
         null => "",
         _ => LocalizationService.Get(_explorerStatusKey),
@@ -61,7 +67,7 @@ internal sealed partial class MainViewModel
     private void NotifyExplorerMapping()
     {
         foreach (var property in new[] { nameof(ExplorerMappingBusy), nameof(ExplorerMappingDeviceUdid),
-            nameof(ExplorerMappingBundleId), nameof(ExplorerMappingDriveName), nameof(ExplorerMappingStatus), nameof(ExplorerMappingHasError),
+            nameof(ExplorerMappingDriveName), nameof(ExplorerMappingStatus), nameof(ExplorerMappingHasError),
             nameof(ExplorerMappingLimitBytes) }) OnPropertyChanged(property);
     }
 
@@ -72,9 +78,6 @@ internal sealed partial class MainViewModel
     }
 
     internal async Task<bool> SetExplorerMappingAsync(DeviceViewModel device, bool enabled)
-        => await SetExplorerDocumentMappingAsync(device, enabled, null);
-
-    internal async Task<bool> SetExplorerDocumentMappingAsync(DeviceViewModel device, bool enabled, string? bundleId)
     {
         if (!enabled)
         {
@@ -84,18 +87,18 @@ internal sealed partial class MainViewModel
         }
         if (_disposed || _explorerMappingBusy || !ReferenceEquals(SelectedDevice, device) || device.IsMediaCast)
             return false;
-        if (_explorerMapping?.Drive is not null && ReferenceEquals(_explorerMapping.Device, device) && _explorerMapping.BundleId == bundleId) return true;
+        if (_explorerMapping?.Drive is not null && ReferenceEquals(_explorerMapping.Device, device)) return true;
 
         // Publish the attempt before the first await, including old cleanup.
         _explorerMappingBusy = true;
         var previous = StopExplorerMappingAsync(keepBusy: true);
         var session = new ExplorerMappingSession(device, GetReadyDeviceHubBridge(device),
             CancellationTokenSource.CreateLinkedTokenSource(_shutdownCancellation.Token));
-        session.BundleId = bundleId;
         _explorerMapping = session;
         _explorerMappingBusy = true;
         _explorerMappingError = false;
         _explorerFailure = null;
+        _explorerScanCurrent = _explorerScanTotal = 0;
         _explorerStatusKey = "DeviceHubExplorerStarting";
         NotifyExplorerMapping();
         var mapped = false;
@@ -115,14 +118,29 @@ internal sealed partial class MainViewModel
             }
             if (session.Bridge is not { SupportsDeviceHub: true }) throw new IOException("DEVICE_HUB_UNAVAILABLE");
             if (!ExplorerRouteCurrent(session)) throw new OperationCanceledException();
-            var store = new DeviceHubExplorerFileStore(async (action, arguments, cancellation) =>
+            var progress = new Progress<(int Current, int Total)>(value =>
+            {
+                if (!ReferenceEquals(_explorerMapping, session) || session.Token.IsCancellationRequested || !_explorerMappingBusy || session.Drive is not null) return;
+                _explorerScanCurrent = value.Current;
+                _explorerScanTotal = value.Total;
+                _explorerStatusKey = "DeviceHubExplorerScanningFormat";
+                NotifyExplorerMapping();
+            });
+            session.Cache = await Task.Run(() => new ExplorerTreeCache(
+                Path.Combine(Updater.UpdateSettingsStore.UserDataDirectory, "ExplorerTreeCache"), device.Udid,
+                device.ProductType + "\n" + device.OsVersion), session.Token);
+            var store = await DeviceHubExplorerRootStore.CreateAsync(async (action, arguments, cancellation) =>
             {
                 using var request = CancellationTokenSource.CreateLinkedTokenSource(cancellation, session.Token);
                 var nested = await Application.Current.Dispatcher.InvokeAsync(() =>
                     ExplorerRequestAsync(session, action, arguments, request.Token),
                     DispatcherPriority.Normal, request.Token);
                 return await nested.ConfigureAwait(false);
-            });
+            }, string.IsNullOrWhiteSpace(device.Name) ? LocalizationService.Get("DeviceHubExplorerFolder") : device.Name,
+                LocalizationService.Get("DeviceHubPanelMediaFiles"),
+                LocalizationService.Get("DeviceHubExplorerCrashFolder"), LocalizationService.Get("DeviceHubExplorerTemporaryFolder"),
+                LocalizationService.Get("DeviceHubExplorerSystemCrashFolder"), session.Token, progress,
+                LocalizationService.Get("DeviceHubExplorerSystemFolder"), LocalizationService.Get("DeviceHubExplorerSymbolsFolder"), deferDiscovery: true, cache: session.Cache);
             _ = await store.StatAsync("", session.Token);
             if (!ExplorerRouteCurrent(session)) throw new OperationCanceledException();
             session.Server = ExplorerWebDavServer.Start(store,
@@ -136,12 +154,17 @@ internal sealed partial class MainViewModel
             _explorerWatch.Tick -= OnExplorerMappingWatch;
             _explorerWatch.Tick += OnExplorerMappingWatch;
             _explorerWatch.Start();
-            session.Drive = await WindowsExplorerDrive.ConnectAsync(session.Server.BaseUri, session.Token);
+            session.Drive = await WindowsExplorerDrive.ConnectAsync(session.Server.BaseUri, session.Token, device.Name);
             if (!ExplorerRouteCurrent(session)) throw new OperationCanceledException();
             mapped = true;
+            store.RootsChanged += () => { if (!session.Token.IsCancellationRequested) session.Drive.RefreshFolders(); };
+            store.DirectoryChanged += path => { if (!session.Token.IsCancellationRequested) session.Drive.RefreshFolders(path); };
+            store.StorageChanged += () => { if (!session.Token.IsCancellationRequested) session.Drive.RefreshStorage(); };
             _explorerStatusKey = "DeviceHubExplorerMappedFormat";
             AddDiagnosticLog(AppLog.Event("explorer_mapping_started", ("device", AppLog.Device(device.Udid)),
                 ("drive", session.Drive.DriveName)));
+            session.Discovery = DiscoverExplorerFoldersAsync(session, store);
+            session.CacheMaintenance = MaintainExplorerCacheAsync(session, store);
             return true;
         }
         catch (OperationCanceledException)
@@ -184,19 +207,49 @@ internal sealed partial class MainViewModel
 
     private void OnExplorerMappingWatch(object? sender, EventArgs e) => CheckExplorerMappingConnection();
 
+    private async Task MaintainExplorerCacheAsync(ExplorerMappingSession session, DeviceHubExplorerRootStore store)
+    {
+        try { await store.MaintainCacheAsync(session.Token); }
+        catch (OperationCanceledException) when (session.Token.IsCancellationRequested) { }
+        catch (Exception error) { LogCleanupFailure(error); }
+    }
+
+    private async Task DiscoverExplorerFoldersAsync(ExplorerMappingSession session, DeviceHubExplorerRootStore store)
+    {
+        _explorerDiscovering = true;
+        var progress = new Progress<(int Current, int Total)>(value =>
+        {
+            if (!ReferenceEquals(_explorerMapping, session) || session.Token.IsCancellationRequested || !_explorerDiscovering) return;
+            (_explorerScanCurrent, _explorerScanTotal) = value;
+            NotifyExplorerMapping();
+        });
+        try
+        {
+            await store.DiscoverRemainingAsync(session.Token, progress);
+            AddDiagnosticLog(AppLog.Event("explorer_mapping_discovery_complete"));
+        }
+        catch (OperationCanceledException) when (session.Token.IsCancellationRequested) { }
+        catch (Exception error)
+        {
+            // Optional discovery cannot remove an already usable drive.
+            AddDiagnosticLog(AppLog.Event("explorer_mapping_discovery_failed", ("error", error.GetType().Name)));
+        }
+        finally
+        {
+            if (ReferenceEquals(_explorerMapping, session))
+            {
+                _explorerDiscovering = false;
+                NotifyExplorerMapping();
+            }
+        }
+    }
+
     private async Task<JsonElement> ExplorerRequestAsync(ExplorerMappingSession session,
         string action, object? arguments, CancellationToken cancellation)
     {
         if (!ExplorerRouteCurrent(session)) throw new OperationCanceledException();
         bool Current() => ExplorerRouteCurrent(session);
         var bridge = session.Bridge!;
-        if (session.BundleId is not null)
-        {
-            var scoped = JsonSerializer.SerializeToElement(arguments).EnumerateObject().ToDictionary(p => p.Name, p => p.Value.Clone());
-            scoped["root"] = JsonSerializer.SerializeToElement("documents");
-            scoped["bundleId"] = JsonSerializer.SerializeToElement(session.BundleId);
-            arguments = scoped;
-        }
         try
         {
             if (DeviceHubContract.Require(action).ReadOnly)
@@ -218,6 +271,7 @@ internal sealed partial class MainViewModel
         _explorerWatch?.Stop();
         var session = _explorerMapping;
         _explorerMapping = null;
+        _explorerDiscovering = false;
         session?.Lifetime.Cancel();
         if (!keepStatus) _explorerStatusKey = disconnected ? "DeviceHubExplorerDisconnected" : null;
         if (!keepBusy) _explorerMappingBusy = false;
@@ -239,10 +293,16 @@ internal sealed partial class MainViewModel
         async Task CleanupAsync()
         {
             await session.Finished.Task;
+            try { if (session.Discovery is not null) await session.Discovery; }
+            catch (Exception error) { LogCleanupFailure(error); }
+            try { if (session.CacheMaintenance is not null) await session.CacheMaintenance; }
+            catch (Exception error) { LogCleanupFailure(error); }
             // No resource failure may skip the next resource or old cleanup.
             try { if (session.Server is not null) await session.Server.DisposeAsync(); }
             catch (Exception error) { LogCleanupFailure(error); }
             try { if (session.Drive is not null) await session.Drive.DisposeAsync(); }
+            catch (Exception error) { LogCleanupFailure(error); }
+            try { if (session.Cache is not null) await session.Cache.FlushAsync(force: true); }
             catch (Exception error) { LogCleanupFailure(error); }
             try { await previous; }
             catch (Exception error) { LogCleanupFailure(error); }

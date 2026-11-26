@@ -23,6 +23,19 @@
      </ControlTemplate.Triggers>
     </ControlTemplate></Setter.Value></Setter>
    </Style>
+   <Style x:Key="LibraryItemStyle" TargetType="Button" BasedOn="{StaticResource SecondaryButton}">
+    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+    <Setter Property="Padding" Value="12,9"/>
+    <Setter Property="MinHeight" Value="46"/>
+    <Setter Property="Margin" Value="4,3"/>
+    <Style.Triggers>
+     <Trigger Property="IsEnabled" Value="False">
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderSoftBrush}"/>
+      <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}"/>
+     </Trigger>
+    </Style.Triggers>
+   </Style>
   </Grid.Resources>
   <Canvas IsHitTestVisible="False">
   <Image x:Name="SceneImage" Stretch="Fill" IsHitTestVisible="False" HorizontalAlignment="Left" VerticalAlignment="Top" RenderTransformOrigin="0,0">
@@ -78,19 +91,29 @@
     </StackPanel>
    </Border>
    <Border x:Name="SettingsPanel" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="24,0,24,28"
-           Background="{DynamicResource WindowBackgroundBrush}" BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="1" CornerRadius="9" Padding="10">
+           Background="{DynamicResource WindowBackgroundBrush}" BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="1" CornerRadius="14">
     <Border.RenderTransform><TranslateTransform x:Name="FooterShift"/></Border.RenderTransform>
     <Grid>
      <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-     <ScrollViewer x:Name="OptionsScroll" MaxHeight="250" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-       <Border x:Name="LibraryPanel" Visibility="Collapsed" Padding="0,0,0,8">
-        <StackPanel>
-         <TextBlock Text="{DynamicResource ToolbarLibrary}" FontWeight="SemiBold" Margin="0,0,0,10"/>
-         <WrapPanel x:Name="LibraryItems"/>
-        </StackPanel>
-       </Border>
-     </ScrollViewer>
-     <StackPanel Grid.Row="1">
+     <Grid x:Name="LibraryPanel" Visibility="Collapsed" Margin="16,14,16,12">
+      <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+      <TextBlock Text="{DynamicResource ToolbarLibrary}" Style="{StaticResource SubWindowSectionTitle}"
+                 TextAlignment="Center" Margin="0,0,0,8"/>
+      <ScrollViewer x:Name="OptionsScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+       <UniformGrid x:Name="LibraryItems" Columns="2" Margin="10,0"/>
+      </ScrollViewer>
+     </Grid>
+     <Border Grid.Row="1" Padding="12,10,12,8" BorderBrush="{DynamicResource BorderSoftBrush}">
+      <Border.Style>
+       <Style TargetType="Border">
+        <Style.Triggers>
+         <DataTrigger Binding="{Binding IsVisible, ElementName=LibraryPanel}" Value="True">
+          <Setter Property="BorderThickness" Value="0,1,0,0"/>
+         </DataTrigger>
+        </Style.Triggers>
+       </Style>
+      </Border.Style>
+     <StackPanel>
       <TextBlock x:Name="Feedback" Foreground="{DynamicResource WarningBrush}" Visibility="Collapsed" TextWrapping="Wrap" Margin="0,0,0,8"/>
       <Grid>
        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -105,6 +128,7 @@
        </StackPanel>
       </Grid>
      </StackPanel>
+     </Border>
     </Grid>
    </Border>
   </Grid>

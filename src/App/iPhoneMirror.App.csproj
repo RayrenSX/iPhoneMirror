@@ -23,7 +23,7 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <AssemblyName>iPhoneMirror</AssemblyName>
     <RootNamespace>IPhoneMirror.App</RootNamespace>
-    <Version>1.8.5-pre6</Version>
+    <Version>1.8.5-pre7</Version>
     <AssemblyVersion>1.8.5.0</AssemblyVersion>
     <FileVersion>1.8.5.0</FileVersion>
     <Authors>RayrenSX</Authors>
@@ -58,6 +58,9 @@
     <EmbeddedResource Include="native\components\ffmpeg.sha256"
                       LogicalName="IPhoneMirror.App.Components.Ffmpeg.sha256"
                       Condition="Exists('native\components\ffmpeg.sha256')" />
+    <EmbeddedResource Include="$(AirPlayPhoneAudioTestHashes)"
+                      LogicalName="IPhoneMirror.App.Components.AirPlayPhoneAudioTest.sha256"
+                      Condition="'$(AirPlayPhoneAudioTestHashes)' != ''" />
     <Content Include="$(UsbBridgeRoot)\iUsbBridge.exe">
       <Link>tools\iUsbBridge.exe</Link>
       <TargetPath>tools\iUsbBridge.exe</TargetPath>

@@ -11,73 +11,47 @@ internal sealed class ParentDriverNative : IDisposable
     private const uint CompatibleDrivers = 2;
     private readonly nint _set;
     private DeviceInfo _device;
-    private nint _listDevice;
-    private readonly uint _listType;
     private bool _disposed;
     private readonly List<(ParentDriverChoice Choice, DriverInfo Native)> _drivers = [];
 
     internal IReadOnlyList<ParentDriverChoice> Choices => _drivers.Select(item => item.Choice).ToArray();
 
-    internal ParentDriverNative(string instanceId, bool composite = false, bool installedOnly = false)
+    internal ParentDriverNative(string instanceId, bool installedOnly = false)
     {
         if (!DriverConstants.IsAppleMobileCaptureParent(instanceId))
             throw new InvalidOperationException("Invalid Apple mobile parent instance.");
-        _listType = composite ? 1u : CompatibleDrivers;
         _set = SetupDiCreateDeviceInfoList(0, 0);
         if (_set == new nint(-1)) throw new Win32Exception();
         try
         {
             _device = new DeviceInfo { Size = Marshal.SizeOf<DeviceInfo>() };
             Check(SetupDiOpenDeviceInfoW(_set, instanceId, 0, 0, ref _device));
-            // A global class list is necessary for usb.inf: a broken parent can
-            // belong to USBDevice (or another class), and Apple may omit USB\COMPOSITE.
-            // Building this list does not alter the device's class or hardware IDs.
-            if (!composite)
-            {
-                _listDevice = Marshal.AllocHGlobal(Marshal.SizeOf<DeviceInfo>());
-                Marshal.StructureToPtr(_device, _listDevice, false);
-            }
             var parameters = new InstallParameters { Size = Marshal.SizeOf<InstallParameters>(), DriverPath = "" };
-            Check(SetupDiGetDeviceInstallParamsW(_set, _listDevice, ref parameters));
+            Check(SetupDiGetDeviceInstallParamsW(_set, ref _device, ref parameters));
             parameters.Flags |= 0x00800000; // DI_QUIETINSTALL
             parameters.FlagsEx |= 0x00000800; // DI_FLAGSEX_ALLOWEXCLUDEDDRVS
             parameters.FlagsEx &= ~0x00002000u; // Do not restrict matches to the broken driver's class.
             parameters.FlagsEx |= 0x20000000; // DI_FLAGSEX_RESTART_DEVICE_ONLY
             if (installedOnly) parameters.FlagsEx |= 0x04000000; // DI_FLAGSEX_INSTALLEDDRIVER
-            if (composite)
-            {
-                parameters.Flags |= 0x00010000; // DI_ENUMSINGLEINF
-                parameters.DriverPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "INF", "usb.inf");
-            }
-            Check(SetupDiSetDeviceInstallParamsW(_set, _listDevice, ref parameters));
-            if (!SetupDiBuildDriverInfoList(_set, _listDevice, _listType))
+            Check(SetupDiSetDeviceInstallParamsW(_set, ref _device, ref parameters));
+            // A device can require Apple's composite INF even though both drivers use usbccgp.
+            // Use this device's compatible list so usb.inf requires a matching USB ID.
+            if (!SetupDiBuildDriverInfoList(_set, ref _device, CompatibleDrivers))
             {
                 var error = Marshal.GetLastWin32Error();
-                // A missing original driver must not block binding the system driver.
-                if (!composite && error is unchecked((int)0xE0000203) or unchecked((int)0xE0000228)) return;
+                if (error is unchecked((int)0xE0000203) or unchecked((int)0xE0000228)) return;
                 throw new Win32Exception(error);
-            }
-            if (_listDevice != 0) _device = Marshal.PtrToStructure<DeviceInfo>(_listDevice);
-            if (composite)
-            {
-                // DIOD_INHERIT_CLASSDRVS attaches the global usb.inf list to this
-                // exact device without changing its registry class or binding.
-                Check(SetupDiOpenDeviceInfoW(_set, instanceId, 0, 0x2, ref _device));
-                _listDevice = Marshal.AllocHGlobal(Marshal.SizeOf<DeviceInfo>());
-                Marshal.StructureToPtr(_device, _listDevice, false);
             }
             for (uint index = 0; ; index++)
             {
                 var driver = new DriverInfo { Size = Marshal.SizeOf<DriverInfo>() };
-                if (!SetupDiEnumDriverInfoW(_set, _listDevice, _listType, index, ref driver))
+                if (!SetupDiEnumDriverInfoW(_set, ref _device, CompatibleDrivers, index, ref driver))
                 {
                     var error = Marshal.GetLastWin32Error();
                     if (error == 259) break; // ERROR_NO_MORE_ITEMS
                     throw new Win32Exception(error);
                 }
-                var choice = ReadChoice(ref driver, out var hardwareId);
-                if (!composite || choice.IsComposite && hardwareId.Equals(@"USB\COMPOSITE", StringComparison.OrdinalIgnoreCase))
-                    _drivers.Add((choice, driver));
+                _drivers.Add((ReadChoice(ref driver), driver));
             }
         }
         catch { Dispose(); throw; }
@@ -89,14 +63,13 @@ internal sealed class ParentDriverNative : IDisposable
     internal static ParentDriverEnumeration EnumerateWithDiagnostics(string instanceId) =>
         CollectSources(new (string Name, Func<IReadOnlyList<ParentDriverChoice>> Read)[]
         {
-            ("Windows composite", () => ReadSource(instanceId, true, false)),
-            ("Compatible", () => ReadSource(instanceId, false, false)),
-            ("Installed", () => ReadSource(instanceId, false, true)),
+            ("Compatible", () => ReadSource(instanceId, false)),
+            ("Installed", () => ReadSource(instanceId, true)),
         });
 
-    private static IReadOnlyList<ParentDriverChoice> ReadSource(string instanceId, bool composite, bool installed)
+    private static IReadOnlyList<ParentDriverChoice> ReadSource(string instanceId, bool installedOnly)
     {
-        using var source = new ParentDriverNative(instanceId, composite, installed);
+        using var source = new ParentDriverNative(instanceId, installedOnly);
         return source.Choices;
     }
 
@@ -128,26 +101,14 @@ internal sealed class ParentDriverNative : IDisposable
     {
         var entry = _drivers.First(item => item.Choice.SameDriver(choice));
         var driver = entry.Native;
-        // Apply flags to the exact opened device, including inherited class lists.
-        var devicePointer = Marshal.AllocHGlobal(Marshal.SizeOf<DeviceInfo>());
-        try
-        {
-            Marshal.StructureToPtr(_device, devicePointer, false);
-            var parameters = new InstallParameters { Size = Marshal.SizeOf<InstallParameters>(), DriverPath = "" };
-            Check(SetupDiGetDeviceInstallParamsW(_set, devicePointer, ref parameters));
-            parameters.Flags |= 0x00800000; // DI_QUIETINSTALL
-            parameters.FlagsEx |= 0x20000000; // DI_FLAGSEX_RESTART_DEVICE_ONLY
-            Check(SetupDiSetDeviceInstallParamsW(_set, devicePointer, ref parameters));
-        }
-        finally { Marshal.FreeHGlobal(devicePointer); }
-        // An explicit DriverInfo forces this selection for this device, independent of rank.
+        // Use the confirmed driver for this exact instance, independent of rank.
         Check(DiInstallDevice(0, _set, ref _device, ref driver, 0, out var reboot));
         return reboot; // Windows signature enforcement stays enabled.
     }
 
-    private ParentDriverChoice ReadChoice(ref DriverInfo driver, out string hardwareId)
+    private ParentDriverChoice ReadChoice(ref DriverInfo driver)
     {
-        _ = SetupDiGetDriverInfoDetailW(_set, _listDevice, ref driver, 0, 0, out var required);
+        _ = SetupDiGetDriverInfoDetailW(_set, ref _device, ref driver, 0, 0, out var required);
         var error = Marshal.GetLastWin32Error();
         if (required == 0 || required > 1024 * 1024) throw new Win32Exception(error);
         var size = Math.Max((int)required, Marshal.SizeOf<DriverDetail>());
@@ -155,9 +116,8 @@ internal sealed class ParentDriverNative : IDisposable
         try
         {
             Marshal.WriteInt32(buffer, Marshal.SizeOf<DriverDetail>());
-            Check(SetupDiGetDriverInfoDetailW(_set, _listDevice, ref driver, buffer, (uint)size, out _));
+            Check(SetupDiGetDriverInfoDetailW(_set, ref _device, ref driver, buffer, (uint)size, out _));
             var detail = Marshal.PtrToStructure<DriverDetail>(buffer);
-            hardwareId = Marshal.PtrToStringUni(buffer + (int)Marshal.OffsetOf<DriverDetail>(nameof(DriverDetail.HardwareId))) ?? "";
             return new ParentDriverChoice(detail.InfFileName, detail.SectionName,
                 driver.Description, driver.ProviderName, driver.Version,
                 ((long)driver.Date.dwHighDateTime << 32) | (uint)driver.Date.dwLowDateTime);
@@ -170,7 +130,6 @@ internal sealed class ParentDriverNative : IDisposable
         if (_disposed) return;
         _disposed = true;
         if (_set != 0 && _set != new nint(-1)) SetupDiDestroyDeviceInfoList(_set);
-        if (_listDevice != 0) { Marshal.FreeHGlobal(_listDevice); _listDevice = 0; }
     }
 
     private static void Check(bool success) { if (!success) throw new Win32Exception(); }
@@ -220,15 +179,15 @@ internal sealed class ParentDriverNative : IDisposable
     [DllImport("setupapi.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern bool SetupDiOpenDeviceInfoW(nint set, string instanceId, nint parent, uint flags, ref DeviceInfo device);
     [DllImport("setupapi.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern bool SetupDiGetDeviceInstallParamsW(nint set, nint device, ref InstallParameters parameters);
+    private static extern bool SetupDiGetDeviceInstallParamsW(nint set, ref DeviceInfo device, ref InstallParameters parameters);
     [DllImport("setupapi.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern bool SetupDiSetDeviceInstallParamsW(nint set, nint device, ref InstallParameters parameters);
+    private static extern bool SetupDiSetDeviceInstallParamsW(nint set, ref DeviceInfo device, ref InstallParameters parameters);
     [DllImport("setupapi.dll", SetLastError = true)]
-    private static extern bool SetupDiBuildDriverInfoList(nint set, nint device, uint type);
+    private static extern bool SetupDiBuildDriverInfoList(nint set, ref DeviceInfo device, uint type);
     [DllImport("setupapi.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern bool SetupDiEnumDriverInfoW(nint set, nint device, uint type, uint index, ref DriverInfo driver);
+    private static extern bool SetupDiEnumDriverInfoW(nint set, ref DeviceInfo device, uint type, uint index, ref DriverInfo driver);
     [DllImport("setupapi.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern bool SetupDiGetDriverInfoDetailW(nint set, nint device, ref DriverInfo driver, nint detail, uint size, out uint required);
+    private static extern bool SetupDiGetDriverInfoDetailW(nint set, ref DeviceInfo device, ref DriverInfo driver, nint detail, uint size, out uint required);
     [DllImport("setupapi.dll", SetLastError = true)]
     private static extern bool SetupDiDestroyDeviceInfoList(nint set);
     [DllImport("newdev.dll", SetLastError = true)]

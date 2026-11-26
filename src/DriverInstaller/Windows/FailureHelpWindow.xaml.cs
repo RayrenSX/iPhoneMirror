@@ -8,10 +8,13 @@ namespace IPhoneMirror.DriverInstaller.Windows;
 public partial class FailureHelpWindow : IPhoneMirror.UI.Controls.RoundedWindow
 {
     public string ErrorMessage { get; }
+    public string? LogPath { get; }
+    public Visibility LogVisibility => string.IsNullOrWhiteSpace(LogPath) ? Visibility.Collapsed : Visibility.Visible;
 
-    internal FailureHelpWindow(string errorMessage)
+    internal FailureHelpWindow(string errorMessage, string? logPath)
     {
         ErrorMessage = errorMessage;
+        LogPath = logPath;
         DataContext = this;
         InitializeComponent();
     }
@@ -21,13 +24,37 @@ public partial class FailureHelpWindow : IPhoneMirror.UI.Controls.RoundedWindow
         try
         {
             Clipboard.SetText(DriverConstants.QqGroupNumber);
-            Process.Start(new ProcessStartInfo("https://im.qq.com/") { UseShellExecute = true });
             PromptWindow.Inform(this, DriverLocalization.Get("GroupCopiedTitle"),
                 DriverLocalization.Get("GroupCopiedBody"));
         }
         catch (Exception error)
         {
-            PromptWindow.Inform(this, DriverLocalization.Get("CannotOpenQq"), error.Message);
+            DriverLogger.WriteException("ui", "copy_group_failed", error);
+            PromptWindow.Inform(this, DriverLocalization.Get("CannotCopyGroup"),
+                DriverLocalization.Get("HelpBody"), isError: true);
+        }
+    }
+
+    private void OnOpenLogClick(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(LogPath)) return;
+        try
+        {
+            var path = Path.GetFullPath(LogPath);
+            var directory = Path.GetDirectoryName(path);
+            while (directory is not null && !Directory.Exists(directory))
+                directory = Path.GetDirectoryName(directory);
+            var start = new ProcessStartInfo("explorer.exe") { UseShellExecute = true };
+            if (File.Exists(path)) start.Arguments = $"/select,\"{path}\"";
+            else if (directory is not null) start.ArgumentList.Add(directory);
+            else return;
+            Process.Start(start);
+        }
+        catch (Exception error)
+        {
+            DriverLogger.WriteException("ui", "open_failure_log_failed", error);
+            PromptWindow.Inform(this, DriverLocalization.Get("CannotOpenLogs"),
+                DriverLocalization.Get("OpenLogFailedBody"), isError: true);
         }
     }
 
@@ -41,7 +68,7 @@ public partial class FailureHelpWindow : IPhoneMirror.UI.Controls.RoundedWindow
         {
             DriverLogger.WriteException("ui", "help_browser_start_failed", error);
             PromptWindow.Inform(this, DriverLocalization.Get("HelpBrowserFailedTitle"),
-                DriverLocalization.Format("HelpBrowserFailed", DriverConstants.AisiOfficialUrl, error.Message));
+                DriverLocalization.Format("HelpBrowserFailed", DriverConstants.AisiOfficialUrl), isError: true);
         }
     }
 
@@ -55,8 +82,8 @@ public partial class FailureHelpWindow : IPhoneMirror.UI.Controls.RoundedWindow
         catch (Exception error)
         {
             DriverLogger.WriteException("ui", "driver_cleanup_script_start_failed", error);
-            PromptWindow.Inform(this, DriverLocalization.Get("DriverCleanupTitle"),
-                DriverLocalization.Format("DriverCleanupScriptStartFailed", error.Message));
+            PromptWindow.Inform(this, DriverLocalization.Get("DriverCleanupUnavailableTitle"),
+                DriverLocalization.Get("DriverCleanupScriptStartFailed"), isError: true);
         }
     }
 

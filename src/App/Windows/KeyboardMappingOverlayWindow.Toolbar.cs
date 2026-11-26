@@ -45,37 +45,6 @@ internal sealed partial class KeyboardMappingOverlayWindow
         _toolbar.SetResourceReference(Border.BorderBrushProperty, "BorderSoftBrush");
     }
 
-    internal static Rect PlacePickingToolbar(Rect preview, Rect picture, Rect workArea, Size size, double gap)
-    {
-        var slots = new[] {
-            new Rect(preview.Left, preview.Top, Math.Max(0, picture.Left - preview.Left), preview.Height),
-            new Rect(picture.Right, preview.Top, Math.Max(0, preview.Right - picture.Right), preview.Height),
-            new Rect(preview.Left, preview.Top, preview.Width, Math.Max(0, picture.Top - preview.Top)),
-            new Rect(preview.Left, picture.Bottom, preview.Width, Math.Max(0, preview.Bottom - picture.Bottom)) };
-        foreach (var candidate in slots)
-        {
-            var slot = Rect.Intersect(candidate, workArea);
-            if (slot.IsEmpty) continue;
-            if (slot.Width >= size.Width + gap * 2 && slot.Height >= size.Height + gap * 2)
-                return new Rect(slot.Left + gap, slot.Top + gap, size.Width, size.Height);
-        }
-        var x = Math.Clamp(preview.Left + (preview.Width - size.Width) / 2,
-            workArea.Left, Math.Max(workArea.Left, workArea.Right - size.Width));
-        if (preview.Top - size.Height - gap >= workArea.Top)
-            return new Rect(x, preview.Top - size.Height - gap, size.Width, size.Height);
-        if (preview.Bottom + size.Height + gap <= workArea.Bottom)
-            return new Rect(x, preview.Bottom + gap, size.Width, size.Height);
-        var y = Math.Clamp(preview.Top + gap, workArea.Top, Math.Max(workArea.Top, workArea.Bottom - size.Height));
-        if (preview.Left - size.Width - gap >= workArea.Left)
-            return new Rect(preview.Left - size.Width - gap, y, size.Width, size.Height);
-        if (preview.Right + size.Width + gap <= workArea.Right)
-            return new Rect(preview.Right + gap, y, size.Width, size.Height);
-        // An edge-to-edge fullscreen picture leaves no outside space. This
-        // last-resort strip hides when the picking pointer approaches it.
-        return new Rect(x, Math.Clamp(preview.Bottom - size.Height - gap,
-            workArea.Top, Math.Max(workArea.Top, workArea.Bottom - size.Height)), size.Width, size.Height);
-    }
-
     private void UpdatePickingToolbar()
     {
         if (_pick is not { } pick || _closed || _pixelWidth <= 0 || _pixelHeight <= 0) return;
@@ -96,19 +65,36 @@ internal sealed partial class KeyboardMappingOverlayWindow
         var area = GetMonitorInfoW(MonitorFromWindow(Surface.Window, 2), ref monitor)
             ? new Rect(monitor.Work.Left, monitor.Work.Top, monitor.Work.Right - monitor.Work.Left, monitor.Work.Bottom - monitor.Work.Top)
             : preview;
-        var bounds = PlacePickingToolbar(preview, picture, area, size, 8 * dpi.DpiScaleX);
+        var bounds = PreviewCoordinateMapper.PlaceOverlayToolbar(preview, picture, area, size, 8 * dpi.DpiScaleX);
         _toolbarOverVideo = bounds.IntersectsWith(picture);
-        _pickingToolbar ??= new PickingToolbarWindow(this, _toolbar);
-        _pickingToolbar.SetClickThrough(_toolbarOverVideo);
-        if (_toolbarScreenBounds != bounds || !_pickingToolbar.IsVisible)
+        var toolbar = _pickingToolbar ??= CreatePickingToolbar();
+        toolbar.SetClickThrough(_toolbarOverVideo);
+        if (_toolbarScreenBounds != bounds || !toolbar.IsVisible)
         {
             _toolbarScreenBounds = bounds;
-            SetWindowPos(new WindowInteropHelper(_pickingToolbar).EnsureHandle(), 0, (int)Math.Round(bounds.X), (int)Math.Round(bounds.Y),
+            var handle = new WindowInteropHelper(toolbar).EnsureHandle();
+            if (!StillPicking()) return;
+            SetWindowPos(handle, 0, (int)Math.Round(bounds.X), (int)Math.Round(bounds.Y),
                 (int)Math.Ceiling(bounds.Width), (int)Math.Ceiling(bounds.Height), 0x0014);
         }
-        if (!_pickingToolbar.IsVisible) _pickingToolbar.Show();
+        if (!StillPicking()) return;
+        if (!toolbar.IsVisible) toolbar.Show();
+        if (!StillPicking()) return;
         if (_toolbarOverVideo && IsMouseOver) UpdatePickingToolbarOcclusion(Mouse.GetPosition(this));
-        else { _pickingToolbar.Opacity = 1; _pickingToolbar.IsHitTestVisible = true; }
+        else { toolbar.Opacity = 1; toolbar.IsHitTestVisible = true; }
+
+        bool StillPicking() => !_closed && ReferenceEquals(_pick, pick) && ReferenceEquals(_pickingToolbar, toolbar);
+    }
+
+    private PickingToolbarWindow CreatePickingToolbar()
+    {
+        var toolbar = new PickingToolbarWindow(this, _toolbar);
+        toolbar.Closed += (_, _) =>
+        {
+            if (ReferenceEquals(_pickingToolbar, toolbar)) _pickingToolbar = null;
+            toolbar.Content = null;
+        };
+        return toolbar;
     }
 
     private void UpdatePickingToolbarOcclusion(Point pointer)

@@ -1,4 +1,5 @@
 #pragma once
+#include "Capture/PreviewAudioSync.h"
 
 #include "Capture/ICaptureSession.h"
 #include "IpcProtocol.h"
@@ -101,11 +102,13 @@ public:
         std::uint64_t after_sequence) const;
     void set_audio_enabled(bool enabled) noexcept;
     void set_audio_volume(float volume) noexcept;
+    void set_audio_playback_preferences(std::uint32_t buffer, bool sync);
     void set_remote_audio_volume(float volume) noexcept;
     void set_target_fps(std::uint32_t target_fps) noexcept;
     [[nodiscard]] std::uint32_t target_fps() const noexcept;
     void publish_video(const wireless::MessageHeader& header,
-        std::span<const std::uint8_t> payload);
+        std::span<const std::uint8_t> payload, bool external = false,
+        std::optional<unsigned> device_turns = std::nullopt);
     void publish_audio(const wireless::MessageHeader& header,
         std::span<const std::uint8_t> payload);
     void set_mirror_state(wireless::MirrorSenderState state);
@@ -127,10 +130,13 @@ private:
     std::uint32_t attachments_{};
     Snapshot snapshot_;
     std::shared_ptr<const media::DecodedFrame> latest_frame_;
+    PreviewAudioSync preview_audio_sync_;
     std::uint64_t landscape_run_{};
     std::atomic_uint32_t target_fps_{60};
     std::atomic_bool play_audio_{true};
     std::atomic<float> local_audio_volume_{1.0F};
+    std::atomic_bool sync_audio_preview_{};
+    std::uint32_t audio_buffer_{};
     std::atomic<float> remote_audio_volume_{1.0F};
     mutable std::mutex audio_mutex_;
     std::unique_ptr<audio::WasapiRenderer> audio_renderer_;

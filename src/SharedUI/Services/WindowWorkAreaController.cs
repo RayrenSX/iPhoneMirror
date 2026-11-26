@@ -22,6 +22,17 @@ internal static class WindowWorkAreaController
     private const uint SwpNoActivate = 0x0010;
     private static readonly ConditionalWeakTable<Window, object> AttachedWindows = new();
     private static readonly ConditionalWeakTable<Window, object> OwnerBoundWindows = new();
+    private static readonly ConditionalWeakTable<Window, object> FullMonitorWindows = new();
+
+    // The main shell maximizes with native monitor bounds while its WPF
+    // WindowState stays Normal. Deferred monitor/DPI fitting must respect that
+    // presentation just as it respects an ordinary maximized WindowState.
+    internal static void SetFullMonitorPresentation(Window window, bool enabled)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+        if (enabled) FullMonitorWindows.TryAdd(window, new object());
+        else FullMonitorWindows.Remove(window);
+    }
 
     // An overlay follows an existing window, including maximized/fullscreen
     // bounds. Applying ordinary dialog fitting would shrink it independently.
@@ -98,6 +109,9 @@ internal static class WindowWorkAreaController
 
         void FitToCurrentMonitor(bool center)
         {
+            // Check when the callback runs: it may have been queued before the
+            // user maximized or entered fullscreen on the destination monitor.
+            if (FullMonitorWindows.TryGetValue(window, out _)) return;
             var handle = new WindowInteropHelper(window).Handle;
             if (handle == 0 || !GetWindowRect(handle, out var current)) return;
             var monitor = MonitorFromWindow(handle, MonitorDefaultToNearest);

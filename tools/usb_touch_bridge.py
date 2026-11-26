@@ -43,6 +43,7 @@ import sys
 import tempfile
 import threading
 import time
+import uuid
 from typing import Callable, Optional
 from urllib.parse import quote, urlsplit
 from xml.parsers.expat import ExpatError
@@ -95,6 +96,7 @@ from pymobiledevice3.remote.tunnel_service import (
     RemotePairingTunnelService as UpstreamRemotePairingTunnelService,
 )
 from mdns_discovery import MdnsDiscoveryError, browse_remotepairing
+from pymobiledevice3.remote.core_device.device_info import DeviceInfoService
 from pymobiledevice3.remote.core_device.display_service import DisplayService
 from pymobiledevice3.remote.core_device.pasteboard_service import PasteboardService
 try:
@@ -232,12 +234,11 @@ async def touch_session(rsd):
     and its stop/close calls are unbounded. Keep the same authentication order
     while making all startup and teardown paths bounded.
     """
-    from pymobiledevice3.remote.core_device.screen_stream import open_media_receiver
-    import uuid
+    from device_hub import stop_display_media
 
     display = DisplayService(rsd)
     media_hub = getattr(rsd, '_iphone_mirror_media_hub', None)
-    hid = transport = drain = answer = None
+    hid = transport = drain = session_id = None
 
     async def close(service):
         if service is not None:
@@ -251,11 +252,13 @@ async def touch_session(rsd):
             await asyncio.wait_for(display.__aenter__(), 8)
         except TimeoutError as error:
             raise RuntimeError('com.apple.coredevice.displayservice open timed out') from error
-        transport, receiver_ip = open_media_receiver(display, (1 * 1024 * 1024,))
+        transport, receiver_ip = _open_touch_media_receiver(rsd, display)
         try:
+            session_id = uuid.uuid4()
             answer = await asyncio.wait_for(display.start_video_stream(
                 receiver_ip=receiver_ip, receiver_port=transport.port,
-                sender_ip=rsd.service.address[0], display_id=1,
+                sender_ip=rsd.service.address[0], display_id=_touch_display(rsd).id,
+                client_session_id=session_id,
                 allow_rtcp_fb=True, ltrp_enabled=False, fec_enabled=False), 10)
         except TimeoutError as error:
             raise RuntimeError('Timed out starting the media stream that gates HID auth.') from error
@@ -280,26 +283,146 @@ async def touch_session(rsd):
         async with _cleanup_cancellation_scope() as finish:
             if media_hub is not None:
                 await finish(media_hub.suspend())
-                media_hub.owner.display = media_hub.owner.transport = media_hub.owner.stream_answer = None
             await finish(close(hid))
+            if session_id is not None:
+                await finish(stop_display_media(rsd, session_id, service_factory=DisplayService))
+            if media_hub is not None:
+                media_hub.owner.display = media_hub.owner.transport = media_hub.owner.stream_answer = None
             if drain is not None:
                 drain.cancel()
                 await finish(asyncio.gather(drain, return_exceptions=True))
-            if answer is not None:
-                async def stop_media():
-                    try:
-                        csid = answer['connection']['options']['avcMediaStreamOptionClientSessionID']['uuid']
-                        if not isinstance(csid, uuid.UUID):
-                            csid = uuid.UUID(csid)
-                        async with asyncio.timeout(3):
-                            await display.stop_media_stream(csid)
-                    except Exception as error:
-                        log.warning('Touch media stop failed: %s', type(error).__name__)
-                await finish(stop_media())
             if transport is not None:
                 with contextlib.suppress(Exception):
                     transport.close()
             await finish(close(display))
+
+
+class TunnelMediaReceiver:
+    """Receive device-initiated RTP on the PyTCP stack owned by this bridge."""
+
+    def __init__(self, address: str) -> None:
+        from pmd_pytcp.socket import AF_INET6, SOCK_DGRAM, socket as pytcp_socket
+
+        ip = ipaddress.IPv6Address(address)
+        if ip.is_loopback or ip.is_unspecified or ip.ipv4_mapped is not None:
+            raise ValueError('CoreDevice media receiver requires a routable tunnel address')
+        self._socket = pytcp_socket(AF_INET6, SOCK_DGRAM)
+        try:
+            self._socket.bind((address, 0))
+            self.local_ip, self.port = self._socket.getsockname()[:2]
+        except BaseException:
+            self.close()
+            raise
+
+    async def recv(self, bufsize: int = 65535) -> bytes:
+        return await self._socket.recv(bufsize)
+
+    async def sendto(self, data: bytes, ip: str, port: int) -> None:
+        await self._socket.sendto(data, (ip, port))
+
+    def close(self) -> None:
+        with contextlib.suppress(Exception):
+            self._socket.close()
+
+
+def _open_touch_media_receiver(rsd, display):
+    address = getattr(rsd, '_bridge_tunnel_address', None)
+    if isinstance(address, str):
+        try:
+            receiver = TunnelMediaReceiver(address)
+        except Exception as error:
+            raise RuntimeError('startmediastream userspace receiver unavailable: '
+                               f'{type(error).__name__}') from error
+        log.info('startmediastream receiver=userspace display_id=%d', _touch_display(rsd).id)
+        return receiver, receiver.local_ip
+    from pymobiledevice3.remote.core_device.screen_stream import open_media_receiver
+
+    return open_media_receiver(display, (1 * 1024 * 1024,))
+
+
+@dataclass(frozen=True)
+class TouchDisplay:
+    id: int = 1
+    uuid: Optional[str] = None
+    multiple_panels: bool = False
+    tracks_active_panel: bool = False
+    panel: Optional[str] = None
+    matched_preview: bool = False
+
+
+def _touch_display(rsd) -> TouchDisplay:
+    display = getattr(rsd, '_bridge_touch_display', None)
+    return display if isinstance(display, TouchDisplay) else TouchDisplay()
+
+
+def _display_aspect(size) -> Optional[float]:
+    if not isinstance(size, (list, tuple)) or len(size) != 2:
+        return None
+    if any(not isinstance(value, int) or isinstance(value, bool) or value <= 0 for value in size):
+        return None
+    return min(size) / max(size)
+
+
+def _select_touch_display(info: dict, display_id: Optional[int], preview_size, *, warn: bool = True) -> TouchDisplay:
+    displays = info.get('displays') if isinstance(info, dict) else None
+    panels = [panel for panel in (displays if isinstance(displays, list) else []) if isinstance(panel, dict)
+              and not panel.get('external') and isinstance(panel.get('displayId'), int)
+              and not isinstance(panel.get('displayId'), bool) and panel['displayId'] > 0]
+    multiple = len(panels) > 1
+    active = [panel for panel in panels if panel.get('active') is True]
+    lit = [panel for panel in panels if isinstance(panel.get('backlightState'), str)
+           and panel['backlightState'].casefold() not in ('', 'off', 'unknown')]
+    tracked = display_id is None and multiple and (len(active) == 1 or len(lit) == 1)
+    primary = next((panel for panel in panels if panel.get('primary') is True), None)
+    matched_preview = False
+    if display_id is not None:
+        selected = next((panel for panel in panels if panel['displayId'] == display_id), None)
+        if selected is None:
+            raise BridgePrerequisiteError('touch_surface_unavailable', 'The selected display was not advertised.')
+    elif len(active) == 1 or len(lit) == 1:
+        selected = active[0] if len(active) == 1 else lit[0]
+    else:
+        aspect = _display_aspect(preview_size)
+        candidates = []
+        if multiple and aspect is not None:
+            for panel in panels:
+                mode = panel.get('currentMode')
+                panel_aspect = _display_aspect(mode.get('size') if isinstance(mode, dict) else None)
+                if panel_aspect is None:
+                    panel_aspect = _display_aspect(panel.get('nativeSize'))
+                if panel_aspect is not None:
+                    candidates.append((abs(aspect - panel_aspect), panel))
+        candidates.sort(key=lambda candidate: candidate[0])
+        # The Duo panels are close enough to both be within the capture
+        # tolerance. Select the nearest ratio only when it is clearly closer.
+        matched_preview = bool(candidates and candidates[0][0] <= .025 and
+                               (len(candidates) == 1 or candidates[1][0] - candidates[0][0] >= .005))
+        selected = candidates[0][1] if matched_preview else primary or (panels[0] if panels else None)
+        if multiple and not matched_preview and warn:
+            log.warning('Active touch display unavailable; using the primary display')
+    if selected is None:
+        return TouchDisplay()
+    unique_id = selected.get('uniqueId')
+    panel = ('cover' if selected is primary or (primary is None and selected['displayId'] == 1)
+             else 'inner') if multiple else None
+    return TouchDisplay(int(selected['displayId']), unique_id if isinstance(unique_id, str) and unique_id else None,
+                        multiple, tracked, panel, matched_preview)
+
+
+async def _read_touch_displays(rsd) -> dict:
+    service = DeviceInfoService(rsd)
+    try:
+        async with asyncio.timeout(3):
+            await service.__aenter__()
+            return await service.get_display_info()
+    finally:
+        with contextlib.suppress(Exception):
+            await _bounded_remote_exit(service, 2)
+
+
+def _hid_touch_surface(hid) -> int:
+    service_id = getattr(hid, '_bridge_touch_service_id', None)
+    return service_id if type(service_id) is int else DIGITIZER_SURFACE_MAIN_TOUCHSCREEN
 
 
 class _RemotePairingSrpContext:
@@ -586,6 +709,7 @@ def _interface_with_subclass(configuration, subclass: int):
 
 PROTOCOL_VERSION = 2
 CAPABILITIES = ['iphoneMirror.usb_touch.v2', 'iphoneMirror.usb_keyboard.v1', 'iphoneMirror.clipboard.rpc.v1', 'iphoneMirror.hub.rpc.v1', 'iphoneMirror.native_keyboard.v1']
+TOUCH_DISPLAY_PREVIEW_CAPABILITY = 'iphoneMirror.touch_display_preview.v1'
 MAX_SLOTS = 5
 MAX_FRAME_SIZE = 4 * 1024 * 1024
 MESSAGE_SCHEMA = 'iphoneMirror.touch.v2'
@@ -2592,12 +2716,17 @@ class TouchSession:
 
     def __init__(self, ipc: BridgeChannel, rate_hz: int, udid: Optional[str] = None,
                  transport: str = 'usb', ddi_dir: Optional[Path] = None,
-                 show_native_keyboard: bool = True) -> None:
+                 show_native_keyboard: bool = True, *, display_id: Optional[int] = None,
+                 preview_size: Optional[tuple[int, int]] = None) -> None:
         self.ipc = ipc
         self.rate_hz = rate_hz
         self.udid = udid
         self.transport_mode = transport
         self.ddi_dir = ddi_dir
+        self._requested_display_id = display_id
+        self._preview_size = preview_size
+        self._touch_orientation = None
+        self._gesture_inverted = False
         self._mux_checkpoint = None
         self._startup_mux_checkpoint = os.environ.pop('IPHONE_MIRROR_USB_MUX_RESUME', None)
         self.rsd: Optional[RemoteServiceDiscoveryService] = None
@@ -2619,8 +2748,9 @@ class TouchSession:
         self.display: Optional[DisplayService] = None
         self.dial_plane = None
         self.stream_answer = None
+        self._gate_session_id = None
         from device_hub import DeviceHub
-        self.device_hub = DeviceHub(self)
+        self.device_hub = DeviceHub(self, TunnelMediaReceiver)
         self.drain_task = None
         self.transport = None
         self._media_health: Optional[MediaStreamHealth] = None
@@ -2631,6 +2761,8 @@ class TouchSession:
         self._ddi_uses_cryptex = False
         self._ddi_personalized_fallback = False
         self._wireless_ddi_prepared = False
+        self._wireless_ddi_deadline = None
+        self._wireless_ddi_upload_retries = 0
         self._ddi_refresh_attempted = False
         self._ddi_deadline = None
         self._ddi_rejection_scope = None
@@ -3217,14 +3349,16 @@ class TouchSession:
             await self._connect_with_lockdown(lockdown)
             return
         except BridgePrerequisiteError as error:
-            if error.code != 'touch_surface_unavailable':
+            retry_wireless_image = error.code == 'wireless_ddi_reconnect'
+            if error.code != 'touch_surface_unavailable' and not retry_wireless_image:
                 raise
 
         if self.transport_mode == 'wireless':
             # A Network Lockdown session may already have a prepared DDI. If
             # its actual HID probe fails, prepare over the exact USB device
             # once, then build a new wireless RSD service snapshot.
-            await self._prepare_ddi_for_remote_pairing()
+            if not retry_wireless_image:
+                await self._prepare_ddi_for_remote_pairing()
             self._wireless_ready_deadline = None
             # Pairing sockets collected before an image refresh may carry
             # stale service state. A later fallback owns a fresh discovery.
@@ -3286,7 +3420,7 @@ class TouchSession:
 
     async def _consume_remote_pairing(self, discovery, allow_ddi_recovery):
         await self._emit_status('discovering_wireless_device')
-        last_error, needs_ddi_recovery = None, False
+        last_error, needs_ddi_recovery, restart_after_mount = None, False, False
         while True:
             try:
                 deadline = getattr(self, '_wireless_ready_deadline', None)
@@ -3315,6 +3449,16 @@ class TouchSession:
             except Exception as error:
                 if self._generation != generation or self._recovering:
                     raise
+                if isinstance(error, BridgePrerequisiteError) and error.code == 'wireless_ddi_reconnect':
+                    restart_after_mount = True
+                    break
+                if (isinstance(error, BridgePrerequisiteError)
+                        and error.code == 'developer_image_upload_timeout'
+                        and self._wireless_ddi_upload_retries == 0):
+                    self._wireless_ddi_upload_retries += 1
+                    await self._emit_status('switching_developer_image')
+                    restart_after_mount = True
+                    break
                 if isinstance(error, BridgePrerequisiteError) and error.code not in {
                         'touch_surface_unavailable', 'control_service_start_timeout',
                         'apple_connection_lost', 'wireless_remote_pairing_failed'}:
@@ -3326,17 +3470,11 @@ class TouchSession:
             finally:
                 await discovery.close_service(selected)
                 self._wireless_selected = None
-        if needs_ddi_recovery and allow_ddi_recovery and not self._wireless_ddi_prepared:
+        if restart_after_mount or (needs_ddi_recovery and allow_ddi_recovery and not self._wireless_ddi_prepared):
             await discovery.stop()
-            await self._prepare_ddi_for_remote_pairing()
-            self._wireless_ready_deadline = None
-            # The image changed: old RSD inventories and verified sockets are stale.
-            async with RemotePairingDiscovery(self._remote_pairing_identifier()) as fresh:
-                self._wireless_discovery = fresh
-                try:
-                    await self._consume_remote_pairing(fresh, False)
-                finally:
-                    self._wireless_discovery = discovery
+            if not restart_after_mount:
+                await self._prepare_ddi_for_remote_pairing()
+            await self._reconnect_remote_pairing_after_ddi(discovery)
             return
         if isinstance(last_error, BridgePrerequisiteError):
             raise last_error
@@ -3345,6 +3483,56 @@ class TouchSession:
                                           'All discovered control routes failed.') from last_error
         raise BridgePrerequisiteError('wireless_device_not_discoverable',
                                       'No RemotePairing service was discovered for the selected device.')
+
+    async def _reconnect_remote_pairing_after_ddi(self, previous_discovery) -> None:
+        self._wireless_ready_deadline = None
+        identifier = self._remote_pairing_identifier()
+        # Mount verification can succeed before dtuhidd registers. Each
+        # attempt needs a fresh RSD snapshot and must reuse the same budget.
+        for attempt in range(3):
+            try:
+                async with RemotePairingDiscovery(identifier) as fresh:
+                    self._wireless_discovery = fresh
+                    await self._consume_remote_pairing(fresh, False)
+                return
+            except BridgePrerequisiteError as error:
+                if error.code != 'touch_surface_unavailable' or attempt == 2:
+                    raise
+            finally:
+                self._wireless_discovery = previous_discovery
+            await self._emit_status('waiting_for_hid_service')
+            await asyncio.sleep(HID_SERVICE_REGISTRATION_RETRY_SECONDS)
+
+    async def _prepare_wireless_ddi_if_needed(self, rsd) -> None:
+        if self.transport_mode != 'wireless' or self._recovering or self._wireless_ddi_prepared:
+            return
+        major = str(getattr(rsd, 'product_version', '')).split('.')[0]
+        if not major.isdecimal() or not 17 <= int(major) <= 27:
+            return
+        services = (rsd.peer_info or {}).get('Services', {})
+        if any(name in services for name in (UniversalHIDServiceService.SERVICE_NAME, LEGACY_UNIVERSAL_HID_SERVICE)):
+            return
+        if major != '27' and PersonalizedImageMounter.RSD_SERVICE_NAME not in services:
+            return
+        self._wireless_ddi_deadline = asyncio.get_running_loop().time() + PERSONALIZED_DDI_PREPARE_TIMEOUT_SECONDS
+        try:
+            async with asyncio.timeout_at(self._wireless_ddi_deadline):
+                if major == '27':
+                    await prepare_cryptex_ddi(rsd, self._emit_status)
+                else:
+                    await self._prepare_developer_environment(rsd)
+        except BridgePrerequisiteError as error:
+            if error.code != 'developer_image_service_unavailable':
+                raise
+            return  # Older routes still use the trusted USB preparation fallback.
+        except TimeoutError as error:
+            raise BridgePrerequisiteError('developer_image_prepare_timeout',
+                                          'Wireless DDI preparation exceeded its total time budget.') from error
+        finally:
+            self._wireless_ddi_deadline = None
+        self._wireless_ddi_prepared = True
+        raise BridgePrerequisiteError('wireless_ddi_reconnect',
+                                      'The image is ready; reopening the wireless service inventory.')
 
     async def _prepare_ddi_for_remote_pairing(self) -> None:
         # Network and RemotePairing fallback share one startup. A completed
@@ -3801,19 +3989,18 @@ class TouchSession:
             return mounted or bool(personalized)
 
     @staticmethod
-    def _connected_service_ids(surfaces: object) -> set[int]:
+    def _connected_service_ids(surfaces: object, display_uuid: Optional[str] = None) -> set[int]:
         """Extract advertised _ServiceID values from an RSD HID response."""
         ids: set[int] = set()
 
         def visit(value: object) -> None:
             if isinstance(value, dict):
                 service_id = value.get('_ServiceID')
-                if isinstance(service_id, int) and not isinstance(service_id, bool):
-                    ids.add(service_id)
-                elif isinstance(service_id, dict):
-                    raw = service_id.get('uint')
-                    if isinstance(raw, int) and not isinstance(raw, bool):
-                        ids.add(raw)
+                if isinstance(service_id, dict):
+                    service_id = service_id.get('uint')
+                if ((display_uuid is None or value.get('displayUUID') == display_uuid) and
+                        isinstance(service_id, int) and not isinstance(service_id, bool)):
+                    ids.add(int(service_id))
                 for child in value.values():
                     visit(child)
             elif isinstance(value, (list, tuple)):
@@ -3824,7 +4011,7 @@ class TouchSession:
         return ids
 
     async def _verify_touch_surface(self, hid) -> None:
-        """Require the real mainTouchscreen surface before reporting ready."""
+        """Resolve touch and keyboard from the same HID inventory request."""
         surfaces = await asyncio.wait_for(hid.list_connected_services(), 8)
         inventory = os.environ.get('IPHONE_MIRROR_HID_INVENTORY')
         if inventory:
@@ -3838,14 +4025,79 @@ class TouchSession:
         # iOS's native keyboard. Hidden mode registers a real 1/6 keyboard.
         if KEYBOARD_SURFACE_CONNECTED in ids:
             self.keyboard_service_id = KEYBOARD_SURFACE_CONNECTED
-        if DIGITIZER_SURFACE_MAIN_TOUCHSCREEN in ids:
-            return
-        advertised = ', '.join(str(service_id) for service_id in sorted(ids)) or 'none'
-        raise BridgePrerequisiteError(
-            'touch_surface_unavailable',
-            'Universal HID did not advertise the mainTouchscreen surface '
-            f'{DIGITIZER_SURFACE_MAIN_TOUCHSCREEN}; advertised surfaces: {advertised}.',
-        )
+        display = _touch_display(self.rsd)
+        matching = self._connected_service_ids(surfaces, display.uuid) if display.uuid else set()
+        if len(matching) == 1:
+            hid._bridge_touch_service_id = next(iter(matching))
+        elif not display.multiple_panels and DIGITIZER_SURFACE_MAIN_TOUCHSCREEN in ids:
+            hid._bridge_touch_service_id = DIGITIZER_SURFACE_MAIN_TOUCHSCREEN
+        else:
+            advertised = ', '.join(str(service_id) for service_id in sorted(ids)) or 'none'
+            raise BridgePrerequisiteError(
+                'touch_surface_unavailable',
+                f'Universal HID did not identify the touchscreen for display {display.id}; '
+                f'advertised surfaces: {advertised}.',
+            )
+        log.info('touch_surface selected display_id=%d surface=%d', display.id, _hid_touch_surface(hid))
+
+    async def _configure_touch_display(self) -> None:
+        self._touch_orientation = None
+        info = {}
+        services = (getattr(self.rsd, 'peer_info', None) or {}).get('Services', {})
+        if isinstance(services, dict) and DeviceInfoService.SERVICE_NAME in services:
+            try:
+                info = await _read_touch_displays(self.rsd)
+            except Exception as error:
+                log.info('Touch display information unavailable: %s', type(error).__name__)
+        self.rsd._bridge_touch_display = _select_touch_display(
+            info, self._requested_display_id, self._preview_size)
+
+    async def _monitor_touch_panel(self, display: TouchDisplay) -> None:
+        while True:
+            await asyncio.sleep(1)
+            try:
+                info = await _read_touch_displays(self.rsd)
+                selected = _select_touch_display(info, None, self._preview_size, warn=False)
+            except Exception as error:
+                log.debug('Touch display poll failed: %s', type(error).__name__)
+                continue
+            if ((selected.tracks_active_panel or selected.matched_preview) and
+                    (selected.id, selected.uuid) != (display.id, display.uuid)):
+                await self._mark_recovering(ConnectionError('The active touch display changed.'))
+                return
+
+    async def _observe_touch_orientation(self) -> None:
+        from pymobiledevice3.services.springboard import SpringBoardServicesService
+
+        use_usb = (self.transport_mode == 'usb' and self.udid and
+                   SpringBoardServicesService.RSD_SERVICE_NAME not in (self.rsd.peer_info or {}).get('Services', {}))
+        while True:
+            lockdown = None
+            springboard = None
+            try:
+                if use_usb:
+                    lockdown = await asyncio.wait_for(create_using_usbmux(
+                        serial=self.udid, connection_type='USB', autopair=False), 3)
+                    if not _udid_matches(lockdown.udid, self.udid):
+                        raise ConnectionError('Orientation device identity mismatch.')
+                springboard = SpringBoardServicesService(lockdown or self.rsd)
+                await asyncio.wait_for(springboard.__aenter__(), 3)
+                while True:
+                    self._touch_orientation = int(await asyncio.wait_for(
+                        springboard.get_interface_orientation(), 1))
+                    await asyncio.sleep(.1)
+            except Exception as error:
+                self._touch_orientation = None
+                log.debug('Touch orientation unavailable: %s', type(error).__name__)
+            finally:
+                async with _cleanup_cancellation_scope() as finish:
+                    with contextlib.suppress(Exception):
+                        if springboard is not None:
+                            await finish(asyncio.wait_for(springboard.close(), 2))
+                    with contextlib.suppress(Exception):
+                        if lockdown is not None:
+                            await finish(asyncio.wait_for(lockdown.close(), 2))
+            await asyncio.sleep(1)
 
     async def _connect_with_lockdown(self, lockdown) -> None:
         if not lockdown.udid or (self.udid and not _udid_matches(lockdown.udid, self.udid)):
@@ -3933,6 +4185,10 @@ class TouchSession:
                 service = await CoreDeviceTunnelProxy.create(lockdown)
             except InvalidServiceError:
                 if self.transport_mode == 'usb':
+                    version = str(getattr(lockdown, 'product_version', '')).split('.')
+                    if len(version) >= 2 and version[0] == '17' and version[1] in ('0', '1', '2', '3'):
+                        raise BridgePrerequisiteError('wired_control_legacy_ios17',
+                            'iOS 17.0–17.3.x does not expose the USB CoreDeviceProxy service.')
                     raise BridgePrerequisiteError('wired_control_service_unavailable',
                         'The device does not provide the USB CoreDevice tunnel service. '
                         'Unlock/reconnect the device or explicitly select wireless control.')
@@ -4045,11 +4301,12 @@ class TouchSession:
             else:
                 deadline = min(deadline, saved)
         self._wireless_connect_phase = ('transport', loop.time())
+        self._wireless_ddi_deadline = None
         task = asyncio.create_task(operation, name='hid-transport-session')
         ready = asyncio.create_task(self._session_ready.wait())
         try:
             while True:
-                remaining = deadline - loop.time()
+                remaining = max(deadline, self._wireless_ddi_deadline or deadline) - loop.time()
                 if remaining <= 0:
                     raise BridgePrerequisiteError('control_service_start_timeout',
                                                   'CoreDevice/RSD/HID did not become ready in time.')
@@ -4157,11 +4414,24 @@ class TouchSession:
     async def _run_serve(self) -> None:
         # Rotation may interrupt a blocked sender, never its supervisor.
         task = asyncio.create_task(self._serve(), name='hid-input-sender')
+        display = _touch_display(self.rsd)
+        panel_monitor = (asyncio.create_task(self._monitor_touch_panel(display), name='hid-display-monitor')
+                         if display.multiple_panels and self._requested_display_id is None else None)
         try:
-            await task
+            if panel_monitor is None:
+                await task
+            else:
+                done, _ = await asyncio.wait((task, panel_monitor), return_when=asyncio.FIRST_COMPLETED)
+                for finished in done:
+                    await finished
         except asyncio.CancelledError:
             if asyncio.current_task().cancelling() or not self._hid_transport_failed:
                 raise
+        finally:
+            tasks = [child for child in (task, panel_monitor) if child is not None]
+            for child in tasks:
+                child.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _connect_with_tunnel_result(self, tunnel_result,
                                           *, preserve_capture_mux: bool = False) -> None:
@@ -4176,12 +4446,14 @@ class TouchSession:
             )
         tun.set_peer(tunnel_result.address)
         self.dial_plane = UserspaceDialPlane(tun, tunnel_result.address)
+        orientation = None
         try:
             await self.dial_plane.__aenter__()
             self.rsd = RemoteServiceDiscoveryService(
                 (tunnel_result.address, tunnel_result.port),
                 open_connection=self.dial_plane.dial,
             )
+            self.rsd._bridge_tunnel_address = getattr(tun, 'addr', None)
             self._wireless_connect_phase = ('rsd', asyncio.get_running_loop().time())
             if self._recovering:
                 await self._recovery_event('rsd_reconnect_started')
@@ -4196,7 +4468,11 @@ class TouchSession:
                     await self._recovery_event('rsd_reconnect_failed', error)
                 raise
             self._wireless_connect_phase = ('hid', asyncio.get_running_loop().time())
+            await self._prepare_wireless_ddi_if_needed(self.rsd)
             self.rsd._iphone_mirror_media_hub = self.device_hub
+            await self._configure_touch_display()
+            if _touch_display(self.rsd).panel == 'inner' and getattr(self.rsd, 'product_type', None) == 'iPhone19,4':
+                orientation = asyncio.create_task(self._observe_touch_orientation(), name='hid-orientation-monitor')
             await self._prepare_pasteboard_resources()
             if self._recovering:
                 await self._recovery_event('hid_reinit_started')
@@ -4255,7 +4531,11 @@ class TouchSession:
                 await self._emit_ready()
                 await self._run_serve()
         finally:
-            await self._cleanup(preserve_capture_mux=preserve_capture_mux)
+            async with _cleanup_cancellation_scope() as finish:
+                if orientation is not None:
+                    orientation.cancel()
+                    await finish(asyncio.gather(orientation, return_exceptions=True))
+                await finish(self._cleanup(preserve_capture_mux=preserve_capture_mux))
 
     async def _init_touch(self) -> None:
         await self._emit_status('initializing_touch')
@@ -4452,15 +4732,16 @@ class TouchSession:
             return
         self.display = display
         try:
-            from pymobiledevice3.remote.core_device.screen_stream import open_media_receiver
-            self.transport, receiver_ip = open_media_receiver(self.display, (1 * 1024 * 1024,))
+            self.transport, receiver_ip = _open_touch_media_receiver(self.rsd, self.display)
             sender_ip = self.rsd.service.address[0]
+            self._gate_session_id = uuid.uuid4()
             self.stream_answer = await asyncio.wait_for(
                 self.display.start_video_stream(
                     receiver_ip=receiver_ip,
                     receiver_port=self.transport.port,
                     sender_ip=sender_ip,
-                    display_id=1,
+                    display_id=_touch_display(self.rsd).id,
+                    client_session_id=self._gate_session_id,
                     allow_rtcp_fb=True,
                     ltrp_enabled=False,
                     fec_enabled=False,
@@ -4491,6 +4772,7 @@ class TouchSession:
             await self.ipc.emit({'event': 'warning', 'code': 'gate_failed',
                                  'message': f'startmediastream failed: {type(error).__name__}: {msg[:200]}'})
         if self.hid is not None and not self.gate_open:
+            await self._stop_gate_media()
             if self.transport is not None:
                 with contextlib.suppress(Exception):
                     self.transport.close()
@@ -4519,9 +4801,12 @@ class TouchSession:
         if recovered:
             await self._recovery_event('hid_ready')
             await self._recovery_event('sender_restored')
+        capabilities = CAPABILITIES
+        if _touch_display(self.rsd).multiple_panels and self._requested_display_id is None:
+            capabilities = [*capabilities, TOUCH_DISPLAY_PREVIEW_CAPABILITY]
         await self.ipc.emit({
             'event': 'ready', 'protocol': PROTOCOL_VERSION,
-            'capabilities': CAPABILITIES, 'udid': self.udid, 'rateHz': self.rate_hz,
+            'capabilities': capabilities, 'udid': self.udid, 'rateHz': self.rate_hz,
             'gateOpen': self.gate_open, 'authMode': self.auth_mode,
             'transport': self.transport_mode,
             'generation': self._generation,
@@ -4545,7 +4830,7 @@ class TouchSession:
             for slot in range(MAX_SLOTS):
                 report = build_touchscreen_report(slot, TOUCHSCREEN_STATE_RELEASE, 0, 0)
                 await asyncio.wait_for(self.hid.send_report(
-                    DIGITIZER_SURFACE_MAIN_TOUCHSCREEN, report), HID_OPERATION_TIMEOUT_SECONDS)
+                    _hid_touch_surface(self.hid), report), HID_OPERATION_TIMEOUT_SECONDS)
             # Prepare the chosen keyboard route without injecting a user key.
             # Native-visible mode retains system 512 without a hardware attach.
             await self._ensure_keyboard_service(self.hid, best_effort=True)
@@ -4709,6 +4994,13 @@ class TouchSession:
                         continue
                     if frame.get('kind') in ('hub_request', 'cancel_hub'):
                         self.device_hub.dispatch(frame, self._generation)
+                        continue
+                    if frame.get('kind') == 'touch_display_preview':
+                        width, height = frame.get('width'), frame.get('height')
+                        if (frame.get('schema') != MESSAGE_SCHEMA or
+                                any(type(value) is not int or not 1 <= value <= 65535 for value in (width, height))):
+                            raise ValueError('Invalid touch display preview dimensions.')
+                        self._preview_size = (width, height)
                         continue
                     if frame.get('kind') == 'native_keyboard_visibility':
                         request_generation = self._generation
@@ -5740,7 +6032,7 @@ class TouchSession:
                 # watchdog replay its preceding press while repair is pending.
                 self._touch_keepalive_contacts = ()
             send = asyncio.create_task(self.hid.send_report(
-                DIGITIZER_SURFACE_MAIN_TOUCHSCREEN, report))
+                _hid_touch_surface(self.hid), report))
             try:
                 try:
                     await asyncio.wait_for(asyncio.shield(send), timeout)
@@ -5773,7 +6065,7 @@ class TouchSession:
         # A fresh device-monotonic timestamp preserves the same slots, IDs and
         # positions without submitting a new press or repeating a keyboard key.
         await asyncio.wait_for(self.hid.send_report(
-            DIGITIZER_SURFACE_MAIN_TOUCHSCREEN, report), HID_OPERATION_TIMEOUT_SECONDS)
+            _hid_touch_surface(self.hid), report), HID_OPERATION_TIMEOUT_SECONDS)
         self._touch_report_sent_at = time.monotonic()
 
     async def _apply_paste_text(self, text: str) -> None:
@@ -5964,11 +6256,16 @@ class TouchSession:
         ts = None
         released: set[int] = set()
         changed = False
+        if not sm._id_to_slot:
+            # Keep a finger in one coordinate space until its release.
+            self._gesture_inverted = self._touch_orientation in (1, 4)
         for touch_point in points:
             pointer_id = int(touch_point['pointerId'])
             action = touch_point['action']
             x = int(round(float(touch_point['normalizedX']) * 65535))
             y = int(round(float(touch_point['normalizedY']) * 65535))
+            if self._gesture_inverted:
+                x, y = 65535 - x, 65535 - y
             if action == 'down':
                 slot = sm.assign(pointer_id)
                 if slot is None:
@@ -6029,14 +6326,20 @@ class TouchSession:
                 report = build_touchscreen_report(slot, TOUCHSCREEN_STATE_RELEASE, 0, 0)
                 with contextlib.suppress(Exception):
                     await self.hid.send_report(
-                        DIGITIZER_SURFACE_MAIN_TOUCHSCREEN, report)
+                        _hid_touch_surface(self.hid), report)
 
         with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(
                 release_hid_state(), timeout=HID_CLEANUP_TIMEOUT_SECONDS)
 
+    async def _stop_gate_media(self) -> None:
+        from device_hub import stop_display_media
+
+        session_id, self._gate_session_id = self._gate_session_id, None
+        if session_id is not None:
+            await stop_display_media(self.rsd, session_id, service_factory=DisplayService)
+
     async def _cleanup(self, *, preserve_capture_mux: bool = False) -> None:
-        await self.device_hub.suspend()
         async def close_pasteboard():
             try:
                 async with asyncio.timeout(HID_CLEANUP_TIMEOUT_SECONDS):
@@ -6051,8 +6354,10 @@ class TouchSession:
                 await self._close_device_pasteboard()
 
         async with _cleanup_cancellation_scope() as finish:
+            await finish(self.device_hub.suspend())
             await finish(self._release_hid_state())
             await finish(self._release_button_state())
+            await finish(self._stop_gate_media())
             if self.hid is not None and self._owns_hid:
                 await finish(self._close_remote_service(self.hid, 'hid'))
             if self.indigo is not None:
@@ -6075,17 +6380,6 @@ class TouchSession:
             self._touch_keepalive_contacts = ()
             self._held_keyboard_usages = frozenset()
 
-            if self.stream_answer is not None and self.display is not None:
-                try:
-                    import uuid as _uuid
-                    csid = self.stream_answer['connection']['options']['avcMediaStreamOptionClientSessionID']['uuid']
-                    if not isinstance(csid, _uuid.UUID):
-                        csid = _uuid.UUID(csid)
-                    with contextlib.suppress(Exception):
-                        await finish(asyncio.wait_for(self.display.stop_media_stream(csid),
-                                                     HID_CLEANUP_TIMEOUT_SECONDS))
-                except Exception:
-                    pass
             if self.transport is not None:
                 with contextlib.suppress(Exception):
                     self.transport.close()
@@ -6109,9 +6403,11 @@ class TouchSession:
 
 
 async def main_async(rate_hz: int, udid: Optional[str], transport: str,
-                     ddi_dir: Optional[Path] = None, show_native_keyboard: bool = True) -> None:
+                     ddi_dir: Optional[Path] = None, show_native_keyboard: bool = True,
+                     *, display_id: Optional[int] = None, preview_size: Optional[tuple[int, int]] = None) -> None:
     ipc = BridgeChannel()
-    session = TouchSession(ipc, rate_hz, udid, transport, ddi_dir, show_native_keyboard)
+    session = TouchSession(ipc, rate_hz, udid, transport, ddi_dir, show_native_keyboard,
+                           display_id=display_id, preview_size=preview_size)
     connection = asyncio.create_task(session.connect())
     disconnected = asyncio.create_task(ipc.wait_for_disconnect())
     try:
@@ -6190,6 +6486,69 @@ async def device_action_async(udid: str, action: str) -> bool:
         await ipc.close()
 
 
+async def shared_files_async(udid: str, request: dict, transport: str = 'usb',
+                             *, cancel_from_stdin: bool = False) -> bool:
+    """List or upload shared documents over trusted Lockdown, without developer services."""
+    from types import SimpleNamespace
+    from device_management import DeviceManagement, HubError
+
+    ipc = BridgeChannel()
+    session = TouchSession(ipc, 120, udid, transport)
+    lockdown = None
+    cancellation = None
+    cancelled_by_host = False
+    try:
+        action = request.get('action')
+        if action not in ('shared_document_apps', 'upload_file'):
+            raise ValueError('Unsupported shared-files action.')
+        if cancel_from_stdin:
+            operation = asyncio.current_task()
+            async def watch_cancel():
+                nonlocal cancelled_by_host
+                if await ipc._read_exactly(1) == b'\x03':
+                    cancelled_by_host = True
+                    operation.cancel()
+
+            cancellation = asyncio.create_task(watch_cancel(), name='shared-files-cancel')
+        async with asyncio.timeout(30 if action == 'shared_document_apps' else 300):
+            if transport == 'usb':
+                await session._start_capture_mux(attempts=1)
+            lockdown = await create_using_usbmux(
+                serial=udid, connection_type='USB' if transport == 'usb' else 'Network',
+                autopair=False)
+            if not _udid_matches(lockdown.udid, udid):
+                raise BridgePrerequisiteError('device_identity_mismatch', 'The connected device does not match the target.')
+            if not lockdown.paired:
+                raise NotPairedError('Trust this computer on the device first.')
+            management = DeviceManagement(SimpleNamespace(rsd=lockdown))
+            arguments = {} if action == 'shared_document_apps' else {
+                'root': 'documents', 'path': '', 'bundleId': request.get('bundleId'),
+                'sourcePath': request.get('sourcePath'),
+            }
+            result = await management.request(action, arguments)
+        await ipc.emit({'event': 'shared_files_result', 'result': result})
+        return True
+    except asyncio.CancelledError:
+        if not cancelled_by_host:
+            raise
+        await ipc.emit({'event': 'shared_files_result', 'code': 'FILE_TRANSFER_CANCELLED'})
+        return False
+    except Exception as error:
+        await ipc.emit({'event': 'shared_files_result',
+                        'code': error.code if isinstance(error, HubError) else bridge_error_code(error),
+                        'message': str(error)[:300] or type(error).__name__})
+        return False
+    finally:
+        if cancellation is not None:
+            cancellation.cancel()
+            await asyncio.gather(cancellation, return_exceptions=True)
+        if lockdown is not None:
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(lockdown.close(), 2)
+        session._close_capture_mux()
+        await ipc.close()
+
+
 async def enable_wifi_sync_async(udid: str) -> bool:
     ipc = BridgeChannel()
     lockdown = None
@@ -6262,6 +6621,9 @@ def main() -> int:
     parser.add_argument('--media-pipe')
     parser.add_argument('--replay-speed', type=float, default=1.0)
     parser.add_argument('--udid', default=None)
+    parser.add_argument('--display-id', type=int, help='Select an advertised built-in display for reverse control')
+    parser.add_argument('--preview-size', nargs=2, type=int, metavar=('WIDTH', 'HEIGHT'),
+                        help='Match a built-in display to the preview when active display data is unavailable')
     parser.add_argument('--ddi-dir', type=Path, default=None,
                         help='仅在未挂载镜像时使用此本地 Personalized DDI 目录')
     transport = parser.add_mutually_exclusive_group()
@@ -6273,6 +6635,10 @@ def main() -> int:
                         help='通过 USB 为指定设备启用 Apple Wi-Fi 同步')
     parser.add_argument('--device-action', choices=('restart', 'shutdown'),
                         help='对指定的受信任 USB 设备执行一次重启或关机操作')
+    parser.add_argument('--shared-files', action='store_true',
+                        help='通过 JSON 请求列出或写入指定受信任设备的 App 共享文档')
+    parser.add_argument('--ipa-signing', action='store_true', help='Local JSON IPA signing worker; no device access')
+    parser.add_argument('--ipa-workspace', type=Path, help='Host-owned temporary signing directory')
     parser.add_argument('--check-runtime', action='store_true',
                         help='验证反控运行时依赖，不连接设备')
     parser.add_argument('--observe-orientation', action='store_true',
@@ -6280,7 +6646,48 @@ def main() -> int:
     parser.add_argument('--check-setup', action='store_true',
                         help='只读检查指定设备的现有信任、开发者模式及无线控制设置')
     parser.set_defaults(transport='usb')
+    parser.add_argument('--discover-paired-devices', action='store_true',
+                        help='Read-only LAN inventory using existing pairing records; JSON request on stdin')
     args = parser.parse_args()
+    if args.discover_paired_devices:
+        if any((args.udid, args.ipa_signing, args.ipa_workspace, args.shared_files, args.replay_media,
+                args.device_action, args.observe_orientation, args.check_setup, args.check_runtime,
+                args.enable_wifi_sync, args.transport != 'usb')):
+            parser.error('--discover-paired-devices cannot be combined with other operations')
+        from paired_device_discovery import run
+        return run(sys.modules[__name__])
+    if args.ipa_signing:
+        if args.ipa_workspace is None or any((args.udid, args.shared_files, args.replay_media, args.device_action,
+                args.observe_orientation, args.check_setup, args.check_runtime, args.enable_wifi_sync)):
+            parser.error('--ipa-signing requires --ipa-workspace and no other operation')
+        from ipa_signing import run_worker
+        return run_worker(args.ipa_workspace)
+    if args.ipa_workspace is not None:
+        parser.error('--ipa-workspace requires --ipa-signing')
+    if args.display_id is not None and args.display_id < 1:
+        parser.error('--display-id must be positive')
+    if args.preview_size is not None and min(args.preview_size) < 1:
+        parser.error('--preview-size dimensions must be positive')
+    if args.shared_files:
+        if not args.udid or any((
+                args.replay_media, args.device_action, args.observe_orientation,
+                args.check_setup, args.check_runtime, args.enable_wifi_sync)):
+            parser.error('--shared-files requires --udid and cannot be combined with other modes')
+        try:
+            # Keep the following control byte in the unbuffered stream used
+            # by BridgeChannel. Its daemon reader may outlive the operation.
+            stdin = getattr(sys.stdin.buffer, 'raw', sys.stdin.buffer)
+            line = stdin.readline(262145)
+            if len(line) > 262144:
+                raise ValueError('Request too large.')
+            request = json.loads(line)
+            if not isinstance(request, dict):
+                raise ValueError('Expected a JSON object.')
+        except (ValueError, UnicodeError) as error:
+            print(json.dumps({'event': 'shared_files_result', 'code': 'BAD_REQUEST', 'message': str(error)}))
+            return 1
+        return 0 if asyncio.run(shared_files_async(args.udid, request, args.transport,
+                                                   cancel_from_stdin=True)) else 1
     if args.replay_media:
         if not args.media_pipe or args.udid:
             parser.error('--replay-media requires --media-pipe and no device')
@@ -6336,7 +6743,8 @@ def main() -> int:
                 parser.error('--enable-wifi-sync requires --udid')
             return 0 if asyncio.run(enable_wifi_sync_async(args.udid)) else 1
         asyncio.run(main_async(args.rate_hz, args.udid, args.transport, args.ddi_dir,
-                               not args.hide_native_keyboard))
+                               not args.hide_native_keyboard, display_id=args.display_id,
+                               preview_size=tuple(args.preview_size) if args.preview_size else None))
     except KeyboardInterrupt:
         return 0
     return 0

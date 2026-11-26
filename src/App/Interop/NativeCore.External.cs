@@ -26,9 +26,14 @@ internal sealed partial class NativeCore
             new(false, null, result, GetLastError("CoreDevice capture could not start."));
     }
 
-    internal void PushExternalFrame(NativeSessionHandle handle, uint kind, uint width, uint height, byte[] data)
+    internal void PushExternalFrame(NativeSessionHandle handle, uint kind, uint width, uint height, byte[] data) =>
+        PushExternalFrame(handle, kind, width, height, data, data.Length);
+
+    internal void PushExternalFrame(NativeSessionHandle handle, uint kind, uint width, uint height, byte[] data, int length)
     {
-        if (im_external_session_push(handle.RawHandle, kind, width, height, data, checked((uint)data.Length)) != 0)
+        ArgumentOutOfRangeException.ThrowIfNegative(length);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(length, data.Length);
+        if (im_external_session_push(handle.RawHandle, kind, width, height, data, (uint)length) != 0)
             throw new InvalidDataException("The native media consumer rejected the decoded frame.");
     }
     internal void SetExternalActive(NativeSessionHandle handle, bool active) =>

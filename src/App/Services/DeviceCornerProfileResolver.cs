@@ -15,58 +15,76 @@ internal static class DeviceCornerProfileResolver
     // does not publish a numeric display corner radius. Keep the constants in
     // one place so a future official bezel can be calibrated without touching
     // renderer/window code.
-    internal static readonly DeviceCornerProfile IPhoneX = new(
-        "iphone-x", true, 0.1460, 2.15, 0.1320);
-    internal static readonly DeviceCornerProfile IPhoneNotch = new(
-        "iphone-notch", true, 0.1580, 2.25, 0.1420);
-    internal static readonly DeviceCornerProfile IPhone12Mini = new(
-        "iphone-12-mini", true, 0.1180, 2.18, 0.1080);
-    internal static readonly DeviceCornerProfile IPhone13Mini = new(
-        "iphone-13-mini", true, 0.1240, 2.20, 0.1130);
-    internal static readonly DeviceCornerProfile IPhone12Standard = new(
-        "iphone-12-standard", true, 0.1390, 2.22, 0.1260);
-    internal static readonly DeviceCornerProfile IPhone12Max = new(
-        "iphone-12-max", true, 0.1320, 2.22, 0.1200);
     internal static readonly DeviceCornerProfile IPhoneDynamicIsland = new(
-        // The main compact preview is an opaque child HWND. Its region must
-        // follow the shader's curve; a smaller region radius exposes a black
-        // strip between the child silhouette and the anti-aliased picture.
-        "iphone-dynamic-island", true, 0.1784, 2.36, 0.1784);
+        "iphone-dynamic-island", true, 0.1784, 2.36);
+    private static readonly DeviceCornerProfile IPhoneNotch = new(
+        "iphone-notch", true, 0.1580, 2.25);
+
+    // Fits to the display area of the corresponding screen artwork, in units
+    // of the short edge. Models share a fit where the source outlines agree.
+    private static readonly DeviceCornerProfile IPhoneX = new(
+        "iphone-x", true, 0.11980, 2.3298);
+    private static readonly DeviceCornerProfile IPhoneXsMax = new(
+        "iphone-xs-max", true, 0.11632, 2.5528);
+    private static readonly DeviceCornerProfile IPhoneXr = new(
+        "iphone-xr", true, 0.12032, 2.4728);
+    private static readonly DeviceCornerProfile IPhone12Mini = new(
+        "iphone-12-mini", true, 0.14346, 2.4694);
+    private static readonly DeviceCornerProfile IPhone12Standard = new(
+        "iphone-12-standard", true, 0.14612, 2.4968);
+    private static readonly DeviceCornerProfile IPhone12Max = new(
+        "iphone-12-max", true, 0.14958, 2.4940);
+    private static readonly DeviceCornerProfile IPhone13Mini = new(
+        "iphone-13-mini", true, 0.15946, 2.8076);
+    private static readonly DeviceCornerProfile IPhone13 = new(
+        "iphone-13", true, 0.13004, 2.0340);
+    private static readonly DeviceCornerProfile IPhone13Pro = new(
+        "iphone-13-pro", true, 0.14484, 2.4832);
+    private static readonly DeviceCornerProfile IPhone13ProMax = new(
+        "iphone-13-pro-max", true, 0.14412, 2.5036);
+    private static readonly DeviceCornerProfile IPhone14 = new(
+        "iphone-14", true, 0.13466, 2.1760);
+    private static readonly DeviceCornerProfile IPhone14Plus = new(
+        "iphone-14-plus", true, 0.19178, 3.2200);
+    private static readonly DeviceCornerProfile IPhone14Pro = new(
+        "iphone-14-pro", true, 0.19364, 2.9136);
+    private static readonly DeviceCornerProfile IPhone14ProMax = new(
+        "iphone-14-pro-max", true, 0.18050, 2.8628);
     // Model-specific visual fits against the checked-in screen masks. These
     // are measured artwork fits, not Apple-published mechanical dimensions.
     // See docs/diagnostics/recent-iphone-corners-20261117.md for provenance.
     internal static readonly DeviceCornerProfile IPhone16 = new(
-        "iphone-16", true, 0.17700, 2.6358, 0.17700);
+        "iphone-16", true, 0.17700, 2.6358);
     internal static readonly DeviceCornerProfile IPhone16Plus = new(
-        "iphone-16-plus", true, 0.17090, 2.8106, 0.17090);
+        "iphone-16-plus", true, 0.17090, 2.8106);
     internal static readonly DeviceCornerProfile IPhone16Pro = new(
-        "iphone-16-pro", true, 0.19272, 2.5886, 0.19272);
+        "iphone-16-pro", true, 0.19272, 2.5886);
     internal static readonly DeviceCornerProfile IPhone16ProMax = new(
-        "iphone-16-pro-max", true, 0.17100, 2.5040, 0.17100);
+        "iphone-16-pro-max", true, 0.17100, 2.5040);
     internal static readonly DeviceCornerProfile IPhone17 = new(
-        "iphone-17", true, 0.19590, 2.6304, 0.19590);
+        "iphone-17", true, 0.19590, 2.6304);
     internal static readonly DeviceCornerProfile IPhone17Pro = new(
-        "iphone-17-pro", true, 0.19452, 2.6086, 0.19452);
+        "iphone-17-pro", true, 0.19452, 2.6086);
     internal static readonly DeviceCornerProfile IPhone17ProMax = new(
-        "iphone-17-pro-max", true, 0.17832, 2.5876, 0.17832);
+        "iphone-17-pro-max", true, 0.17832, 2.5876);
     internal static readonly DeviceCornerProfile IPhoneAir = new(
-        "iphone-air", true, 0.18298, 2.4729, 0.18298);
+        "iphone-air", true, 0.18298, 2.4729);
     internal static readonly DeviceCornerProfile IPhone18Pro = new(
-        "iphone-18-pro", true, 0.19058, 2.5518, 0.19058);
+        "iphone-18-pro", true, 0.19058, 2.5518);
     internal static readonly DeviceCornerProfile IPhone18ProMax = new(
-        "iphone-18-pro-max", true, 0.17698, 2.5706, 0.17698);
+        "iphone-18-pro-max", true, 0.17698, 2.5706);
     internal static readonly DeviceCornerProfile IPhoneDuoInner = new(
-        "iphone-duo-inner", true, 0.09698, 2.5022, 0.09698);
+        "iphone-duo-inner", true, 0.09698, 2.5022);
     internal static readonly DeviceCornerProfile IPhoneModernNotch = new(
-        "iphone-modern-notch", true, 0.1580, 2.25, 0.1580);
+        "iphone-modern-notch", true, 0.1580, 2.25);
     internal static readonly DeviceCornerProfile IPadPro = new(
-        "ipad-pro-rounded", true, 0.0430, 2.12, 0.0390);
+        "ipad-pro-rounded", true, 0.0430, 2.12);
     internal static readonly DeviceCornerProfile IPadAir = new(
-        "ipad-air-rounded", true, 0.0390, 2.08, 0.0360);
+        "ipad-air-rounded", true, 0.0390, 2.08);
     internal static readonly DeviceCornerProfile IPadMini = new(
-        "ipad-mini-rounded", true, 0.0520, 2.12, 0.0470);
+        "ipad-mini-rounded", true, 0.0520, 2.12);
     internal static readonly DeviceCornerProfile IPadBase = new(
-        "ipad-rounded", true, 0.0380, 2.08, 0.0350);
+        "ipad-rounded", true, 0.0380, 2.08);
 
     private static readonly HashSet<(int Major, int Minor)> RectangularIPhones =
     [
@@ -112,6 +130,14 @@ internal static class DeviceCornerProfileResolver
             ? IPhoneX
             : DeviceCornerProfile.Rectangular;
 
+        if (major is 11 or 12) return (major, minor) switch
+        {
+            (11, 2) or (12, 3) => IPhoneX,
+            (11, 4 or 6) or (12, 5) => IPhoneXsMax,
+            (11, 8) or (12, 1) => IPhoneXr,
+            _ => IPhoneNotch,
+        };
+
         if (major == 13) return minor switch
         {
             1 => IPhone12Mini,
@@ -122,14 +148,31 @@ internal static class DeviceCornerProfileResolver
         if (major == 14) return minor switch
         {
             4 => IPhone13Mini,
-            3 or 5 or 7 or 8 => IPhone12Standard,
-            2 => IPhone12Max,
+            2 => IPhone13Pro,
+            3 => IPhone13ProMax,
+            5 => IPhone13,
+            7 => IPhone14,
+            8 => IPhone14Plus,
             _ => IPhoneNotch,
         };
 
         // ProductType iPhone15,* starts with iPhone 14 Pro and is the first
         // all-Dynamic-Island generation. Later identifiers inherit that fit.
         if (NotchedModernIPhones.Contains((major, minor))) return IPhoneModernNotch;
+        if (major == 15) return minor switch
+        {
+            2 => IPhone14Pro,
+            3 => IPhone14ProMax,
+            4 => IPhone16 with { Id = "iphone-15" },
+            5 => IPhone16Plus with { Id = "iphone-15-plus" },
+            _ => IPhoneDynamicIsland,
+        };
+        if (major == 16) return minor switch
+        {
+            1 => IPhone16 with { Id = "iphone-15-pro" },
+            2 => IPhone16Plus with { Id = "iphone-15-pro-max" },
+            _ => IPhoneDynamicIsland,
+        };
         if (major == 17) return minor switch
         {
             1 => IPhone16Pro,

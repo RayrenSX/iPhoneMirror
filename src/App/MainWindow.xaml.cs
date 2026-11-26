@@ -387,27 +387,39 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         InitializeAutomation();
         MainPreviewHost.PointerInput += OnControlPointerInput;
         MainPreviewHost.KeyboardInput += OnControlKeyboardInput;
+        MainPreviewHost.FilesDropped += OnMainNativePreviewFilesDropped;
         _viewModel.SetMediaCastOutputProviders(
             CaptureMediaCastNv12Frame, CaptureMediaCastVideoFrame,
             afterSequence => _mediaCastAudioDecoder.GetPacket(afterSequence));
         _secondaryMirrors = new MultiDevicePreviewManager(_viewModel,
             (udid, window) => !_bossKeyHidden &&
                 (_viewModel.IsUsbControlTarget(udid) ||
-                 (_activeControlWindow == window && IsBluetoothControlActiveFor(udid))));
+                 (_activeControlWindow == window && IsBluetoothControlActiveFor(udid))),
+            PreviewWindowsHotkeysFor);
         _secondaryMirrors.ReverseControlRequested += OnIndependentReverseControlRequested;
         _secondaryMirrors.UsbControlRequested += OnIndependentUsbControlRequested;
         _secondaryMirrors.WirelessControlRequested += OnIndependentWirelessControlRequested;
         _secondaryMirrors.PreviewClosed += OnIndependentPreviewClosed;
         _secondaryMirrors.PointerInput += OnIndependentPointerInput;
         _secondaryMirrors.KeyboardInput += OnIndependentKeyboardInput;
+        _secondaryMirrors.SelectScreenTextRequested += (source, window) =>
+            _ = OpenScreenTextSelectionAsync(source, window.Handle);
+        _secondaryMirrors.FilesDropped += (device, window, paths) =>
+            _ = QueuePreviewFileDrop(device, window, paths);
         _secondaryMirrors.KeyboardFocusChanged += OnIndependentKeyboardFocusChanged;
+        _secondaryMirrors.PreviewCreated += ConfigurePreviewClickThrough;
         DataContext = _viewModel;
         RefreshIndependentWindowLayoutEditor();
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
-        _secondaryMirrors.PhoneFrameChanged += RefreshProjectionPhoneFrame;
+        _secondaryMirrors.PhoneFrameChanged += () =>
+        {
+            RefreshProjectionPhoneFrame();
+            if (_viewModel.MainPreviewPhoneFrame) QueueMainPreviewHostSync();
+        };
         _viewModel.PropertyChanged += (_, _) => RefreshProjectionPhoneFrame();
         Loaded += (_, _) => RefreshProjectionPhoneFrame();
         _viewModel.Devices.CollectionChanged += OnDevicesCollectionChanged;
+        _viewModel.DeviceCards.CollectionChanged += OnDeviceCardsCollectionChanged;
         _viewModel.DeviceVideoSizeChanged += OnDeviceVideoSizeChanged;
         _viewModel.DeviceSessionHandleChanged += OnDeviceSessionHandleChanged;
         _viewModel.DeviceProtectionStateChanged += OnDeviceProtectionStateChanged;
@@ -439,6 +451,11 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         SourceInitialized += OnSourceInitialized;
         Deactivated += OnMainKeyboardDeactivated;
         Activated += OnMainKeyboardActivated;
+        Activated += (_, _) =>
+        {
+            _independentLayoutEditor?.RefreshIfChanged();
+            _networkProxyEditor?.RefreshIfChanged();
+        };
         PreviewGotKeyboardFocus += OnMainKeyboardFocusChanged;
         PreviewTextInput += OnRemoteTextInput;
         SizeChanged += OnWorkspaceWindowSizeChanged;
@@ -460,6 +477,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         // when the workspace opens. Bind input to the already-created HWND.
         _windowSource = HwndSource.FromHwnd(new WindowInteropHelper(this).Handle);
         _windowSource?.AddHook(WindowMessageHook);
+        // The GPU preview is an alpha-composited child. WPF must paint the
+        // workspace beneath it, including pixels outside the device outline.
+        if (_windowSource is not null) Controls.NativePreviewHost.EnableParentPainting(_windowSource.Handle);
         RegisterBluetoothControlHotkey();
         _viewModel.AddDiagnosticLog(AppLog.Event("main_window_input_source_initialized",
             ("attached", _windowSource is not null), ("visible", IsVisible)));
@@ -557,7 +577,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         return true;
     }
 
-    private void ShowShortcutSettings()
+    private void ShowShortcutSettings() => OpenShortcutSettings(this);
+
+    internal void OpenShortcutSettings(Window owner)
     {
         if (_shortcutSettingsWindow is not null)
         {
@@ -571,7 +593,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             ApplyBluetoothShortcuts, ConfiguredSettingShortcuts, ApplyShortcutSettingsWithHotkeys,
             (settings?.PreviewWindowsHotkeyAllowList, settings?.PreviewWindowsHotkeyBlockList))
         {
-            Owner = this,
+            Owner = owner,
         };
         _shortcutSettingsWindow = window;
         ReleaseSettingShortcutOverrides();
@@ -685,6 +707,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         Controls.PreviewPointerEventArgs e)
     {
         if (_activeControlWindow != 0) return;
+        if (MapMainPreviewFramePointer(e) is not { } mapped) return;
+        e = mapped;
         var udid = _viewModel.SelectedDevice?.Udid;
         if (!IsUsbControlActive && HandleWindowBluetoothPointer(e, udid)) return;
         if (TryHandlePointerShortcut(e, udid)) return;
@@ -1818,6 +1842,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
         DisposeKeyboardMapping();
         DisposeTray();
+        DisposePreviewInteractionRecovery();
         _compactLaunchCancellation.Cancel();
         _secondaryMirrors.PreviewClosed -= OnCompactPreviewClosed;
         CancelLightweightWindowWidthAnimation();
@@ -1842,15 +1867,25 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private nint WindowMessageHook(nint hwnd, int message, nint wParam, nint lParam,
         ref bool handled)
     {
+        if (message == 0x007C) // WM_STYLECHANGING
+            Controls.NativePreviewHost.KeepParentPainting(wParam, lParam);
         if (message is 0x0231 or 0x0232) // WM_ENTERSIZEMOVE / WM_EXITSIZEMOVE
+        {
             _horizontalProjectionResize = null;
+            _completeHorizontalResize = false;
+        }
         if (message == 0x0046 && lParam != 0 && CanConstrainCompleteWorkspace && GetWindowRect(hwnd, out var completeBounds))
         {
             var position = Marshal.PtrToStructure<WorkspaceWindowPosition>(lParam);
             if ((position.Flags & 0x0001) == 0 && position.Width > 0 && position.Height > 0)
             {
                 var scale = Math.Max(1, GetDpiForWindow(hwnd)) / 96d;
-                var minimumWidth = CanConstrainCompletePreview
+                var horizontalResize = _completeHorizontalResize ||
+                    (_viewModel.SourceVideoWidth > _viewModel.SourceVideoHeight &&
+                     position.Height == completeBounds.Bottom - completeBounds.Top &&
+                     position.Width < completeBounds.Right - completeBounds.Left);
+                _completeHorizontalResize = horizontalResize;
+                var minimumWidth = CanConstrainCompletePreview && !horizontalResize
                     ? GetCompletePreviewMinimumWindowWidth(completeBounds, position.Height, scale)
                     : GetCompleteWorkspaceMinimumWidth();
                 var minimum = (int)Math.Ceiling(minimumWidth * scale - .001);
@@ -1861,13 +1896,16 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                     position.Width = minimum;
                     Marshal.StructureToPtr(position, lParam, false);
                 }
+                _completePreviewAtResizeLimit = position.Width <= minimum;
+                RefreshCompletePreviewFit();
             }
         }
         if (message == 0x0214 && lParam != 0 && CanConstrainCompleteWorkspace && GetWindowRect(hwnd, out var completeCurrent))
         {
             var proposed = Marshal.PtrToStructure<NativeRect>(lParam);
             var scale = Math.Max(1, GetDpiForWindow(hwnd)) / 96d;
-            var minimumWidth = CanConstrainCompletePreview
+            _completeHorizontalResize = (int)wParam is 1 or 2;
+            var minimumWidth = CanConstrainCompletePreview && !_completeHorizontalResize
                 ? GetCompletePreviewMinimumWindowWidth(completeCurrent, proposed.Bottom - proposed.Top, scale)
                 : GetCompleteWorkspaceMinimumWidth();
             var minimum = (int)Math.Ceiling(minimumWidth * scale - .001);
@@ -1963,8 +2001,10 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         }
         if (message == WmHotKey)
         {
-            // Registration is only a settings conflict probe. Never execute a
-            // queued WM_HOTKEY alongside the hook's physical key lifetime.
+            if (wParam == _previewInteractionHotkeyId && CanUsePreviewInteractionHotkey)
+                RestorePreviewInteraction();
+            // Configurable shortcuts use the keyboard hook. Their WM_HOTKEY
+            // messages are only produced by the settings conflict probe.
             handled = true;
             return 0;
         }
@@ -2351,6 +2391,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private void ApplyWindowFramePolicy()
     {
         var flushToDisplayEdge = _isFullScreen || _isWindowMaximized;
+        IPhoneMirror.SharedUI.Services.WindowWorkAreaController.SetFullMonitorPresentation(this, flushToDisplayEdge);
         WindowCornerPreference = flushToDisplayEdge
             ? Wpf.Ui.Controls.WindowCornerPreference.DoNotRound
             : Wpf.Ui.Controls.WindowCornerPreference.Round;
@@ -2441,6 +2482,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     {
         if (_leftWorkspacePanel == panel) return;
         _leftWorkspacePanel = panel;
+        if (panel != LeftWorkspacePanel.None) _workspacePrefersRightPanel = false;
         ApplyWorkspacePanelState(animate: IsLoaded && !_isFullScreen);
         _viewModel.AddDiagnosticLog(AppLog.Event("workspace_left_panel_changed",
             ("panel", panel.ToString().ToLowerInvariant())));
@@ -2450,7 +2492,11 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     {
         if (_isSettingsPanelVisible == visible) return;
         _isSettingsPanelVisible = visible;
-        if (visible) _isDeviceHubPanelVisible = false;
+        if (visible)
+        {
+            _isDeviceHubPanelVisible = false;
+            _workspacePrefersRightPanel = true;
+        }
         SynchronizeRightPanelContent();
         ApplyWorkspacePanelState(animate: IsLoaded && !_isFullScreen);
         _viewModel.AddDiagnosticLog(AppLog.Event("workspace_settings_panel_changed",
@@ -2459,6 +2505,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private void ApplyWorkspacePanelState(bool animate = false)
     {
+        KeepPreferredWorkspacePanel();
         animate &= SystemParameters.ClientAreaAnimation && IsVisible && IsLoaded &&
             WindowState != WindowState.Minimized;
         var showMirroring = _leftWorkspacePanel == LeftWorkspacePanel.Mirroring;
@@ -2524,17 +2571,18 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         {
             // A newly opening card must be measured at its final content width
             // before the reveal starts, never at the old window's leftover space.
-            if (showLeftPanel && !leftWasOpen) LeftPanelHost.ContentWidth = WorkspaceDeviceWidth;
+            if (showLeftPanel && !leftWasOpen) LeftPanelHost.ContentWidth = WorkspaceLeftWidth;
             if (showSettings && !rightWasOpen) ControlPanel.ContentWidth = WorkspaceRightWidth;
         }
         if (!animate)
         {
             LeftGapColumn.Width = new GridLength(showLeftPanel ? 18 : 0);
             RightGapColumn.Width = new GridLength(showSettings ? 18 : 0);
-            SetWorkspaceSurfaceImmediate(LeftPanelHost, showLeftPanel, WorkspaceDeviceWidth);
+            SetWorkspaceSurfaceImmediate(LeftPanelHost, showLeftPanel, WorkspaceLeftWidth);
             SetWorkspacePageImmediate(DevicePanel, showDevices);
             SetWorkspacePageImmediate(MirroringPanel, showMirroring);
             SetWorkspaceSurfaceImmediate(ControlPanel, showSettings, WorkspaceRightWidth);
+            UpdateRightPanelPages();
             ReleaseLightweightCenterWidth();
             if (_viewModel.IsLightweightApplicationMode && IsVisible)
                 QueueInitialLightweightWorkspaceFit();
@@ -2575,7 +2623,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             : currentCenterWidth;
 
         _workspaceLeftSurfaceStartWidth = currentLeftWidth;
-        _workspaceLeftSurfaceTargetWidth = showLeftPanel ? WorkspaceDeviceWidth : 0;
+        _workspaceLeftSurfaceTargetWidth = showLeftPanel ? WorkspaceLeftWidth : 0;
         _workspaceRightSurfaceStartWidth = currentRightWidth;
         _workspaceRightSurfaceTargetWidth = showSettings ? WorkspaceRightWidth : 0;
         _workspaceLeftGapStartWidth = currentLeftGap;
@@ -2757,8 +2805,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         var hasPanels = showLeftPanel || showSettings;
         DeviceColumn.Width = GridLength.Auto;
         ControlColumn.Width = GridLength.Auto;
-        SetWorkspaceSurfaceImmediate(LeftPanelHost, showLeftPanel, WorkspaceDeviceWidth);
+        SetWorkspaceSurfaceImmediate(LeftPanelHost, showLeftPanel, WorkspaceLeftWidth);
         SetWorkspaceSurfaceImmediate(ControlPanel, showSettings, WorkspaceRightWidth);
+        UpdateRightPanelPages();
         LeftGapColumn.Width = new GridLength(showLeftPanel ? 18 : 0);
         RightGapColumn.Width = new GridLength(showSettings ? 18 : 0);
         SetLightweightCenterColumnFill();
@@ -2768,7 +2817,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         var scale = (dpi == 0 ? 96d : dpi) / 96d;
         var currentWindowWidth = Math.Max(1, bounds.Right - bounds.Left) / scale;
         var chromeWidth = GetLightweightFixedChromeWidth(currentWindowWidth);
-        var sideWidth = (showLeftPanel ? WorkspaceDeviceWidth + 18 : 0) +
+        var sideWidth = (showLeftPanel ? WorkspaceLeftWidth + 18 : 0) +
             (showSettings ? WorkspaceRightWidth + 18 : 0);
         var maximumWindowWidth = GetLightweightMaximumWindowWidth();
         var maximumPreviewWidth = Math.Max(1, maximumWindowWidth - chromeWidth -
@@ -2857,9 +2906,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         element.Width = visible ? width : 0;
     }
 
-    private void OnThemeSelectionChanged(object sender, SelectionChangedEventArgs e)
+    internal void OnThemeSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (!_themeControlReady || sender is not ComboBox { SelectedValue: string value } ||
+        if (!_themeControlReady || sender is not ComboBox { SelectedValue: string value } selector ||
             !Enum.TryParse<AppTheme>(value, ignoreCase: true, out var theme) ||
             Application.Current is not App app || app.UpdateSettings.Theme == theme)
             return;
@@ -2869,13 +2918,14 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         {
             app.UpdateSettings.Theme = previous;
             _themeControlReady = false;
-            try { ThemeComboBox.SelectedValue = previous.ToString(); }
+            try { selector.SelectedValue = previous.ToString(); }
             finally { _themeControlReady = true; }
             _viewModel.ApplicationSettingsStatus = LocalizationService.Get("SetupSaveFailed");
             return;
         }
         _viewModel.ApplicationSettingsStatus = string.Empty;
         ThemeService.Apply(theme);
+        ThemeComboBox.SelectedValue = theme.ToString();
     }
 
     private void OnMinimizeClick(object sender, RoutedEventArgs e) =>
@@ -3002,6 +3052,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         _viewModel.AddDiagnosticLog(AppLog.Event("main_window_shutdown_begin"));
         _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
         _viewModel.Devices.CollectionChanged -= OnDevicesCollectionChanged;
+        _viewModel.DeviceCards.CollectionChanged -= OnDeviceCardsCollectionChanged;
         _viewModel.DeviceVideoSizeChanged -= OnDeviceVideoSizeChanged;
         _viewModel.DeviceSessionHandleChanged -= OnDeviceSessionHandleChanged;
         _viewModel.DeviceProtectionStateChanged -= OnDeviceProtectionStateChanged;
@@ -3280,6 +3331,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         _mediaCastAudioDecoder.Stop();
         ResetMediaRecoveryCancellation();
         var generation = _mediaCastEvents.BeginGeneration();
+        CloseScreenTextSelectionForSource(DeviceViewModel.MediaCastUdid);
         ++_mediaRecoveryRevision;
         // Every new source owns a new bridge, including HLS -> native media
         // and replacements whose backend fails to start.
@@ -3418,6 +3470,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         _mediaOpeningTimer.Stop();
         CancelMediaRecovery();
         _mediaCastEvents.Invalidate();
+        CloseScreenTextSelectionForSource(DeviceViewModel.MediaCastUdid);
         ++_mediaRecoveryRevision;
         if (!_mediaStopped)
         {
@@ -3479,7 +3532,6 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         MediaCastSurface.Visibility = Visibility.Collapsed;
         ResetMediaCastControls();
         _viewModel.EndMediaCast();
-        MainPreviewHost.ClearValue(VisibilityProperty);
         SynchronizeMainPreviewHost();
     }
 
@@ -3498,6 +3550,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
         CancelMediaRecovery();
         _mediaCastEvents.Invalidate();
+        CloseScreenTextSelectionForSource(DeviceViewModel.MediaCastUdid);
         ++_mediaRecoveryRevision;
         _mediaStopped = true;
         _mediaPlaying = false;
@@ -3580,7 +3633,6 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         }
         try
         {
-            MainPreviewHost.ClearValue(VisibilityProperty);
             SynchronizeMainPreviewHost();
         }
         catch (Exception error)
@@ -5875,11 +5927,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private void ShowDeveloperProjectionSettings()
     {
-        var window = new ProjectionSettingsWindow(_viewModel,
-            () => Task.CompletedTask, () => Task.CompletedTask,
-            () => Task.CompletedTask, () => Task.CompletedTask,
-            () => { }) { Owner = this };
-        window.Show();
+        ProjectionSettingsWindow.ShowDeveloperPreview(this, _viewModel);
     }
 
     private void ShowDeveloperMediaOutputSettings()
@@ -6064,9 +6112,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         {
             var before = CaptureDeviceItemPositions();
             var placeAfter = e.GetPosition(item!).Y >= item!.ActualHeight / 2;
-            var oldIndex = _viewModel.Devices.IndexOf(source);
+            var oldIndex = _viewModel.DeviceCards.IndexOf(source);
             _viewModel.MoveDevice(source, target, placeAfter);
-            if (_viewModel.Devices.IndexOf(source) != oldIndex)
+            if (_viewModel.DeviceCards.IndexOf(source) != oldIndex)
                 AnimateDeviceItemsFrom(before);
         }
         e.Handled = true;
@@ -6092,7 +6140,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private Dictionary<DeviceViewModel, double> CaptureDeviceItemPositions()
     {
         var positions = new Dictionary<DeviceViewModel, double>();
-        foreach (var device in _viewModel.Devices)
+        foreach (var device in _viewModel.DeviceCards)
             if (DeviceListBox.ItemContainerGenerator.ContainerFromItem(device) is ListBoxItem item)
                 positions[device] = item.TranslatePoint(default, DeviceListBox).Y;
         return positions;
@@ -6101,7 +6149,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private void AnimateDeviceItemsFrom(IReadOnlyDictionary<DeviceViewModel, double> before)
     {
         DeviceListBox.UpdateLayout();
-        foreach (var device in _viewModel.Devices)
+        foreach (var device in _viewModel.DeviceCards)
         {
             if (!before.TryGetValue(device, out var oldY) ||
                 DeviceListBox.ItemContainerGenerator.ContainerFromItem(device) is not ListBoxItem item)
@@ -6180,6 +6228,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private async void OnStartUsbControlClick(object sender, RoutedEventArgs e)
     {
+        if (!_viewModel.CanToggleWiredControl) return;
         try
         {
             ShowReverseControlStatus(ControlStatusMode.Usb);
@@ -6200,6 +6249,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private async void OnStartWirelessControlClick(object sender, RoutedEventArgs e)
     {
+        if (!_viewModel.CanToggleWirelessControl) return;
         try
         {
             ShowReverseControlStatus(ControlStatusMode.Wireless);
@@ -6342,6 +6392,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                 OnDeviceSessionHandleChanged(udid, sessionHandle));
             return;
         }
+        CloseScreenTextSelectionForSource(udid);
         if (IsTrayMode && sessionHandle != 0) QueueTrayProjection(udid, sessionHandle);
         if (_projectionSettingsWindow is not null &&
             DeviceViewModel.UdidEquals(_projectionSettingsUdid, udid) &&
@@ -6420,6 +6471,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         }
         OnMappingContextChanged(e.PropertyName);
         if (e.PropertyName == nameof(MainViewModel.HideInterfaceDescriptions)) UpdatePreviewStatusPresentation();
+        if (e.PropertyName is nameof(MainViewModel.MainPreviewRoundedCorners) or nameof(MainViewModel.MainPreviewPhoneFrame))
+            QueueMainPreviewHostSync();
         // A mode switch also notifies both effective checkbox values. Its
         // IsLightweightApplicationMode notification applies geometry once.
         if (e.PropertyName is nameof(MainViewModel.HidePreviewToolbar) or nameof(MainViewModel.HidePreviewStatusBar) &&
@@ -6523,13 +6576,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                 _viewModel.SelectedDevice,
                 _viewModel.SourceVideoWidth,
                 _viewModel.SourceVideoHeight);
-            if (e.PropertyName is nameof(MainViewModel.SelectedDevice) or
-                nameof(MainViewModel.CurrentSessionHandle) or
-                nameof(MainViewModel.IsAudioOnlyAirPlay) or
-                nameof(MainViewModel.IsVideoProtected))
-                QueueMainPreviewHostSync();
+            QueueMainPreviewHostSync();
         }
-        else if (e.PropertyName == nameof(MainViewModel.IsCapturing))
+        else if (e.PropertyName is nameof(MainViewModel.IsCapturing) or nameof(MainViewModel.HasMirroringVideo))
             QueueMainPreviewHostSync();
     }
 
@@ -6642,6 +6691,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             PreviewPanel.ClearValue(MaxWidthProperty);
             CenterColumn.MaxWidth = double.PositiveInfinity;
             PreviewPanel.HorizontalAlignment = HorizontalAlignment.Stretch;
+            UpdateMainPreviewFrame(IsMainNativePreviewVisible);
             return;
         }
 
@@ -6653,13 +6703,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             PreviewPanel.ClearValue(MaxWidthProperty);
             CenterColumn.MaxWidth = double.PositiveInfinity;
             PreviewPanel.ClearValue(HorizontalAlignmentProperty);
-            PreviewPanel.SetResourceReference(Panel.BackgroundProperty,
-                "PreviewChromeBrush");
-            PreviewPanel.BorderThickness = new Thickness(1);
-            PreviewPanel.CornerRadius = new CornerRadius(16);
-            PreviewPanel.SetResourceReference(Border.BorderBrushProperty, "BorderBrush");
-            MainPreviewHost.SetDeviceCornerProfile(DeviceCornerProfile.Rectangular,
-                enabled: false);
+            UpdateMainPreviewFrame(IsMainNativePreviewVisible);
             UpdateCompleteWorkspaceMinimumWidth();
             if (_lightweightModeApplied && !_isWindowMaximized)
             {
@@ -6679,25 +6723,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         }
         PreviewPanel.MinWidth = 0;
         PreviewPanel.ClearValue(WidthProperty);
-        if (HasLightweightVideoPresentation)
-        {
-            // Compact mode lets the native preview own the device outline;
-            // the WPF frame must not leave a black strip above the clipped
-            // child HWND.
-            PreviewPanel.Background = Brushes.Transparent;
-            PreviewPanel.BorderThickness = new Thickness(0);
-            PreviewPanel.CornerRadius = new CornerRadius(0);
-            PreviewPanel.BorderBrush = Brushes.Transparent;
-        }
-        else
-        {
-            PreviewPanel.SetResourceReference(Panel.BackgroundProperty,
-                "PreviewChromeBrush");
-            PreviewPanel.BorderThickness = new Thickness(1);
-            PreviewPanel.CornerRadius = new CornerRadius(16);
-            PreviewPanel.SetResourceReference(Border.BorderBrushProperty, "BorderBrush");
-        }
-        UpdateMainPreviewCornerProfile();
+        UpdateMainPreviewFrame(IsMainNativePreviewVisible);
         ApplyLightweightPreviewFramePolicy();
         if (_isWindowMaximized)
             return;
@@ -6881,7 +6907,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         var showLeftPanel = _leftWorkspacePanel != LeftWorkspacePanel.None;
         var showSettings = IsRightWorkspacePanelVisible;
         if (!showLeftPanel && !showSettings) return false;
-        var targetSideWidth = (showLeftPanel ? WorkspaceDeviceWidth + 18 : 0) +
+        var targetSideWidth = (showLeftPanel ? WorkspaceLeftWidth + 18 : 0) +
             (showSettings ? WorkspaceRightWidth + 18 : 0);
         var chromeWidth = GetLightweightFixedChromeWidth(
             GetLightweightCurrentWindowWidth());
@@ -7038,26 +7064,48 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private bool HasLightweightVideoPresentation => _viewModel.IsCapturing ||
         (_mediaCastActive && _viewModel.IsMediaCastSelected);
 
-    private void UpdateMainPreviewCornerProfile()
-    {
-        var useDeviceOutline = _viewModel.IsLightweightApplicationMode &&
-            !_isFullScreen && HasLightweightVideoPresentation &&
-            !_viewModel.IsMediaCastSelected;
-        var profile = useDeviceOutline
-            ? DeviceCornerProfileResolver.Resolve(_viewModel.SelectedDevice?.ProductType,
-                _viewModel.SourceVideoWidth, _viewModel.SourceVideoHeight)
-            : DeviceCornerProfile.Rectangular;
-        MainPreviewHost.SetDeviceCornerProfile(profile, useDeviceOutline);
+    private bool IsMainNativePreviewVisible => !IsTrayMode && !_viewModel.IsMediaCastSelected &&
+        _viewModel.IsCapturing && _viewModel.HasMirroringVideo && !_viewModel.IsAudioOnlyAirPlay &&
+        !_secondaryMirrors.IsOpen(_viewModel.SelectedDevice);
 
-        var session = _viewModel.CurrentSessionHandle;
-        // A session can be rendered by either the main child HWND or an
-        // independent top-level HWND. The session-wide setter updates every
-        // renderer, so never let a main-window mode switch overwrite the
-        // independent window's per-HWND device outline.
-        var independentWindowOpen = _secondaryMirrors.IsOpen(_viewModel.SelectedDevice);
-        if (session != 0 && !independentWindowOpen)
-            _ = NativeCore.SetDeviceCornerProfile(session,
-                profile.IsRounded ? profile.RadiusRatio : 0, profile.CurveExponent);
+    private void UpdateMainPreviewFrame(bool nativeVideoVisible)
+    {
+        var showStage = !_isFullScreen && !_viewModel.IsLightweightApplicationMode &&
+            nativeVideoVisible && HasLightweightContentDimensions;
+        CompletePreviewStage.Visibility = showStage ? Visibility.Visible : Visibility.Collapsed;
+        var rounded = _viewModel.MainPreviewRoundedCorners;
+        CompletePreviewStage.CornerRadius = new CornerRadius(rounded ? 16 : 0);
+        var sideInset = _viewModel.SourceVideoWidth > _viewModel.SourceVideoHeight ? 1 : 8;
+        PreviewViewportSlot.Margin = showStage ? new Thickness(sideInset, 0, sideInset, 0) : new Thickness(0);
+        PreviewViewportSlot.FitHeight = showStage;
+        RefreshCompletePreviewFit();
+
+        if (_isFullScreen)
+        {
+            // Keep the theme's text/background contrast while showing status.
+            // A playing video still uses a black surround.
+            if (PreviewPlaceholder.Visibility == Visibility.Visible)
+                PreviewPanel.SetResourceReference(Panel.BackgroundProperty, "PreviewChromeBrush");
+            else
+                PreviewPanel.Background = Brushes.Black;
+            return;
+        }
+        var compactFrame = showStage || (_viewModel.IsLightweightApplicationMode &&
+            (nativeVideoVisible || (_mediaCastActive && _viewModel.IsMediaCastSelected)));
+        PreviewPanel.BorderThickness = new Thickness(compactFrame ? 0 : 1);
+        PreviewPanel.CornerRadius = new CornerRadius(compactFrame || !rounded ? 0 : 16);
+        if (nativeVideoVisible || compactFrame)
+        {
+            // The GPU owns the whole outline. A square fill or second WPF
+            // outline behind it would show through the antialiased corners.
+            PreviewPanel.Background = Brushes.Transparent;
+            PreviewPanel.BorderBrush = Brushes.Transparent;
+        }
+        else
+        {
+            PreviewPanel.SetResourceReference(Panel.BackgroundProperty, "PreviewChromeBrush");
+            PreviewPanel.SetResourceReference(Border.BorderBrushProperty, "BorderBrush");
+        }
     }
 
     private bool HasLightweightContentDimensions =>
@@ -7192,18 +7240,20 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             foreach (var device in e.NewItems.OfType<DeviceViewModel>())
                 ShowDeviceProfileGuidance(device);
         }
+    }
 
-        // A source panel is useful once there is a choice. Open it exactly
-        // when a new source is added; refreshes and removals must not override
-        // the user's current panel choice.
-        if (e.Action != NotifyCollectionChangedAction.Add ||
-            e.NewItems is null || e.NewItems.Count == 0 || _viewModel.Devices.Count <= 1 ||
-            _leftWorkspacePanel == LeftWorkspacePanel.Devices)
+    private void OnDeviceCardsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        // Reveal newly available choices in a free sidebar. Discovery should
+        // leave the current workspace page in place while the user works.
+        if (IsTrayMode || e.Action != NotifyCollectionChangedAction.Add ||
+            e.NewItems is null || e.NewItems.Count == 0 || _viewModel.DeviceCards.Count <= 1 ||
+            _leftWorkspacePanel != LeftWorkspacePanel.None || NeedsSingleWorkspacePanel(openingLeftPanel: true))
             return;
 
         SetLeftWorkspacePanel(LeftWorkspacePanel.Devices);
         _viewModel.AddDiagnosticLog(AppLog.Event("workspace_left_panel_auto_opened",
-            ("reason", "device_added"), ("device_count", _viewModel.Devices.Count)));
+            ("reason", "device_added"), ("device_count", _viewModel.DeviceCards.Count)));
     }
 
     private void ShowDeviceProfileGuidance(DeviceViewModel device)
@@ -7253,7 +7303,6 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private void SynchronizeMainPreviewHost()
     {
-        UpdateMainPreviewCornerProfile();
         var mediaOnMain = _mediaCastActive && _mediaCastPreviewWindow is null &&
             _viewModel.IsMediaCastSelected;
         var independentOnMain = !mediaOnMain && !_viewModel.IsMediaCastSelected &&
@@ -7262,23 +7311,24 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             ? Visibility.Visible : Visibility.Collapsed;
         IndependentPreviewSurface.Visibility = independentOnMain
             ? Visibility.Visible : Visibility.Collapsed;
-        var visible = !IsTrayMode && !mediaOnMain && !_viewModel.IsMediaCastSelected &&
-            _viewModel.IsCapturing && !_viewModel.IsAudioOnlyAirPlay &&
-            !_viewModel.IsVideoProtected &&
-            _viewModel.CurrentSessionHandle != 0 && !independentOnMain;
-        MainPreviewHost.SetPresentationVisible(visible);
+        var visible = IsMainNativePreviewVisible;
+        PreviewPlaceholder.Visibility = visible || mediaOnMain || independentOnMain ||
+            _viewModel.IsAudioOnlyAirPlay || _viewModel.IsVideoProtected
+            ? Visibility.Collapsed : Visibility.Visible;
+        UpdateMainPreviewFrame(visible);
         if (!visible)
         {
-            // HwndHost owns native airspace and cannot be covered by the WPF
-            // independent-window notice. Collapsing the host removes that
-            // child HWND from composition until the main preview is restored.
+            // WPF cannot paint status content over native HWND airspace.
+            MainPreviewHost.SetPresentationVisible(false);
             MainPreviewHost.Visibility = Visibility.Collapsed;
             MainPreviewHost.Deactivate();
+            ApplyMainPreviewAppearance();
             return;
         }
 
-        MainPreviewHost.ClearValue(VisibilityProperty);
+        MainPreviewHost.Visibility = Visibility.Visible;
         MainPreviewHost.Activate();
+        ApplyMainPreviewAppearance();
         MainPreviewHost.SetPresentationVisible(true);
     }
 
@@ -7390,7 +7440,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             MainContentGrid.MaxWidth = double.PositiveInfinity;
             MainContentGrid.HorizontalAlignment = HorizontalAlignment.Stretch;
             SetNavigationPaneVisible(false);
-            SetWorkspaceSurfaceImmediate(LeftPanelHost, visible: false, width: WorkspaceDeviceWidth);
+            SetWorkspaceSurfaceImmediate(LeftPanelHost, visible: false, width: WorkspaceLeftWidth);
             SetWorkspacePageImmediate(DevicePanel, visible: false);
             SetWorkspacePageImmediate(MirroringPanel, visible: false);
             SetWorkspaceSurfaceImmediate(ControlPanel, visible: false, width: WorkspaceRightWidth);
@@ -7419,10 +7469,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                 monitorInfo.Monitor.Bottom - monitorInfo.Monitor.Top,
                 SwpFrameChanged | SwpShowWindow);
         }
-        if (!_viewModel.IsMediaCastSelected) MainPreviewHost.Activate();
-        MainPreviewHost.IsFullScreenPresentation = _isFullScreen;
-        UpdateMainPreviewCornerProfile();
+        if (IsMainNativePreviewVisible) MainPreviewHost.Activate();
         ApplyApplicationDisplayMode();
+        ApplyMainPreviewAppearance();
         UpdateMediaCastFullScreenButton();
         _viewModel.AddDiagnosticLog(AppLog.Event("main_fullscreen_state",
             ("enabled", _isFullScreen)));
@@ -7520,6 +7569,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         }
 
         _mediaCastPreviewWindow = window;
+        ConfigurePreviewClickThrough(window);
+        window.SetPreviewTools(() => _ = OpenScreenTextSelectionAsync(DeviceViewModel.MediaCastUdid, window.Handle));
+        window.WindowsHotkeysFor = PreviewWindowsHotkeysFor;
         window.FullScreenChanged += enabled => Dispatcher.BeginInvoke(
             DispatcherPriority.Render, () =>
             {
@@ -7857,13 +7909,17 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         }
         else if (action == BluetoothShortcutAction.WirelessControl)
         {
-            ShowReverseControlStatus(ControlStatusMode.Wireless, ActiveInputDeviceUdid);
-            _ = _viewModel.ToggleWirelessControlAsync(ActiveInputDeviceUdid);
+            var target = ActiveInputDeviceUdid;
+            if (!_viewModel.CanToggleMirroringControl(target, wireless: true)) return;
+            ShowReverseControlStatus(ControlStatusMode.Wireless, target);
+            _ = _viewModel.ToggleWirelessControlAsync(target);
         }
         else if (action == BluetoothShortcutAction.WiredControl)
         {
-            ShowReverseControlStatus(ControlStatusMode.Usb, ActiveInputDeviceUdid);
-            _ = _viewModel.ToggleWiredControlAsync(ActiveInputDeviceUdid);
+            var target = ActiveInputDeviceUdid;
+            if (!_viewModel.CanToggleMirroringControl(target, wireless: false)) return;
+            ShowReverseControlStatus(ControlStatusMode.Usb, target);
+            _ = _viewModel.ToggleWiredControlAsync(target);
         }
         else
             _ = SendConfiguredSystemShortcutAsync(action);
@@ -7914,6 +7970,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             else
             {
                 _bossKeyHidden = true;
+                CloseScreenTextSelection();
                 ApplyBluetoothControlInputState(activateIndependentWindow: false);
                 BossKeyWindowVisibility.HideAll();
                 NativePreviewWindow.SetAllBossKeyHidden(true);
@@ -7997,6 +8054,15 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             if (!canSend() || !route.IsCurrent()) { Skipped("route_or_focus_changed"); return; }
             var bluetoothTarget = route.Transport == "BluetoothDirect";
             var usbTarget = !bluetoothTarget;
+            if (usbTarget && await _viewModel.TrySendDuoWiredShortcutAsync(target, action, usage,
+                    usesGlobe: usage != 0 && indigoButton is null,
+                    () => canSend() && route.IsCurrent()))
+            {
+                _viewModel.AddDiagnosticLog(AppLog.Event("system_shortcut_sent",
+                    ("action", action.ToString()), ("device", AppLog.Device(target)),
+                    ("bluetooth", true), ("usb", false)));
+                return;
+            }
             if (action == BluetoothShortcutAction.AppSwitcher && bluetoothTarget)
                 await _viewModel.SendBluetoothAppSwitcherAsync(target, canSend);
             else if (usage != 0 && bluetoothTarget)

@@ -34,8 +34,10 @@ internal static partial class Program
                     Console.WriteLine($"{theme}/{panel}: focused={viewer.IsKeyboardFocused}, focus visual={viewer.FocusVisualStyle?.TargetType.Name ?? "null"}");
                     InteractionAssert(viewer.FocusVisualStyle is null,
                         $"{theme}/{panel}: a scroll container can draw the unwanted full-panel focus frame.");
-                    InteractionAssert(viewer.Focusable,
-                        "Scroll containers must retain keyboard scrolling support.");
+                    // The ListBox handles keyboard navigation through its rows. Its template's
+                    // ScrollViewer should not add a separate focus stop ahead of those rows.
+                    var keyboardTarget = panel == "Devices" ? (Control)owner.FindName("DeviceListBox") : viewer;
+                    InteractionAssert(keyboardTarget.Focusable, "The panel must retain keyboard scrolling support.");
                     var button = Visuals(frame).OfType<Button>().First(b => b.IsVisible && b.IsEnabled);
                     InteractionAssert(button.FocusVisualStyle is not null,
                         "Removing the container frame removed a button's keyboard focus indicator.");

@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import base64
 from collections import deque
-from contextlib import asynccontextmanager, suppress
+from contextlib import aclosing, asynccontextmanager, suppress
 from datetime import datetime
 import io
 import json
@@ -17,12 +17,21 @@ import struct
 import time
 import uuid
 import zipfile
+from urllib.parse import unquote
 
 from pymobiledevice3.remote.core_device.app_service import AppServiceService
 from pymobiledevice3.remote.core_device.core_device_service import CoreDeviceService
-from pymobiledevice3.exceptions import AfcException, AfcFileNotFoundError
+from pymobiledevice3.exceptions import (
+    AfcException, AfcFileNotFoundError, ConnectionTerminatedError, CoreDeviceError, InvalidServiceError, StartServiceError,
+)
+from pymobiledevice3.lockdown import create_using_remote
+from pymobiledevice3.remote.xpc_message import XpcInt64Type, XpcUInt64Type
 from pymobiledevice3.services.afc import AfcOpcode, AfcService
 from document_file_service import DocumentsFiles, HouseArrestService, VEND_DOCUMENTS
+from explorer_file_roots import application_files, application_root, coredevice_files, readable, file_read_only, CORE_FILE_OPERATIONS_VERIFIED
+from explorer_name_view import ExplorerNameView
+from explorer_system_files import system_directories
+from explorer_symbols import SymbolFileCatalog, SymbolFiles
 from pymobiledevice3.services.diagnostics import DiagnosticsService
 from pymobiledevice3.services.installation_proxy import InstallationProxyService
 from pymobiledevice3.services.misagent import MisagentService
@@ -36,6 +45,9 @@ ACTIONS = CONTRACT["actions"]
 CHUNK = 192 * 1024
 MAX_IPA = 512 * 1024 * 1024
 MAX_PROFILE = 8 * 1024 * 1024
+MAX_PROCESSES = 5000
+LOCKDOWN_DISCONNECTS = (TimeoutError, ConnectionError, ConnectionTerminatedError, NotImplementedError)
+REMOTE_LOCKDOWN = "com.apple.mobile.lockdown.remote"
 CONFIG = "com.apple.coredevice.configuration"
 LOCATION = "com.apple.coredevice.locationservice"
 PREFIX = "com.apple.coredevice.action."
@@ -80,6 +92,16 @@ def bundle_id(value):
     if not isinstance(value, str) or len(value) > 512 or not re.fullmatch(r"[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)+", value):
         raise ValueError("Invalid bundleId")
     return value
+
+
+def executable_path(value):
+    if not isinstance(value, str):
+        return None
+    if value.startswith("file:///"):
+        value = unquote(value.removeprefix("file://"))
+    if value.startswith("/private/var/"):
+        value = value.removeprefix("/private")
+    return value if value.startswith("/") else None
 
 
 def integer(value, low, high):
@@ -153,6 +175,11 @@ class DeviceManagement:
         self.log_seq = 0
         self.log_error = None
         self.log_activity = 0
+        self._explorer_apps = None
+        self._explorer_groups = []
+        self._explorer_core_unresponsive = False
+        self._symbol_catalog = None
+        self._explorer_retry_roots = []
 
     @property
     def rsd(self):
@@ -177,18 +204,83 @@ class DeviceManagement:
                 "address": json_value(address), "generation": self.owner._generation}
 
     async def _device_info(self, args):
-        result = {}
-        for key, domain in (("device", None), ("battery", "com.apple.mobile.battery"), ("disk", "com.apple.disk_usage")):
+        rsd = self.rsd
+        pending = {"device": None, "battery": "com.apple.mobile.battery", "disk": "com.apple.disk_usage"}
+        result = {key: {"available": False, "error": "TimeoutError"} for key in pending}
+        retried_domains = set()
+        retry_open = True
+        loop = asyncio.get_running_loop()
+        # Leave room for the final socket close within the hub request timeout.
+        deadline = loop.time() + ACTIONS["device_info"]["timeout"] - 3
+        while pending and loop.time() < deadline:
+            connection = None
             try:
-                async with asyncio.timeout(8):
-                    values = await self.rsd.get_value(domain=domain)
-                if key == "device" and isinstance(values, dict):
-                    values = {k: values[k] for k in ("DeviceName", "ProductType", "ProductVersion", "BuildVersion",
-                        "HardwareModel", "CPUArchitecture", "UniqueDeviceID", "SerialNumber", "DeviceClass",
-                        "WiFiAddress", "BluetoothAddress", "ModelNumber", "RegionInfo") if k in values}
-                result[key] = {"available": True, "values": json_value(values)}
+                async with asyncio.timeout_at(min(deadline, loop.time() + 5)):
+                    # Own the socket before check-in. The SDK's combined open
+                    # and check-in call does not close on cancellation.
+                    service_name = REMOTE_LOCKDOWN + ".trusted"
+                    try:
+                        connection = await rsd.start_lockdown_service_without_checkin(service_name)
+                    except InvalidServiceError:
+                        service_name = REMOTE_LOCKDOWN + ".untrusted"
+                        connection = await rsd.start_lockdown_service_without_checkin(service_name)
+                    await connection.start()
+                    checkin = await connection.send_recv_plist({
+                        "Label": "pymobiledevice3", "ProtocolVersion": "2", "Request": "RSDCheckin",
+                    })
+                    if checkin.get("Request") != "RSDCheckin":
+                        raise ConnectionError("Invalid remote Lockdown check-in response")
+                    started = await connection.recv_plist()
+                    if started.get("Request") != "StartService":
+                        raise ConnectionError("Invalid remote Lockdown startup response")
+                    if (error := started.get("Error")) is not None:
+                        raise StartServiceError(service_name, error)
+                    lockdown = await create_using_remote(connection, identifier=rsd.udid, autopair=False)
+                retry_open = True
+                for key, domain in tuple(pending.items()):
+                    try:
+                        async with asyncio.timeout_at(min(deadline, loop.time() + 4)):
+                            # Initialization already fetched the default domain.
+                            values = lockdown.all_values if domain is None else await lockdown.get_value(domain=domain)
+                        if key == "device" and isinstance(values, dict):
+                            values = {k: values[k] for k in ("DeviceName", "ProductType", "ProductVersion", "BuildVersion",
+                                "HardwareModel", "CPUArchitecture", "UniqueDeviceID", "SerialNumber", "DeviceClass",
+                                "WiFiAddress", "BluetoothAddress", "ModelNumber", "RegionInfo") if k in values}
+                        if isinstance(values, dict) and values:
+                            result[key] = {"available": True, "values": json_value(values)}
+                        else:
+                            result[key] = {"available": False, "error": "MissingValues"}
+                    except LOCKDOWN_DISCONNECTS as error:
+                        # The stream can no longer match replies to requests.
+                        # Retry this domain once, then use a new stream for the next domain.
+                        result[key] = {"available": False, "error": type(error).__name__}
+                        if key in retried_domains:
+                            del pending[key]
+                        else:
+                            retried_domains.add(key)
+                        break
+                    except Exception as error:
+                        result[key] = {"available": False, "error": type(error).__name__}
+                    del pending[key]
             except Exception as error:
-                result[key] = {"available": False, "error": type(error).__name__}
+                result.update({key: {"available": False, "error": type(error).__name__} for key in pending})
+                if not retry_open or not isinstance(error, LOCKDOWN_DISCONNECTS):
+                    break
+                retry_open = False
+            finally:
+                if connection is not None:
+                    writer = connection.writer
+                    closed = False
+                    try:
+                        async with asyncio.timeout(2):
+                            await connection.close()
+                        closed = True
+                    except Exception:
+                        pass
+                    finally:
+                        if not closed and writer is not None:
+                            with suppress(Exception):
+                                writer.transport.abort()
         return result
 
     async def _apps(self, args):
@@ -236,6 +328,85 @@ class DeviceManagement:
             result.append({"bundleId": identifier, "name": str(app.get("CFBundleDisplayName") or app.get("CFBundleName") or identifier)[:512]})
         return {"apps": sorted(result, key=lambda item: (item["name"].casefold(), item["bundleId"]))}
 
+    async def _explorer_roots(self, args):
+        offset = integer(args.get("offset", 0), 0, 10000)
+        limit = integer(args.get("limit", 4), 1, 4)
+        roots = []
+        if args.get("initialOnly") is True:
+            # Make the drive usable before browsing installed apps or probing
+            # optional developer services. Continuation still scans every app.
+            for root in ("media", "crashes"):
+                if await readable(self._files({"root": root})):
+                    roots.append({"root": root, "readOnly": root == "crashes"})
+            return {"roots": roots, "total": 0, "nextOffset": 0, "pending": True}
+        async def probe_core(domain, identifier):
+            if not CORE_FILE_OPERATIONS_VERIFIED or self._explorer_core_unresponsive:
+                return False
+            def timed_out():
+                # Stop repeatedly timing out the same shared daemon for every
+                # installed app. A new discovery retries the service.
+                self._explorer_core_unresponsive = True
+            return await readable(coredevice_files(self.rsd, domain, identifier), on_timeout=timed_out)
+        if offset == 0 or self._explorer_apps is None:
+            self._explorer_core_unresponsive = False
+            self._explorer_retry_roots = []
+            async with connected(InstallationProxyService, self.rsd) as service:
+                apps = await service.browse(attributes=["CFBundleIdentifier", "CFBundleDisplayName", "CFBundleName", "GroupContainers", "UIFileSharingEnabled"])
+            if not isinstance(apps, list) or len(apps) > 5000:
+                raise HubError("INVALID_DEVICE_RESPONSE")
+            discovered, groups = {}, set()
+            for app in apps:
+                if not isinstance(app, dict):
+                    continue
+                try:
+                    identifier = bundle_id(app.get("CFBundleIdentifier"))
+                except ValueError:
+                    continue
+                discovered[identifier] = {"bundleId": identifier,
+                    "name": str(app.get("CFBundleDisplayName") or app.get("CFBundleName") or identifier)[:512],
+                    "sharing": app.get("UIFileSharingEnabled") is True}
+                containers = app.get("GroupContainers") or {}
+                if isinstance(containers, dict):
+                    groups.update(key for key in containers if isinstance(key, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,254}", key))
+            self._explorer_apps = sorted(discovered.values(), key=lambda app: (not app["sharing"], app["name"].casefold(), app["bundleId"]))
+            self._explorer_groups = sorted(groups)[:5000]
+            for root in ("media", "crashes"):
+                if await readable(self._files({"root": root})):
+                    roots.append({"root": root, "readOnly": root == "crashes"})
+            if await readable(system_directories(self.rsd), timeout=5):
+                roots.append({"root": "system", "readOnly": True})
+            if await readable(self._files({"root": "symbols"}), timeout=10):
+                roots.append({"root": "symbols", "readOnly": True})
+            else:
+                self._explorer_retry_roots.append('symbols')
+            for domain in ("temporary", "systemCrashLogs"):
+                if await probe_core(domain, ""):
+                    roots.append({"root": "coredevice", "domain": domain, "identifier": "", "readOnly": True})
+        total = len(self._explorer_apps) + len(self._explorer_groups)
+        if offset > total:
+            raise ValueError("Invalid discovery offset")
+        for index in range(offset, min(offset + limit, total)):
+            if index < len(self._explorer_apps):
+                item = await application_root(self.rsd, self._explorer_apps[index], probe_core)
+                if item is not None:
+                    roots.extend(item.pop('additionalRoots', []))
+                    roots.append(item)
+            else:
+                identifier = self._explorer_groups[index - len(self._explorer_apps)]
+                if await probe_core("appGroupDataContainer", identifier):
+                    roots.append({"root": "coredevice", "domain": "appGroupDataContainer", "identifier": identifier,
+                                  "name": identifier, "readOnly": True})
+        end = min(offset + limit, total)
+        if end == total:
+            # Symbol enumeration can be temporarily busy while a previous
+            # capture or developer connection retires. Retry this read-only
+            # service after the app scan before omitting a verified source.
+            for root in self._explorer_retry_roots:
+                if await readable(self._files({"root": root}), timeout=10):
+                    roots.append({"root": root, "readOnly": True})
+            self._explorer_retry_roots = []
+        return {"roots": roots, "total": total, "nextOffset": end if end < total else None}
+
     async def _get_app_icon(self, args):
         bundle = bundle_id(args.get("bundleId"))
         async with connected(SpringBoardServicesService, self.rsd) as service:
@@ -261,18 +432,84 @@ class DeviceManagement:
                 start_suspended=False, environment={"MTL_HUD_ENABLED": "1"})
         return {"status": "launched", "bundleId": bundle, "process": json_value(result)}
 
+    async def _read_processes(self, rsd, service, limit=MAX_PROCESSES):
+        features = rsd.get_service_features(service.service_name)
+        if "com.apple.coredevice.feature.streamprocesslist" not in features:
+            return await service.list_processes()
+        processes = []
+        async with aclosing(service.stream_processes()) as stream:
+            async for process in stream:
+                processes.append(process)
+                if len(processes) >= limit:
+                    break
+        return processes
+
     async def _list_processes(self, args):
-        async with connected(AppServiceService, self.rsd) as service:
-            features = self.rsd.get_service_features(service.service_name)
-            if "com.apple.coredevice.feature.streamprocesslist" in features:
-                processes = []
-                async for process in service.stream_processes():
-                    processes.append(process)
-                    if len(processes) >= 5000:
-                        break
-            else:
-                processes = await service.list_processes()
-        return {"processes": [json_value(p) for p in processes[:5000]]}
+        rsd = self.rsd
+        async with connected(AppServiceService, rsd) as service:
+            processes = await self._read_processes(rsd, service)
+        return {"processes": [json_value(p) for p in processes[:MAX_PROCESSES]]}
+
+    async def _close_app(self, args):
+        if set(args) != {"bundleId"}:
+            raise ValueError("Close app only accepts a bundleId")
+        bundle = bundle_id(args["bundleId"])
+        rsd = self.rsd
+        async with connected(InstallationProxyService, rsd) as service:
+            apps = await service.lookup({"BundleIDs": [bundle], "ApplicationType": "Any",
+                                         "ReturnAttributes": ["Path", "CFBundleExecutable"]})
+        if not isinstance(apps, dict):
+            raise HubError("INVALID_DEVICE_RESPONSE")
+        if bundle not in apps:
+            return {"status": "not-running", "bundleId": bundle}
+        app = apps[bundle]
+        if not isinstance(app, dict):
+            raise HubError("INVALID_DEVICE_RESPONSE")
+        directory = (executable_path(app.get("Path")) or "").rstrip("/")
+        executable = app.get("CFBundleExecutable")
+        if (not directory.endswith(".app") or not isinstance(executable, str) or
+                executable in ("", ".", "..") or "/" in executable or "\0" in executable):
+            raise HubError("INVALID_DEVICE_RESPONSE")
+        path = directory + "/" + executable
+
+        async with connected(AppServiceService, rsd) as service:
+            # An early stop leaves unread replies on the AppService connection.
+            # Signal only after the complete list has arrived.
+            processes = await self._read_processes(rsd, service, limit=MAX_PROCESSES + 1)
+            if not isinstance(processes, list) or len(processes) > MAX_PROCESSES:
+                raise HubError("INVALID_DEVICE_RESPONSE")
+            matches = []
+            for process in processes:
+                if not isinstance(process, dict):
+                    raise HubError("INVALID_DEVICE_RESPONSE")
+                url = process.get("executableURL")
+                if url is None:
+                    continue
+                if not isinstance(url, dict) or not isinstance(url.get("relative"), str):
+                    raise HubError("INVALID_DEVICE_RESPONSE")
+                if executable_path(url["relative"]) == path:
+                    matches.append(process)
+            if not matches:
+                return {"status": "not-running", "bundleId": bundle}
+            if len(matches) != 1:
+                raise HubError("INVALID_DEVICE_RESPONSE")
+            pid = matches[0].get("processIdentifier")
+            if not isinstance(pid, int) or isinstance(pid, bool) or not 0 < pid < 2**31:
+                raise HubError("INVALID_DEVICE_RESPONSE")
+            token = {"processIdentifier": XpcInt64Type(pid)}
+            # Preserve the device's process identity when a version is supplied.
+            version = matches[0].get("processIdentifierVersion")
+            if version is not None:
+                if not isinstance(version, int) or isinstance(version, bool) or not 0 <= version < 2**32:
+                    raise HubError("INVALID_DEVICE_RESPONSE")
+                token["processIdentifierVersion"] = version if isinstance(version, XpcUInt64Type) else XpcInt64Type(version)
+            try:
+                # SIGKILL on iOS. Python on Windows does not define it.
+                await service.invoke("com.apple.coredevice.feature.sendsignaltoprocess",
+                                     {"process": token, "signal": XpcInt64Type(9)})
+            except CoreDeviceError as error:
+                raise HubError("APP_CLOSE_FAILED") from error
+        return {"status": "signal-sent", "bundleId": bundle}
 
     async def _terminate_app(self, args):
         pid = integer(args.get("pid"), 1, 2**31 - 1)
@@ -375,21 +612,39 @@ class DeviceManagement:
 
     @asynccontextmanager
     async def _files(self, args):
+        if args.get("mappedNames") is True:
+            async with self._files({key: value for key, value in args.items() if key != "mappedNames"}) as service:
+                yield ExplorerNameView(service)
+            return
         root = args.get("root", "media")
+        if root == "symbols":
+            if self._symbol_catalog is not None and self._symbol_catalog.rsd is not self.rsd:
+                await self._symbol_catalog.close()
+                self._symbol_catalog = None
+            self._symbol_catalog = self._symbol_catalog or SymbolFileCatalog(self.rsd)
+            yield SymbolFiles(self._symbol_catalog)
+            return
+        if root == "system":
+            async with system_directories(self.rsd) as service:
+                yield service
+            return
+        if root == "container":
+            async with application_files(self.rsd, bundle_id(args.get("bundleId")), False) as service:
+                yield service
+            return
+        if root == "coredevice":
+            identifier = args.get("identifier", "")
+            if identifier:
+                identifier = bundle_id(identifier)
+            async with coredevice_files(self.rsd, args.get("domain"), identifier) as service:
+                yield service
+            return
         if root == "documents":
             identifier = bundle_id(args.get("bundleId"))
-            service = HouseArrestService(self.rsd, documents_only=True)
-            try:
-                # Vend must finish before AFC's packet reader starts; otherwise
-                # that reader can consume the House Arrest plist response.
-                await service.send_command(identifier, VEND_DOCUMENTS)
-                async with service:
-                    if (await service.stat("/Documents")).get("st_ifmt") != "S_IFDIR":
-                        raise ValueError("Shared Documents is not a directory")
-                    yield DocumentsFiles(service)
-            finally:
-                with suppress(Exception):
-                    await asyncio.wait_for(service.close(), 2)
+            async with application_files(self.rsd, identifier, True) as service:
+                if (await service.stat("/")).get("st_ifmt") != "S_IFDIR":
+                    raise ValueError("Shared Documents is not a directory")
+                yield service
             return
         if root not in ("media", "crashes"):
             raise ValueError("Choose media or crashes")
@@ -433,9 +688,15 @@ class DeviceManagement:
                     child = "/".join(p for p in (path, name) if p)
                     stat = await service.stat("/" + child)
                     entries.append({"name": name, "path": child, "type": {"S_IFDIR": "directory", "S_IFREG": "file"}.get(stat.get("st_ifmt"), "other"),
-                        "size": int(stat.get("st_size", 0)), "modified": json_value(stat.get("st_mtime"))})
+                        "size": int(stat.get("st_size", 0)), "modified": json_value(stat.get("st_mtime")),
+                        **({"readOnly": True} if args.get("root") in ("crashes", "coredevice") or file_read_only(stat) else {})})
                 except ValueError:
                     continue
+                except (PermissionError, FileNotFoundError):
+                    continue
+                except AfcException as error:
+                    if error.status not in (8, 10):
+                        raise
         return {"path": path, "entries": entries, "total": len(names), "nextOffset": offset + limit if offset + limit < len(names) else None}
 
     async def _read_file(self, args):
@@ -544,9 +805,10 @@ class DeviceManagement:
             raise HubError("FILE_IMPORT_FAILED") from error
 
     @staticmethod
-    def _mapped_path(args, key="path", allow_root=False):
-        if args.get("root", "media") not in ("media", "documents"):
-            raise ValueError("Explorer mapping only exposes the media file service")
+    def _mapped_path(args, key="path", allow_root=False, allow_readonly=False):
+        root = args.get("root", "media")
+        if root not in ("media", "documents", "container") and not (allow_readonly and root in ("crashes", "coredevice", "system", "symbols")):
+            raise ValueError("Choose a writable media or application document service")
         path = relative_path(args.get(key, ""))
         if not allow_root and not path:
             raise ValueError("The mapped root cannot be changed")
@@ -560,10 +822,13 @@ class DeviceManagement:
         if kind is None:
             raise ValueError("Explorer mapping does not expose links or special files")
         return {"path": path, "name": path.rsplit("/", 1)[-1], "type": kind,
-                "size": int(value.get("st_size", 0)), "modified": json_value(value.get("st_mtime"))}
+                "size": int(value.get("st_size", 0)), "modified": json_value(value.get("st_mtime")),
+                **({"readOnly": True} if file_read_only(value) else {})}
 
     @staticmethod
     def _mapped_expected(current, expected):
+        if current.get("readOnly") is True:
+            raise HubError("FILE_ACCESS_DENIED")
         if not isinstance(expected, dict) or expected.get("type") not in ("file", "directory") or \
                 type(expected.get("size")) is not int or expected["size"] < 0 or "modified" not in expected:
             raise ValueError("A mapping metadata snapshot is required")
@@ -606,11 +871,14 @@ class DeviceManagement:
 
     async def _mapped_parent(self, service, path):
         parent = path.rpartition("/")[0]
-        if (await self._mapped_stat(service, parent))["type"] != "directory":
+        current = await self._mapped_stat(service, parent)
+        if current.get("readOnly") is True:
+            raise HubError("FILE_ACCESS_DENIED")
+        if current["type"] != "directory":
             raise HubError("FILE_MAPPING_CONFLICT")
 
     async def _stat_file(self, args):
-        path = self._mapped_path(args, allow_root=True)
+        path = self._mapped_path(args, allow_root=True, allow_readonly=True)
         try:
             async with self._files(args) as service:
                 return await self._mapped_stat(service, path)
@@ -731,6 +999,8 @@ class DeviceManagement:
                 # Links and special entries abort without removing any file.
                 while pending:
                     target, metadata, depth = pending.pop()
+                    if metadata.get("readOnly") is True:
+                        raise HubError("FILE_ACCESS_DENIED")
                     if depth > 64 or len(plan) + len(pending) >= 10000:
                         raise HubError("DIRECTORY_TOO_LARGE")
                     plan.append((target, metadata))
@@ -748,6 +1018,8 @@ class DeviceManagement:
                             raise HubError("DIRECTORY_TOO_LARGE")
                 for target, metadata in reversed(plan):
                     fresh = await self._mapped_stat(service, target)
+                    if fresh.get("readOnly") is True:
+                        raise HubError("FILE_ACCESS_DENIED")
                     if metadata["type"] == "file":
                         self._mapped_expected(fresh, metadata)
                     elif fresh["type"] != "directory" or any(name not in (".", "..") for name in await service.listdir("/" + target)):
@@ -908,6 +1180,9 @@ class DeviceManagement:
         return {"status": "dispatched", "button": button}
 
     async def close(self):
+        catalog, self._symbol_catalog = self._symbol_catalog, None
+        if catalog is not None:
+            await catalog.close()
         task, self.log_task = self.log_task, None
         if task:
             task.cancel()

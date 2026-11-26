@@ -28,10 +28,14 @@ internal static class ParentDriverChange
             var reboot = install(consent.Driver);
             if (reboot) return new(true, true, "ParentBindingRestartRequired");
             checkpoint?.Invoke();
-            if (readCurrent() is not { } after ||
+            var after = readCurrent();
+            if (after is null ||
                 !after.InstanceId.Equals(consent.InstanceId, StringComparison.OrdinalIgnoreCase) ||
                 !BindingMatches(after, consent.Driver) || !after.IsHealthy)
-                throw new InvalidOperationException("The selected parent driver did not become healthy or the binding did not match.");
+                throw new InvalidOperationException(
+                    $"Parent binding verification failed. Present={after?.IsPresent}, started={after?.IsStarted}, " +
+                    $"problem={after?.ProblemCode}, service={after?.Service}, INF={after?.DriverInf}, " +
+                    $"section={after?.DriverSection}, version={after?.DriverVersion}.");
             return new(true, false, "ParentBindingComplete");
         }
         catch (Exception error)
@@ -44,11 +48,9 @@ internal static class ParentDriverChange
                 {
                     var reboot = install(previous);
                     if (reboot) return new(false, true, "ParentRollbackRestartRequired");
-                    if (readCurrent() is { } restored &&
-                        restored.InstanceId.Equals(consent.InstanceId, StringComparison.OrdinalIgnoreCase) &&
-                        restored.Service.Equals(initial!.Service, StringComparison.OrdinalIgnoreCase) &&
-                        BindingMatches(restored, previous))
+                    if (readCurrent() is { } restored && WasRestored(restored, initial!, previous))
                         return new(false, false, "ParentChangeRolledBack");
+                    log("Rollback verification failed: the original binding, filters or device health could not be confirmed.");
                 }
                 catch (Exception rollbackError) { log(rollbackError.ToString()); }
             }
@@ -59,15 +61,15 @@ internal static class ParentDriverChange
     internal static bool BindingMatches(AppleDeviceRecord device, ParentDriverChoice choice) =>
         device.IsPresent && Path.GetFileName(device.DriverInf).Equals(Path.GetFileName(choice.InfPath),
             StringComparison.OrdinalIgnoreCase) &&
-        SectionMatches(device.DriverSection, choice.Section) &&
+        ParentDriverChoice.SectionMatches(device.DriverSection, choice.Section) &&
         device.DriverVersion.Equals(choice.VersionText, StringComparison.OrdinalIgnoreCase) &&
-        (!choice.IsComposite || device.IsCaptureParent);
+        (!choice.IsCaptureDriver || device.IsCaptureParent);
 
-    private static bool SectionMatches(string installed, string selected) =>
-        installed.Equals(selected, StringComparison.OrdinalIgnoreCase) ||
-        installed.StartsWith(selected, StringComparison.OrdinalIgnoreCase) &&
-        System.Text.RegularExpressions.Regex.IsMatch(installed[selected.Length..],
-            @"^\.NT(?:amd64|x86|arm64)?(?:\.\d+)*$",
-            System.Text.RegularExpressions.RegexOptions.IgnoreCase |
-            System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+    internal static bool WasRestored(AppleDeviceRecord restored, AppleDeviceRecord original,
+        ParentDriverChoice choice) =>
+        restored.InstanceId.Equals(original.InstanceId, StringComparison.OrdinalIgnoreCase) &&
+        restored.Service.Equals(original.Service, StringComparison.OrdinalIgnoreCase) &&
+        BindingMatches(restored, choice) && (!original.IsHealthy || restored.IsHealthy) &&
+        restored.UpperFilters.SequenceEqual(original.UpperFilters, StringComparer.OrdinalIgnoreCase) &&
+        (restored.LowerFilters ?? []).SequenceEqual(original.LowerFilters ?? [], StringComparer.OrdinalIgnoreCase);
 }

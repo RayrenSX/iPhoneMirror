@@ -30,34 +30,60 @@ def capture_mux_address(value):
 async def observe_orientation(bridge, udid):
     ipc = bridge.BridgeChannel()
     session = bridge.TouchSession(ipc, 120, udid=udid)
-    lockdown = None
 
     async def observe():
-        nonlocal lockdown
         await session._start_capture_mux(attempts=1)
         address = capture_mux_address(os.environ.get('USBMUXD_SOCKET_ADDRESS'))
         if not address:
             raise ConnectionError('capture usbmux is unavailable')
-        lockdown = await asyncio.wait_for(bridge.create_using_usbmux(
-            serial=udid, connection_type='USB', autopair=False), 5)
-        if not bridge._udid_matches(lockdown.udid, udid):
-            raise ConnectionError('orientation device identity mismatch')
-        try:
-            async with SpringBoardServicesService(lockdown) as springboard:
-                print('IM_MUX ' + address.rsplit(':', 1)[1], flush=True)
+        announced_mux = False
+        unavailable = False
+
+        def report_unavailable():
+            nonlocal unavailable
+            if not unavailable:
+                print('IM_ORIENTATION_UNAVAILABLE', flush=True)
+                unavailable = True
+
+        while True:
+            lockdown = None
+            springboard = None
+            try:
+                lockdown = await asyncio.wait_for(bridge.create_using_usbmux(
+                    serial=udid, connection_type='USB', autopair=False), 5)
+                if not bridge._udid_matches(lockdown.udid, udid):
+                    raise ConnectionError('orientation device identity mismatch')
+                if not announced_mux:
+                    print('IM_MUX ' + address.rsplit(':', 1)[1], flush=True)
+                    announced_mux = True
+                springboard = SpringBoardServicesService(lockdown)
+                await asyncio.wait_for(springboard.connect(), 2)
                 while True:
-                    orientation = int(await asyncio.wait_for(
-                        springboard.get_interface_orientation(), 1))
-                    if orientation not in (1, 2, 3, 4):
-                        raise ValueError('unknown SpringBoard interface orientation')
-                    print(f'IM_ORIENTATION {orientation}', flush=True)
+                    try:
+                        orientation = int(await asyncio.wait_for(
+                            springboard.get_interface_orientation(), 1))
+                    except ValueError:
+                        # An unknown value is a reply, so the stream remains usable.
+                        orientation = 0
+                    if orientation in (1, 2, 3, 4):
+                        print(f'IM_ORIENTATION {orientation}', flush=True)
+                        unavailable = False
+                    else:
+                        report_unavailable()
                     await asyncio.sleep(.1)
-        except Exception:
-            # Direction failure triggers ordinary B fallback in the parent.
-            # This process may still own the broker used by reverse control;
-            # keep that USB interface alive until the parent closes stdin.
-            print('IM_ORIENTATION_UNAVAILABLE', flush=True)
-            await asyncio.Future()
+            except Exception:
+                report_unavailable()
+            finally:
+                try:
+                    if springboard is not None:
+                        with contextlib.suppress(Exception):
+                            await asyncio.wait_for(springboard.close(), 1)
+                finally:
+                    if lockdown is not None:
+                        with contextlib.suppress(Exception):
+                            await asyncio.wait_for(lockdown.close(), 2)
+            # Only reopen the clients. The USB mux may be serving reverse control.
+            await asyncio.sleep(1)
 
     observation = asyncio.create_task(observe())
     disconnected = asyncio.create_task(ipc.wait_for_disconnect())
@@ -69,8 +95,5 @@ async def observe_orientation(bridge, udid):
         for task in (observation, disconnected):
             task.cancel()
         await asyncio.gather(observation, disconnected, return_exceptions=True)
-        if lockdown is not None:
-            with contextlib.suppress(Exception):
-                await asyncio.wait_for(lockdown.close(), 2)
         session._close_capture_mux()
         await ipc.close()

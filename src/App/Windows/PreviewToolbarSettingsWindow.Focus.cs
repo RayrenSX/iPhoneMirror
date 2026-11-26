@@ -223,7 +223,8 @@ public partial class PreviewToolbarSettingsWindow
             var width = EditorRoot.ActualWidth; var height = EditorRoot.ActualHeight;
             var readingScale = TryFindResource("BodyFontSize") is double bodySize ? bodySize / 14 : 1;
             SettingsPanel.Width = Math.Min(width - 48, 640 * readingScale);
-            OptionsScroll.MaxHeight = Math.Max(60, Math.Min(320, height * .40));
+            LibraryItems.Columns = SettingsPanel.Width >= 340 * readingScale ? 2 : 1;
+            OptionsScroll.MaxHeight = Math.Max(60, Math.Min(360, height * .42));
             var (naturalWidth, naturalHeight) = MeasureToolbarRow();
             var toolbarScale = Math.Min(FocusScale, Math.Max(1, width - 66) / naturalWidth);
             var targetWidth = naturalWidth * toolbarScale + 18; var targetHeight = naturalHeight * toolbarScale + 18;
@@ -233,7 +234,11 @@ public partial class PreviewToolbarSettingsWindow
                 (width - _sourceBounds.Width * FocusScale) / 2 - _sourceBounds.Left * FocusScale, targetY - _sourceBounds.Top * FocusScale);
             ToolbarSurface.Width = targetWidth;
             _previewScale.ScaleX = _previewScale.ScaleY = toolbarScale;
-            SettingsPanel.MaxHeight = Math.Max(180, height - targetY - Math.Max(targetHeight, ToolbarSurface.ActualHeight) - 70);
+            var libraryOpen = LibraryPanel.Visibility == Visibility.Visible;
+            var toolbarBottom = targetY + Math.Max(targetHeight, ToolbarSurface.ActualHeight);
+            SettingsPanel.MaxHeight = Math.Max(180, height - toolbarBottom - 70);
+            SettingsPanel.VerticalAlignment = libraryOpen ? VerticalAlignment.Center : VerticalAlignment.Bottom;
+            SettingsPanel.Margin = new Thickness(24, libraryOpen ? toolbarBottom + 22 : 0, 24, 28);
             ToolbarSurface.Margin = new Thickness(targetX, targetY, 0, 0);
             PrepareShade(); ApplyMotionState(FocusProgress); PositionSelectionTools();
         }

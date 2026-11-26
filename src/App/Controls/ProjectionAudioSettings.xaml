@@ -1,0 +1,55 @@
+<UserControl x:Class="IPhoneMirror.App.Controls.ProjectionAudioSettings"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="VisibleWhen"/>
+    </UserControl.Resources>
+    <StackPanel>
+        <TextBlock Text="{DynamicResource ProjectionAudioTitle}" FontWeight="SemiBold"/>
+        <ComboBox x:Name="RoutePicker" AutomationProperties.Name="{DynamicResource ProjectionAudioTitle}"
+                  AutomationProperties.AutomationId="ProjectionAudioRoute"
+                  SelectedIndex="{Binding ProjectionAudioRouteIndex, Mode=TwoWay}"
+                  IsEnabled="{Binding CanSelectDeviceAudio}" Margin="0,6,0,0">
+            <ComboBoxItem Content="{DynamicResource ProjectionAudioWindows}"/>
+            <ComboBoxItem Content="{DynamicResource ProjectionAudioDevice}"/>
+        </ComboBox>
+        <TextBlock Text="{Binding ProjectionAudioRouteHint}"
+                   Foreground="{DynamicResource MutedTextBrush}"
+                   FontSize="{DynamicResource CaptionFontSize}" TextWrapping="Wrap" Margin="0,5,0,0"/>
+        <StackPanel x:Name="WindowsAudioControls" Margin="0,10,0,0"
+                    Visibility="{Binding ShowWindowsAudioControls, Converter={StaticResource VisibleWhen}}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="{DynamicResource PlaybackVolume}" Foreground="{DynamicResource MutedTextBrush}"/>
+                <TextBlock Grid.Column="1" Text="{Binding PlaybackVolume, StringFormat={}{0:F0}%}"
+                           Foreground="{DynamicResource AccentHoverBrush}" FontWeight="SemiBold"/>
+            </Grid>
+            <Slider x:Name="VolumeSlider" AutomationProperties.Name="{DynamicResource PlaybackVolume}"
+                    AutomationProperties.AutomationId="VolumeSlider" Minimum="0" Maximum="100"
+                    Value="{Binding PlaybackVolume, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                    Margin="0,4,0,0"/>
+            <StackPanel IsEnabled="{Binding CanConfigureProjectionAudio}" Margin="0,10,0,0">
+                <CheckBox x:Name="LipSyncCheckBox" Content="{DynamicResource ProjectionAudioSync}"
+                          AutomationProperties.AutomationId="ProjectionAudioSync"
+                          IsChecked="{Binding ProjectionAudioSync, Mode=TwoWay}"/>
+                <TextBlock Text="{DynamicResource ProjectionAudioBuffer}"
+                           Foreground="{DynamicResource MutedTextBrush}" Margin="0,8,0,4"/>
+                <ComboBox x:Name="BufferPicker" AutomationProperties.Name="{DynamicResource ProjectionAudioBuffer}"
+                          AutomationProperties.AutomationId="ProjectionAudioBuffer"
+                          SelectedIndex="{Binding ProjectionAudioBufferIndex, Mode=TwoWay}">
+                    <ComboBoxItem Content="{DynamicResource ProjectionAudioBufferAuto}"/>
+                    <ComboBoxItem Content="{DynamicResource ProjectionAudioBufferLow}"/>
+                    <ComboBoxItem Content="{DynamicResource ProjectionAudioBufferNormal}"/>
+                    <ComboBoxItem Content="{DynamicResource ProjectionAudioBufferHigh}"/>
+                </ComboBox>
+                <TextBlock Text="{DynamicResource ProjectionAudioTimingHint}"
+                           Visibility="{DynamicResource InterfaceDescriptionsVisibility}"
+                           Foreground="{DynamicResource MutedTextBrush}"
+                           FontSize="{DynamicResource CaptionFontSize}" TextWrapping="Wrap" Margin="0,5,0,0"/>
+            </StackPanel>
+        </StackPanel>
+    </StackPanel>
+</UserControl>

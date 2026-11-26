@@ -79,6 +79,133 @@ URL-media receiver retains its existing capabilities. Other flag values do not
 activate the diagnostic. The flag does not resize decoded pixels or guarantee
 that iOS selects panel-native dimensions.
 
+For an isolated phone-speaker experiment, the same recipe recognizes
+`IPHONE_MIRROR_DIAGNOSTIC_MIRROR_NO_AUDIO=1`. It clears AirPlay audio feature
+bit 9 in the mirror/combined DNS-SD records and the `/info` and `/server-info`
+responses. The host assigns a separate receiver identity so iOS can discover
+the experimental capabilities independently. The default and dedicated
+URL-media capability profiles retain audio. The flag only changes the
+advertised capability and does not force the sender's playback route.
+Run `scripts/test_airplay_phone_audio.ps1 -Receiver <staged host executable>`
+with the diagnostic host and DLL in the same runtime folder to count video
+frames and audio packets without storing media or sender identifiers.
+In the 2026-11-23 iPhone trial the phone displayed a pending connection while
+the receiver counted 1,523 video frames and zero audio packets. The session
+disconnected after 60.7 seconds from the first frame. The phone's local
+speaker output was not verified.
+
+The same day, the full iPhoneMirror app rendered the experimental AirPlay
+stream at 1326×2880. The session reported 3,139 video frames and zero audio
+packets. The user confirmed that the Windows preview and iPhone speaker both
+worked during this session. The receiver reported disconnection 58.6 seconds after the first
+published frame. The UI experiment used a build-time hash manifest for the
+diagnostic receiver DLL and DNS-SD shim. Other runtime hashes were checked
+normally.
+
+`IPHONE_MIRROR_DIAGNOSTIC_MIRROR_AUDIO_EVENT=1` starts a per-session AirPlay
+event channel for both mirror variants. Combined with the no-audio flag, it
+advertises video-only capabilities from the start and sends an explicit
+`updateInfo` on the event channel. Used alone, it starts with the ordinary
+audio advertisement and sends an audio capability withdrawal 15 seconds
+after the event channel connects. The second variant follows the [UxPlay
+fork's event-channel experiment](https://github.com/erseco/UxPlay/commit/ab52665ec306f07307af21b797f1dfcdd9283065).
+The fork demonstrated sustained mirroring on macOS and reported that audio
+still needed a manual route change. Verify picture, connection duration and
+speaker playback independently on iPhone before presenting either variant as
+a supported audio route.
+
+The first iPhone test with the event channel enabled from a video-only start
+received successful replies to `updateInfo`. iPhoneMirror rendered 3,069
+frames and received zero audio packets. The sender still closed its video
+socket 58.6 seconds after the first published frame.
+
+Starting with audio enabled kept the preview running for 110.6 seconds. The
+iPhone acknowledged the update after 15 seconds and continued sending audio
+to Windows. Selecting a different route on the iPhone ended the mirror session.
+For the next diagnostic, `IPHONE_MIRROR_DIAGNOSTIC_WITHDRAW_RAOP=1` also
+withdraws the `_raop._tcp` advertisement and updates the `_airplay._tcp` TXT
+features after the downgrade is acknowledged. The receiver restores the
+initial advertisement when the event connection closes. This follows the
+[UxPlay fork's DNS-SD experiment](https://github.com/erseco/UxPlay/commit/ada57e97).
+The Windows protocol smoke checks both withdrawal and restoration with
+`--withdraw-raop-event`. In the physical iPhone test, the receiver updated
+discovery after 15 seconds and continued rendering for at least 357 seconds
+before the app was closed for the next trial. The phone kept sending audio
+packets and the user confirmed Windows playback.
+
+The early video-only trial cleared one audio feature bit but `/info` still
+listed audio formats and latencies. A stricter mask (`0x1A43F4E6`) passed
+loopback negotiation, but the iPhone did not show the receiver in the screen
+mirroring list. The updated diagnostic keeps the earlier discovery mask.
+Setting both
+`IPHONE_MIRROR_DIAGNOSTIC_MIRROR_NO_AUDIO=1` and
+`IPHONE_MIRROR_DIAGNOSTIC_VIDEO_ONLY_CAPABILITIES=1` removes those fields and
+keeps the same feature mask across DNS-SD, `/server-info`, `/info` and `updateInfo`.
+This diagnostic has its own receiver identity. The media-only receiver uses
+its regular profile. `--video-only-capabilities` checks the stricter handshake.
+With the restored discovery mask, the iPhone found the receiver and the user
+confirmed iPhone speaker playback while iPhoneMirror rendered the video. The
+receiver counted 2,832 video frames and zero audio packets. The iPhone still
+sent TEARDOWN about 58.55 seconds after the first published frame, shortly
+after a successful `/feedback` response. The sender-initiated timeout remained
+with the audio format and latency entries removed.
+
+### AirBridge comparison
+
+[AirBridge 0.6.2](https://github.com/alcxandros/AirBridge/releases/tag/v0.6.2)
+reports iOS 26 picture on the PC with sound on the phone. The release notes
+do not give a session duration. Its [UxPlay patch](https://github.com/alcxandros/AirBridge/blob/v0.6.2/patches/0001-noaudiofeat.patch)
+clears feature bit 9 and disables the local audio renderer.
+
+A Windows loopback probe of the exact release receiver (UxPlay
+`05b0275cb1b726592700e47a6e0307544b3d3a52`) returned feature mask `0x527FFCE6`
+with the audio format and latency arrays still present. The profile differs
+from the earlier iPhoneMirror video-only mask `0x4005A7FFCE6` in bits 27 and
+42. The reference also publishes both AirPlay and RAOP discovery records
+and returns the UDP timing port in the initial `SETUP`. These differences
+are candidates for controlled comparison. The upstream [UxPlay issue](https://github.com/FDH2/UxPlay/issues/303)
+records the one-minute teardown on earlier builds with audio support disabled.
+The exact release receiver can listen independently of iPhoneMirror using a
+different base port. In the test environment Windows created two inbound
+block rules for this executable on the Public network profile. Loopback
+verification passed. A LAN test requires temporary access for the reference
+receiver and a physical iPhone session longer than the prior timeout.
+After the test receiver was allowed through the firewall, the iPhone initially
+did not list it. The receiver's own mDNS process had no UDP socket on port 5353.
+An independent probe then obtained the actual `_airplay` and `_raop` TXT
+payloads from the reference receiver and registered both records with the
+Windows DNS-SD API. Windows acknowledged registration on the Ethernet
+interface and again with the all-interface policy used by iPhoneMirror.
+A separate Windows DNS-SD browse returned both the AirBridge test receiver
+and iPhoneMirror. Resolving the test receiver returned the active LAN address
+and TCP port 17101. A local TCP connection to that address succeeded.
+
+With Windows discovery active, the same iPhone (iOS 27.2.1) connected to the
+reference receiver over IPv6. The reference presented H.264 video at 498×1080
+and the user confirmed sound came from the iPhone speaker. The session closed
+approximately 64 seconds after the first video pipeline log. The user confirmed
+the disconnect occurred without touching the mirroring controls. The reference
+was stopped and its two Public-profile inbound firewall rules were restored to
+Block. The AirBridge 0.6.2 result therefore reproduces the short video-only
+session on this phone, despite the difference in receiver implementation.
+
+In a repeat iPhoneMirror trial on iOS 27.2.1, the video-only receiver
+published 3,417 frames and received zero audio packets before the phone
+closed the video socket 58.580 seconds after the first frame. The receiver
+acknowledged `/feedback` with `200 OK` 286 ms before the close. The iPhone
+then sent TEARDOWN on the control connection. A bounded USB activity-stream
+probe covered the session and returned logs, but the AirPlay filter found no
+sender-side event identifying the reason for the close. This confirms the
+sequence on the wire. It does not establish an internal iOS timeout cause.
+
+For a separate transport, the same iPhone advertised CoreDevice DisplayService
+and answered its media capability query over the existing trusted USB
+connection. Apple device enumeration listed only the USB connection. A direct
+LAN probe reached lockdownd but the service did not accept the existing USB
+pairing record for the Wi-Fi session. The probe did not attempt new pairing or
+start media streaming. Wireless CoreDevice video and local speaker playback
+remain unverified.
+
 Each accepted mirror codec-configuration update also emits numeric diagnostic
 event 33: actual codec (`0` AVC, `1` HEVC), AVC-only diagnostic enabled (`0`/`1`),
 source width, source height, output width and output height. This reports what

@@ -1,7 +1,9 @@
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Data;
+using IPhoneMirror.App.Controls;
 using IPhoneMirror.App.Localization;
 using IPhoneMirror.App.Services;
-using IPhoneMirror.App.Updater;
 using IPhoneMirror.App.ViewModels;
 
 namespace IPhoneMirror.App.Windows;
@@ -32,7 +34,7 @@ public partial class ProjectionSettingsWindow : IPhoneMirror.UI.Controls.Rounded
         if (_refreshingFrameColor || _setFrameColor is null || FrameColorComboBox.SelectedValue is not string color) return;
         var success = _setFrameColor(color);
         RefreshPhoneFrame();
-        PhoneFrameFeedback.Visibility = success ? Visibility.Collapsed : Visibility.Visible;
+        FrameColorFeedback.Visibility = success ? Visibility.Collapsed : Visibility.Visible;
     }
 
     internal void ConfigurePhoneFrame(Func<(bool Enabled, bool Available, string Description)> state,
@@ -86,6 +88,8 @@ public partial class ProjectionSettingsWindow : IPhoneMirror.UI.Controls.Rounded
     private readonly Func<Task> _screenshot;
     private readonly Action _mediaOutput;
     private readonly bool _previewOnly;
+    private readonly IndependentWindowLayoutEditor? _layoutEditor;
+    private readonly NetworkProxySettingsEditor _networkProxyEditor;
 
     internal ProjectionSettingsWindow(object dataContext,
         Func<Task> refresh, Func<Task> fullScreen,
@@ -93,6 +97,11 @@ public partial class ProjectionSettingsWindow : IPhoneMirror.UI.Controls.Rounded
         Action mediaOutput, bool previewOnly = false)
     {
         InitializeComponent();
+        var visibility = new BooleanToVisibilityConverter();
+        BindCategory(ProjectionSettingsScrollViewer, ProjectionSettingsTab);
+        BindCategory(ControlSettingsScrollViewer, ControlSettingsTab);
+        BindCategory(ApplicationSettingsScrollViewer, ApplicationSettingsTab);
+
         DataContext = dataContext;
         _refresh = refresh;
         _fullScreen = fullScreen;
@@ -100,6 +109,75 @@ public partial class ProjectionSettingsWindow : IPhoneMirror.UI.Controls.Rounded
         _screenshot = screenshot;
         _mediaOutput = mediaOutput;
         _previewOnly = previewOnly;
+        _networkProxyEditor = new(this);
+        _networkProxyEditor.Initialize();
+        if (dataContext is MainViewModel viewModel)
+        {
+            _layoutEditor = new(this, viewModel, udid =>
+                (Application.Current?.MainWindow as MainWindow)?.GetCurrentIndependentWindowLayout(udid));
+            _layoutEditor.Refresh();
+            viewModel.PropertyChanged += OnSelectedDeviceChanged;
+            Closed += (_, _) => viewModel.PropertyChanged -= OnSelectedDeviceChanged;
+        }
+        Activated += (_, _) =>
+        {
+            _layoutEditor?.RefreshIfChanged();
+            _networkProxyEditor.RefreshIfChanged();
+        };
+        RefreshThemeSelection(null, EventArgs.Empty);
+        ThemeService.ThemeChanged += RefreshThemeSelection;
+        Closed += (_, _) => ThemeService.ThemeChanged -= RefreshThemeSelection;
+
+        void BindCategory(ScrollViewer page, RadioButton tab) =>
+            page.SetBinding(VisibilityProperty, new Binding(nameof(RadioButton.IsChecked))
+            {
+                Source = tab,
+                Converter = visibility,
+            });
+    }
+
+    private void RefreshThemeSelection(object? sender, EventArgs e) =>
+        ThemeComboBox.SelectedValue = ThemeService.Preference.ToString();
+
+    private void OnSelectedDeviceChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(MainViewModel.SelectedDevice)) _layoutEditor?.Refresh();
+    }
+
+    private void OnIndependentLayoutModeChanged(object sender, SelectionChangedEventArgs e) => _layoutEditor?.ChangeMode();
+    private void OnSaveIndependentWindowLayout(object sender, RoutedEventArgs e) => _layoutEditor?.Save();
+    private void OnSaveCurrentIndependentWindowLayout(object sender, RoutedEventArgs e) => _layoutEditor?.SaveCurrent();
+    private void OnNetworkProxyModeChanged(object sender, SelectionChangedEventArgs e) => _networkProxyEditor?.ChangeMode();
+    private void OnNetworkProxyDraftChanged(object sender, TextChangedEventArgs e) => _networkProxyEditor?.ChangeDraft();
+    private void OnSaveNetworkProxyClick(object sender, RoutedEventArgs e) => _networkProxyEditor.Save();
+
+    private void OnThemeSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_previewOnly && Application.Current?.MainWindow is MainWindow main)
+            main.OnThemeSelectionChanged(sender, e);
+    }
+
+    private void OnUsbProjectionModeInfoClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: UsbProjectionModeOption option }) return;
+        e.Handled = true;
+        new UsbProjectionModeInfoWindow(option) { Owner = this }.ShowDialog();
+    }
+
+    private void OnShortcutSettingsClick(object sender, RoutedEventArgs e)
+    {
+        if (!_previewOnly && Application.Current?.MainWindow is MainWindow main) main.OpenShortcutSettings(this);
+    }
+
+    private void OnCustomizePreviewToolbar(object sender, RoutedEventArgs e)
+    {
+        if (!_previewOnly && Application.Current?.MainWindow is MainWindow main) main.OpenToolbarEditor(this);
+    }
+
+    private void OnAboutClick(object sender, RoutedEventArgs e)
+    {
+        if (!_previewOnly && Application.Current is App app && DataContext is MainViewModel viewModel)
+            app.ShowAboutWindow(this, viewModel);
     }
 
     internal static void ShowDeveloperPreview(Window owner, object dataContext)
@@ -141,30 +219,14 @@ public partial class ProjectionSettingsWindow : IPhoneMirror.UI.Controls.Rounded
         else if (viewModel.StartCommand.CanExecute(null)) viewModel.StartCommand.Execute(null);
     }
 
-    private void OnApplyLightweightModeClick(object sender, RoutedEventArgs e)
-    {
-        if (DataContext is MainViewModel viewModel)
-            viewModel.SelectedApplicationDisplayMode = ApplicationDisplayMode.Lightweight;
-    }
-
     private async void OnScreenshotClick(object sender, RoutedEventArgs e) =>
         await RunAsync(_screenshot);
 
     private void OnCreateCompactShortcutClick(object sender, RoutedEventArgs e)
     {
         if (_previewOnly) return;
-        if (DataContext is not MainViewModel { SelectedDevice: { IsMediaCast: false } device }) return;
-        try
-        {
-            var path = CompactLaunchOptions.CreateDesktopShortcut(device.Udid, device.DisplayName);
-            AppPromptWindow.Inform(LocalizationService.Get("CompactLaunchTitle"),
-                LocalizationService.Format("CompactShortcutCreated", path), this);
-        }
-        catch (Exception error)
-        {
-            AppPromptWindow.Inform(LocalizationService.Get("CompactLaunchTitle"),
-                LocalizationService.Format("CompactLaunchFailed", error.Message), this);
-        }
+        if (DataContext is MainViewModel { SelectedDevice: { IsMediaCast: false } device })
+            MainWindow.CreateCompactShortcut(device, this);
     }
 
     private void OnMediaOutputClick(object sender, RoutedEventArgs e) =>

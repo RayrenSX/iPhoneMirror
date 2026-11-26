@@ -1,11 +1,13 @@
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Media;
 using IPhoneMirror.App.Localization;
 using IPhoneMirror.App.Services;
+using IPhoneMirror.App.Updater;
 using IPhoneMirror.App.Windows;
 
 namespace IPhoneMirror.App.Runtime.Tests;
@@ -20,6 +22,7 @@ internal static partial class Program
         app.InitializeComponent();
         try
         {
+            TestMappingWithLegacyDevicePreferences(app, output);
             if (!lifecycleOnly)
             {
                 TestMappingCaptureTransactions(); TestMappingWindowsKeyChords(); TestMappingVisualCoordinates();
@@ -30,6 +33,102 @@ internal static partial class Program
             return 0;
         }
         finally { app.Shutdown(); }
+    }
+
+    private static void TestMappingWithLegacyDevicePreferences(App app, string output)
+    {
+        const string legacy = """
+            {
+              "DeviceVideoPreferences": {
+                "Test-Phone": { "Width": 720, "Height": 1280, "FrameRate": 30, "Decoder": 0 },
+                "test-phone": { "Width": 1080, "Height": 1920, "FrameRate": 60, "Decoder": 0, "UsbProjectionMode": 0 },
+                "other-phone": { "Width": 540, "Height": 960, "FrameRate": 24, "Decoder": 0 }
+              },
+              "IndependentWindowLayouts": {
+                "Test-Phone": { "Width": 300, "Height": 600 },
+                "test-phone": { "Width": 320, "Height": 640, "Fixed": true }
+              },
+              "IndependentWindowStartupMode": 1,
+              "IndependentWindowLayoutSchema": 1
+            }
+            """;
+        var snapshot = app.UpdateSettings.Clone();
+        var main = CreateWorkspaceTestWindow(app, includeNativePreview: false);
+        var originalStore = KeyboardField(app, "_settingsStore");
+        try
+        {
+            var raw = JsonSerializer.Deserialize<UpdateSettings>(legacy)!;
+            app.UpdateSettings.DeviceVideoPreferences = raw.DeviceVideoPreferences;
+            var vm = (ViewModels.MainViewModel)KeyboardField(main, "_viewModel");
+            vm.ManageKeyboardMappingCommand.Execute(null);
+            var manager = (KeyboardMappingWindow)KeyboardField(main, "_mappingWindow");
+            var enabled = (CheckBox)manager.FindName("EnabledBox");
+            var suppress = (CheckBox)manager.FindName("SuppressBox");
+            var error = (TextBlock)manager.FindName("ErrorText");
+            MappingAssert(manager.IsVisible && !enabled.IsChecked.GetValueOrDefault(),
+                "The production keyboard mapping command did not open an initially disabled manager.");
+
+            var blockedPath = Path.Combine(output, "block-mapping-save");
+            File.WriteAllText(blockedPath, "fixture");
+            SetKeyboardField(app, "_settingsStore", new UpdateSettingsStore(Path.Combine(blockedPath, "settings.json")));
+            var previous = app.UpdateSettings;
+            app.IsUiPreviewMode = false;
+            enabled.IsChecked = true;
+            enabled.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            MappingAssert(ReferenceEquals(previous, app.UpdateSettings) &&
+                ReferenceEquals(raw.DeviceVideoPreferences, app.UpdateSettings.DeviceVideoPreferences) &&
+                !app.UpdateSettings.KeyboardMapping.Enabled && enabled.IsChecked == false && error.Text.Length > 0,
+                "Failed mapping save must restore the toggle without replacing unrelated settings.");
+
+            SetKeyboardField(app, "_settingsStore", new UpdateSettingsStore(Path.Combine(output, "mapping-save-retry.json")));
+            enabled.IsChecked = true;
+            enabled.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            MappingAssert(app.UpdateSettings.KeyboardMapping.Enabled && error.Text.Length == 0,
+                "Enabling keyboard mapping must save even with legacy device preferences.");
+            suppress.IsChecked = !suppress.IsChecked.GetValueOrDefault();
+            suppress.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            MappingAssert(app.UpdateSettings.KeyboardMapping.SuppressOriginalKey == suppress.IsChecked && error.Text.Length == 0,
+                "Changing original-key suppression did not save.");
+            manager.Close();
+            vm.ManageKeyboardMappingCommand.Execute(null);
+            var reopened = (KeyboardMappingWindow)KeyboardField(main, "_mappingWindow");
+            MappingAssert(reopened.IsVisible && ((CheckBox)reopened.FindName("EnabledBox")).IsChecked == true,
+                "The manager did not restore its saved switch after reopening.");
+            ((CheckBox)reopened.FindName("EnabledBox")).IsChecked = false;
+            ((CheckBox)reopened.FindName("EnabledBox")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            MappingAssert(!app.UpdateSettings.KeyboardMapping.Enabled, "Disabling keyboard mapping did not save.");
+            reopened.Close();
+            var saved = new UpdateSettingsStore(Path.Combine(output, "mapping-save-retry.json")).Load();
+            MappingAssert(!saved.KeyboardMapping.Enabled && saved.DeviceVideoPreferences.Count == 2 &&
+                saved.DeviceVideoPreferences["TEST-PHONE"].Width == 1080,
+                "A successful mapping retry must persist both the toggle and normalized device preferences.");
+
+            var path = Path.Combine(output, "legacy-device-preferences.json");
+            File.WriteAllText(path, legacy);
+            var store = new UpdateSettingsStore(path);
+            var loaded = store.Load(out var readFailed, persistMigrations: false);
+            MappingAssert(!readFailed && File.ReadAllText(path) == legacy &&
+                loaded.DeviceVideoPreferences.Count == 2 && loaded.DeviceVideoPreferences["TEST-PHONE"].Width == 1080 &&
+                loaded.DeviceVideoPreferences["OTHER-PHONE"].Width == 540 &&
+                loaded.IndependentWindowLayouts.Count == 1 && loaded.IndependentWindowLayouts["TEST-PHONE"].Fixed,
+                "Reading legacy device settings did not retain the last entry and unrelated devices.");
+            loaded.DeviceVideoPreferences["TEST-PHONE"] = loaded.DeviceVideoPreferences["test-phone"] with { Width = 900 };
+            MappingAssert(loaded.Clone().DeviceVideoPreferences.Count == 2,
+                "An update using another casing recreated the duplicate entry.");
+            store.Load();
+            var repaired = JsonSerializer.Deserialize<UpdateSettings>(File.ReadAllText(path))!;
+            MappingAssert(repaired.DeviceVideoPreferences.Count == 2 && repaired.IndependentWindowLayouts.Count == 1,
+                "The legacy device settings repair did not persist.");
+            Console.WriteLine("PASS keyboard mapping opens, saves, closes and reopens with case-duplicate legacy device settings.");
+        }
+        finally
+        {
+            app.IsUiPreviewMode = true;
+            SetKeyboardField(app, "_settingsStore", originalStore);
+            (KeyboardField(main, "_mappingWindow") as Window)?.Close();
+            app.RestoreUpdateSettings(snapshot);
+            CloseWorkspaceTestWindow(main);
+        }
     }
 
     private static void ActivateMappingTestWindow(Window window)
@@ -221,13 +320,13 @@ internal static partial class Program
             (new Rect(-1500,100,800,700), new Rect(-1200,100,200,700), new Rect(-1920,0,1920,1080)) })
         {
             Rect Scale(Rect value) => new(value.X * dpi, value.Y * dpi, value.Width * dpi, value.Height * dpi);
-            var placement = KeyboardMappingOverlayWindow.PlacePickingToolbar(Scale(preview), Scale(picture), Scale(area),
+            var placement = PreviewCoordinateMapper.PlaceOverlayToolbar(Scale(preview), Scale(picture), Scale(area),
                 new Size(200 * dpi, 40 * dpi), 8 * dpi);
             MappingAssert(!placement.IntersectsWith(Scale(picture)) && Scale(area).Contains(placement),
                 "The picking toolbar covers the picture or escapes its monitor at different DPI/origins.");
         }
         var full = new Rect(0, 0, 1920, 1080);
-        MappingAssert(full.Contains(KeyboardMappingOverlayWindow.PlacePickingToolbar(full, full, full, new Size(200, 40), 8)),
+        MappingAssert(full.Contains(PreviewCoordinateMapper.PlaceOverlayToolbar(full, full, full, new Size(200, 40), 8)),
             "Fullscreen fallback left its visible display.");
         Console.WriteLine("PASS picking hint placement: side/top bars, outside narrow preview, negative monitor origin and 100/125/150/200% DPI.");
     }
@@ -292,6 +391,11 @@ internal static partial class Program
             MappingAssert(MappingSendMessage(new WindowInteropHelper(pickingToolbar).Handle, 0x21, 0, 0) == 3 &&
                 MappingGetForeground() == hwnd, "Showing or clicking the hint steals the picking window's activation.");
             SaveWindowRender(pickingToolbar, Path.Combine(output, "picking-toolbar.png"));
+            ActivateMappingTestWindow(owner);
+            AdvanceDispatcher(TimeSpan.FromMilliseconds(80));
+            MappingAssert(overlay.IsPicking && completions == 0,
+                "The preview reclaiming activation cancelled the in-progress pick.");
+            ActivateMappingTestWindow(overlay);
             // Real native mouse messages enter WPF's input pipeline. Coordinates
             // stay below the small toolbar and inside the known video rectangle.
             var x = (int)(overlay.ActualWidth * .5);
@@ -419,12 +523,18 @@ internal static partial class Program
             }
             LocalizationService.SetLanguage("zh-CN");
             overlay.BeginPick(new(entry, surface, result => { picked = result; ++completions; }));
+            pickingToolbar.Close();
+            overlay.Update(surface, [entry]);
+            MappingAssert(overlay.IsPicking && KeyboardField(overlay, "_pickingToolbar") is Window replacement &&
+                replacement.IsVisible && !ReferenceEquals(replacement, pickingToolbar),
+                "A closed toolbar must be recreated without ending the active pick.");
             overlay.Update(surface with { Rotation = 1 }, [entry]);
             MappingAssert(completions == 2 && picked is null && !overlay.IsPicking, "Rotation left an invalid pick active.");
             overlay.BeginPick(new(entry, surface with { Rotation = 1 }, result => { picked = result; ++completions; }));
             owner.Hide(); overlay.Update(surface with { Rotation = 1 }, []);
             MappingAssert(completions == 3 && !overlay.IsVisible, "Hidden/disconnected surface retained a ghost picker.");
-            MappingAssert(!pickingToolbar.IsVisible, "Hiding the owner left its picking hint behind.");
+            MappingAssert(KeyboardField(overlay, "_pickingToolbar") is not Window remaining || !remaining.IsVisible,
+                "Hiding the owner left its picking hint behind.");
             Console.WriteLine("PASS real owned HWND overlay, rendered enabled/disabled/deleted markers, click-through, resize, native click and all eight action picks, timed drag, automatic exit, rotation cancellation and hidden-owner cleanup.");
         }
         finally { MappingMouseEvent(4, 0, 0, 0, 0); overlay.Close(); owner.Close(); }
@@ -495,7 +605,9 @@ internal static partial class Program
                 "Current-device overlays leaked onto an unrelated independent preview.");
             settings.Mappings[0] = settings.Mappings[0] with { Enabled = false };
             KeyboardCall(main, "ApplyKeyboardMapping", settings);
-            MappingAssert(overlays.Values.All(o => MappingOverlayPixelCount(o) == 0), "Disabling a row failed to update both previews.");
+            var router = (KeyboardInputRouter)KeyboardField(main, "_keyboardRouter");
+            MappingAssert(overlays.Count == 0 && router.RequestedMode == KeyboardInputMode.Direct,
+                "Disabling the last active row must release mapping ownership and remove both overlays.");
             settings.Mappings[0] = settings.Mappings[0] with { Enabled = true, X = .72, Y = .37 };
             KeyboardCall(main, "ApplyKeyboardMapping", settings);
             MappingAssert(overlays.Values.All(o => MappingOverlayPixelCount(o) > 0), "Editing/re-enabling failed to redraw both previews.");
@@ -516,6 +628,23 @@ internal static partial class Program
             MappingAssert(overlays.Count == 0, "Disconnect left ghost overlays despite a missing current session.");
             sessions.Set(padSession); KeyboardCall(main, "RefreshMappingOverlays");
             MappingAssert(overlays.Count == 2, "Reconnect failed to restore current-device overlays.");
+            settings.Mappings.Clear(); KeyboardCall(main, "ApplyKeyboardMapping", settings);
+            MappingAssert(overlays.Count == 0 && router.RequestedMode == KeyboardInputMode.Direct &&
+                settings.Enabled, "Deleting the last row must restore direct ownership with mapping still enabled.");
+            ActivateMappingTestWindow(main);
+            KeyboardCall(main, "SetSettingsPanelVisible", true);
+            FinishWorkspaceReveal(main);
+            var cancelled = 0;
+            Action<KeyboardMappingEntry?> finish = result => { if (result is null) cancelled++; };
+            MappingAssert(KeyboardCall(main, "BeginMappingPositionPick", MappingEntry(), finish) is null,
+                "Selecting a position requires an already visible preview.");
+            AdvanceDispatcher(TimeSpan.FromMilliseconds(350));
+            MappingAssert((bool)KeyboardField(main, "_isSettingsPanelVisible") &&
+                overlays.TryGetValue(second.Handle, out var picker) && picker.IsPicking && cancelled == 0,
+                "Entering the picker while editing settings disturbed the preview layout or ended the pick.");
+            KeyboardCall(main, "CancelMappingPositionPick");
+            MappingAssert(cancelled == 1 && overlays.Count == 0 && (bool)KeyboardField(main, "_isSettingsPanelVisible"),
+                "Cancel must return to the same settings layout and release the temporary overlay.");
             settings.Enabled = false; KeyboardCall(main, "ApplyKeyboardMapping", settings);
             MappingAssert(overlays.Count == 0, "Turning mappings off retained overlays.");
             Console.WriteLine("PASS actual main HwndHost and independent native preview shells, immediate edits/toggles, fullscreen, multi-device selection, orientation, disconnect/reconnect and global-off cleanup (inert renderer/session fixtures).");

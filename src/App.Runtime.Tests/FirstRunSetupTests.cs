@@ -82,6 +82,10 @@ internal static partial class Program
         SetupModeDraftTests.Run();
         Directory.CreateDirectory(output);
         void Check(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
+        var optionalSupport = new FirstRunSetupState { Step = SetupStep.SupportAuthor };
+        optionalSupport.Skip();
+        Check(optionalSupport.Step == SetupStep.ApplicationMode && !optionalSupport.HasSkippedSteps,
+            "Skipping voluntary support must not mark setup incomplete.");
         foreach (var usage in Enum.GetValues<SetupUsage>())
         {
             var state = new FirstRunSetupState { Usage = usage, Devices = [new() { Id = "a" }, new() { Id = "b" }] };
@@ -93,6 +97,11 @@ internal static partial class Program
                 state.Next();
             }
             Check(state.Step == SetupStep.Completed, "Flow did not terminate: " + usage);
+            Check(visited.FindIndex(v => v.Step == SetupStep.FreeSoftwareNotice) ==
+                visited.FindIndex(v => v.Step == SetupStep.Preferences) + 1 &&
+                visited.FindIndex(v => v.Step == SetupStep.SupportAuthor) ==
+                visited.FindIndex(v => v.Step == SetupStep.FreeSoftwareNotice) + 1,
+                "The free-software notice must follow language selection and lead to voluntary support in every setup branch.");
             Check(visited.Any(v => v.Step == SetupStep.MirrorConnection) == (usage != SetupUsage.MirrorAndControl), "Mirror-only transport question was not isolated.");
             Check(!visited.Any(v => v.Step is SetupStep.WiredControl or SetupStep.WirelessControl or SetupStep.WirelessIntroduction or SetupStep.BluetoothIntroduction), "Setup still runs functional control tests or split introduction pages.");
             if (usage == SetupUsage.WirelessOnly)
@@ -117,7 +126,7 @@ internal static partial class Program
                 state.Previous(); state.Previous(); state.Previous();
                 Check(state.Step == SetupStep.DeviceComplete && state.DeviceIndex == 1, "Back did not return to last device.");
                 state.SelectUsage(SetupUsage.WirelessOnly);
-                Check(state.Devices.Count == 0 && state.GlobalOutcomes.Keys.All(s => s is SetupStep.Welcome or SetupStep.Preferences or SetupStep.ApplicationMode or SetupStep.Appearance), "Changing branch reused incompatible checkpoints.");
+                Check(state.Devices.Count == 0 && state.GlobalOutcomes.Keys.All(s => s is SetupStep.Welcome or SetupStep.Preferences or SetupStep.FreeSoftwareNotice or SetupStep.SupportAuthor or SetupStep.ApplicationMode or SetupStep.Appearance), "Changing branch reused incompatible checkpoints.");
             }
         }
         foreach (var usage in Enum.GetValues<SetupUsage>())
@@ -286,7 +295,9 @@ internal static partial class Program
                         for (var index = 1; index < 9; index++) state.Devices.Add(new() { Id = "preview-" + index, Name = "iPad · " + index,
                             Outcomes = new(state.Devices[0].Outcomes) });
                     previewStore.Save(state);
-                    var window = new FirstRunSetupWindow(vm, previewStore, previewOnly: true) { Width = width, Height = width == 600 ? 540 : 760 };
+                    var noticeClock = new NoticeTestClock();
+                    var window = new FirstRunSetupWindow(vm, previewStore, previewOnly: true) { Width = width, Height = width == 600 ? 540 : 760,
+                        NoticeTimeProvider = noticeClock };
                     IPhoneMirror.UI.Animations.PageTransition.SetIsEnabled((DependencyObject)window.Content, false);
                     window.State.Step = step;
                     try
@@ -299,6 +310,25 @@ internal static partial class Program
                         Check(scrollbarFindings.Count == 0, string.Join(Environment.NewLine, scrollbarFindings));
                         if (step == SetupStep.ControlIntroduction)
                             Check(!ComponentVisuals<CheckBox>(window).Any(), "Control introduction still asks users to enable individual features.");
+                        if (step == SetupStep.FreeSoftwareNotice)
+                        {
+                            Check(window.State.Category == SetupCategory.Basics && !((Button)window.FindName("Next")).IsEnabled &&
+                                ComponentVisuals<TextBlock>(window).Any(text => text.Text == LocalizationService.Get("SetupNoticeRefundBody")),
+                                "The standalone notice must show the concise localized statement and a reading delay.");
+                            noticeClock.Advance(TimeSpan.FromSeconds(3));
+                            KeyboardCall(window, "UpdateNoticeCountdown");
+                            Check(((Button)window.FindName("Next")).IsEnabled, "The reading delay did not release navigation.");
+                            previewStore.Save(window.State);
+                            Check(previewStore.Load().Step == SetupStep.FreeSoftwareNotice,
+                                "The new notice checkpoint was not preserved on resume.");
+                            window.State.Previous(); Check(window.State.Step == SetupStep.Preferences, "Notice Back must return to language selection.");
+                            window.State.Next(); window.State.Next();
+                            Check(window.State.Step == SetupStep.SupportAuthor, "Notice Next must lead to voluntary support.");
+                            window.State.Next();
+                            Check(window.State.Step == SetupStep.ApplicationMode, "Support Next must lead to application mode.");
+                            window.State.Previous();
+                            window.State.Previous();
+                        }
                         Check(window.OwnedWindows.Count == 0, "Setup spawned another window.");
                         if (width == 880)
                         {
@@ -377,6 +407,12 @@ internal static partial class Program
                         }
                         if (step == SetupStep.Environment)
                         {
+                            var scroller = (ScrollViewer)window.FindName("Scroller");
+                            var openDriver = ComponentVisuals<Button>(scroller).Single(button =>
+                                System.Windows.Automation.AutomationProperties.GetAutomationId(button) == "SetupOpenDriverManager");
+                            var actionBounds = openDriver.TransformToAncestor(scroller).TransformBounds(new Rect(openDriver.RenderSize));
+                            Check(actionBounds.Top >= 0 && actionBounds.Bottom <= scroller.ViewportHeight + 1,
+                                $"Driver Manager requires scrolling before it can be opened: {culture}/{theme}/{width}/{textScale}.");
                             using (var lockedCheckpoint = File.Open(previewStore.PathName, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
                             {
                                 typeof(FirstRunSetupWindow).GetMethod("Navigate", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(window, [true]);
@@ -657,7 +693,10 @@ internal static partial class Program
                 flow.State.Step = SetupStep.Preferences; flow.State.Usage = SetupUsage.WiredOnly;
                 flow.State.GlobalOutcomes.Clear(); render.Invoke(flow, null);
                 for (var attempt = 0; flow.State.Step != SetupStep.Completed && attempt < 40; attempt++)
+                {
+                    if (flow.State.Step == SetupStep.FreeSoftwareNotice) AdvanceDispatcher(TimeSpan.FromMilliseconds(3200));
                     ((Button)flow.FindName("Skip")).RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                }
                 Check(flow.State.Step == SetupStep.Completed && !flow.State.HasSavedDevices, "UI could not skip every step without a device.");
                 ((Button)flow.FindName("Next")).RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
                 Check(!flow.IsVisible && !flow.StartRequested && flowStore.Load().Disposition == SetupDisposition.Completed,

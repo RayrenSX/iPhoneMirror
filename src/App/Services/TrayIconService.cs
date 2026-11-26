@@ -14,9 +14,12 @@ internal sealed class TrayIconService : IDisposable
     private readonly uint _taskbarCreated = RegisterWindowMessageW("TaskbarCreated");
     private readonly Action _open;
     private NotifyIconData _data;
+    private Window? _panel;
+    private NativePoint _panelAnchor;
+    private NativeRect _panelWorkArea;
     private bool _disposed;
 
-    internal TrayIconService(Action open)
+    internal TrayIconService(Action open, string tooltip = "iPhoneMirror")
     {
         _open = open;
         _source = new HwndSource(new HwndSourceParameters("iPhoneMirror.Tray")
@@ -35,7 +38,7 @@ internal sealed class TrayIconService : IDisposable
             Callback = CallbackMessage,
             Icon = LoadImageW(0, Path.Combine(AppContext.BaseDirectory, "Assets", "iPhoneMirror.ico"),
                 1, 0, 0, 0x10 | 0x40),
-            Tip = "iPhoneMirror",
+            Tip = tooltip,
             Info = string.Empty,
             InfoTitle = string.Empty,
         };
@@ -67,7 +70,10 @@ internal sealed class TrayIconService : IDisposable
             var notification = (int)(lParam.ToInt64() & 0xffff);
             // NIN_SELECT / NIN_KEYSELECT, or the shell's context menu request.
             if (notification is 0x400 or 0x401 or 0x7b)
-                _source.Dispatcher.BeginInvoke(_open);
+                _source.Dispatcher.BeginInvoke(() =>
+                {
+                    if (!_disposed) _open();
+                });
             handled = true;
         }
         return 0;
@@ -89,24 +95,53 @@ internal sealed class TrayIconService : IDisposable
         var monitor = MonitorFromPoint(anchor, 2);
         var info = new MonitorInfo { Size = (uint)Marshal.SizeOf<MonitorInfo>() };
         if (!GetMonitorInfoW(monitor, ref info)) return;
+        var workWidth = info.Work.Right - info.Work.Left;
+        var workHeight = info.Work.Bottom - info.Work.Top;
+        if (workWidth <= 0 || workHeight <= 0) return;
         var handle = new WindowInteropHelper(panel).EnsureHandle();
         // Move the hidden HWND first so WPF obtains this monitor's actual DPI.
         SetWindowPos(handle, 0, anchor.X, anchor.Y, 0, 0, 0x15);
         var dpi = Math.Max(96u, GetDpiForWindow(handle)) / 96d;
-        var width = (int)Math.Ceiling(Math.Min(panel.Width, (info.Work.Right - info.Work.Left) / dpi) * dpi);
-        var height = (int)Math.Ceiling(Math.Min(panel.Height, (info.Work.Bottom - info.Work.Top) / dpi) * dpi);
-        var left = Math.Clamp(anchor.X - width / 2, info.Work.Left, info.Work.Right - width);
-        var top = Math.Clamp(anchor.Y - height, info.Work.Top, info.Work.Bottom - height);
-        SetWindowPos(handle, 0, left, top, width, height, 0x14);
+        panel.MaxWidth = workWidth / dpi;
+        panel.MaxHeight = workHeight / dpi;
+        if (!ReferenceEquals(_panel, panel))
+        {
+            if (_panel is not null) _panel.SizeChanged -= OnPanelSizeChanged;
+            _panel = panel;
+            panel.SizeChanged += OnPanelSizeChanged;
+        }
+        _panelAnchor = anchor;
+        _panelWorkArea = info.Work;
+        PositionPanel(panel);
         SetForegroundWindow(handle);
         panel.Show();
+        PositionPanel(panel);
         panel.Activate();
+    }
+
+    private void OnPanelSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (sender is Window { IsVisible: true } panel) PositionPanel(panel);
+    }
+
+    private void PositionPanel(Window panel)
+    {
+        var handle = new WindowInteropHelper(panel).Handle;
+        var dpi = Math.Max(96u, GetDpiForWindow(handle)) / 96d;
+        var work = _panelWorkArea;
+        var width = Math.Min((int)Math.Ceiling(Math.Max(panel.ActualWidth, 1) * dpi), work.Right - work.Left);
+        var height = Math.Min((int)Math.Ceiling(Math.Max(panel.ActualHeight, 1) * dpi), work.Bottom - work.Top);
+        var left = Math.Clamp(_panelAnchor.X - width / 2, work.Left, work.Right - width);
+        var top = Math.Clamp(_panelAnchor.Y - height, work.Top, work.Bottom - height);
+        SetWindowPos(handle, 0, left, top, 0, 0, 0x15);
     }
 
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
+        if (_panel is not null) _panel.SizeChanged -= OnPanelSizeChanged;
+        _panel = null;
         if (_data.Window != 0) Shell_NotifyIconW(2, ref _data);
         if (_data.Icon != 0) DestroyIcon(_data.Icon);
         _source.RemoveHook(WindowProcedure);

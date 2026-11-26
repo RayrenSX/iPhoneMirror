@@ -2,9 +2,7 @@
 
 This document defines every driver-level dependency used by iPhoneMirror and
 whether it is bundled, supplied by Windows, or acquired from an official vendor.
-The inventory was checked against the `1.8.4-test4` source tree on 2026-10-01.
-See [parent-driver management](PARENT_DRIVER_MANAGEMENT.md) for the current
-per-device confirmation, rebinding and recovery rules.
+The local v1.8.5-pre7 build uses the same product version for iPhoneMirror and Driver Manager. Each dependency below has its own version and verification record. For rebinding and recovery, see [parent-driver management](PARENT_DRIVER_MANAGEMENT.md). See the [pre7 release notes](releases/v1.8.5-pre7.md) for the application changes.
 
 | Component | Purpose | Delivery | Verification |
 |---|---|---|---|

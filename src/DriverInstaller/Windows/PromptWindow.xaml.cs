@@ -14,10 +14,14 @@ public partial class PromptWindow : IPhoneMirror.UI.Controls.RoundedWindow
     public Style ConfirmStyle { get; }
     public bool ConfirmIsDefault { get; }
     public bool CancelIsDefault => !ConfirmIsDefault;
+    public bool IsDanger { get; }
+    public bool IsError { get; }
 
     private PromptWindow(string title, string body, string confirmText,
-        string cancelText, bool showCancel, bool danger)
+        string cancelText, bool showCancel, bool danger, bool isError)
     {
+        IsDanger = danger;
+        IsError = isError;
         ConfirmIsDefault = !danger;
         PromptTitle = title;
         PromptBody = body;
@@ -33,13 +37,13 @@ public partial class PromptWindow : IPhoneMirror.UI.Controls.RoundedWindow
     internal static bool Confirm(Window owner, string title, string body,
         string? confirmText = null, bool danger = false) =>
         new PromptWindow(title, body, confirmText ?? DriverLocalization.Get("Continue"),
-            DriverLocalization.Get("Cancel"), true, danger)
+            DriverLocalization.Get("Cancel"), true, danger, false)
             { Owner = owner }.ShowDialog() == true;
 
     internal static void Inform(Window owner, string title, string body,
-        string? confirmText = null) =>
+        string? confirmText = null, bool isError = false) =>
         new PromptWindow(title, body, confirmText ?? DriverLocalization.Get("Acknowledge"),
-            string.Empty, false, false)
+            string.Empty, false, false, isError)
             { Owner = owner }.ShowDialog();
 
     private void OnConfirmClick(object sender, RoutedEventArgs e) => DialogResult = true;

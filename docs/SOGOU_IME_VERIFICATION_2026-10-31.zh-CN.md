@@ -1,5 +1,7 @@
 # 搜狗中文模式键盘转发实机验证
 
+> 历史记录：以下发现和验证按文中日期、设备与工作区解释。当前操作见[使用指南](USER_GUIDE.md)，实现与构建见[架构](ARCHITECTURE.md)和[开发指南](DEVELOPMENT.md)。
+
 关联：[Issue #72](https://github.com/RayrenSX/iPhoneMirror/issues/72)。
 
 ## 环境

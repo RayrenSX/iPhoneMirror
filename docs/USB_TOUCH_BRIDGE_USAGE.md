@@ -1,6 +1,6 @@
 # iUsbBridge.exe 调用文档
 
-`iUsbBridge.exe` 是 iPhoneMirror 的输入桥接进程。它通过 Apple
+本页描述 iPhoneMirror v1.8.5-pre7 随附的 `iUsbBridge.exe`。独立桥接器的构建来源见[开发指南](DEVELOPMENT.md#桥接器构建来源)。该输入桥接进程通过 Apple
 usbmuxd 建立 CoreDevice 隧道，再向 Universal HID 服务发送触控和键盘报告。
 程序本身不提供交互式命令行输入；启动后通过标准输入接收二进制长度前缀的
 JSON 消息，通过标准输出发送 JSON Lines 状态事件。
@@ -76,8 +76,9 @@ manifest 构建号和 payload digest，再请求 Apple 个性化签名并安装�
 或服务不可用，会在同一准备期限内尝试 pre2 的 Personalized 流程，并记录
 `developer_image_cryptex_fallback` 及原错误码。设备锁定、信任、连接、网络、超时与安装
 验证失败不会触发此回退。iOS 27 的已有镜像不会在恢复中被自动卸载；最终仍需真实 HID
-检查通过。无线缺少 HID 时会通过同一台手机
-的 USB 连接准备 DDI，然后重建无线会话；未插线时仍需先连接 USB 完成准备。
+检查通过。无线缺少 HID 时，优先通过已配对的 RSD 通道准备 DDI。iOS 27 使用 Cryptex，较早版本
+使用设备公布的 Personalized 镜像服务。无线镜像服务不可用时，可通过同一台设备的可信 USB 连接准备镜像。
+准备完成后桥接器会重新打开 RSD，并短暂重试读取 HID 服务清单，等待设备完成注册。
 
 Personalized 下载首先解析上游 GitHub 提交与文件身份，再按独立的直连、代理和镜像策略
 探测、下载及回退，校验 Git blob、大小、SHA-256 和 manifest。该策略不等同于应用更新的

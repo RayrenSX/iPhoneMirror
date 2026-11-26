@@ -2,6 +2,8 @@ using System.IO;
 using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using IPhoneMirror.App.Controls;
 using IPhoneMirror.App.Services;
 using IPhoneMirror.App.Windows;
@@ -10,6 +12,37 @@ namespace IPhoneMirror.App.Runtime.Tests;
 
 internal static partial class Program
 {
+    private static void TestHiddenSensorInteractions(DeviceFrameProfile frame)
+    {
+        var hitTest = new DeviceFrameHitTest(frame);
+        var mask = frame.Mask;
+        foreach (var turns in new[] { 1, 3, 5, 7 })
+        {
+            var image = (BitmapSource)((ImageBrush)PhoneFrameGeometry.CreateScreenMask(frame, turns)).ImageSource;
+            foreach (var (x, y, sensor) in new[] { (610, 85, true), (200, 59, false), (180, 74, false) })
+            {
+                var maskAlpha = mask[y * frame.FrameWidth + x];
+                var expected = sensor && turns >= 4 ? 255 : maskAlpha;
+                var screenX = x - frame.ScreenX;
+                var screenY = y - frame.ScreenY;
+                var clockwise = turns % 4 == 1;
+                var pixel = clockwise ? new Int32Rect(frame.ScreenHeight - 1 - screenY, screenX, 1, 1) :
+                    new Int32Rect(screenY, frame.ScreenWidth - 1 - screenX, 1, 1);
+                var alpha = new byte[4];
+                image.CopyPixels(pixel, alpha, 4, 0);
+                InteractionAssert(alpha[3] == expected, $"Landscape OCR mask coverage differs at {x},{y} (turns {turns}).");
+
+                var previewX = clockwise ? frame.FrameHeight - 1 - y : y;
+                var previewY = clockwise ? x : frame.FrameWidth - 1 - x;
+                var input = new PreviewPointerEventArgs(PreviewPointerKind.TouchDown,
+                    previewX * 2 + 1, previewY * 2 + 1, 1, 0, frame.FrameHeight * 2, frame.FrameWidth * 2,
+                    (uint)frame.ScreenHeight, (uint)frame.ScreenWidth, 0, 1, 0);
+                InteractionAssert(hitTest.Contains(turns, input) == (expected >= 128),
+                    $"Landscape hit testing disagrees with the visible sensor at {x},{y} (turns {turns}).");
+            }
+        }
+    }
+
     private static int RunPhoneFrameTests(string output)
     {
         Directory.CreateDirectory(output);
@@ -164,6 +197,7 @@ internal static partial class Program
         var manualWhite = DeviceFrameCatalog.Resolve("iPhone13,1", new("1", "", "", "white"));
         InteractionAssert(manualWhite.Manual && !manualWhite.Detected && manualWhite.Profile?.Id == "iphone-12-mini-white",
             "Explicit device color must select actual white artwork without claiming automatic detection.");
+        TestHiddenSensorInteractions(manualWhite.Profile!);
         InteractionAssert(!DeviceFrameCatalog.Resolve("iPhone13,1", new("1", "", "", "invalid")).Manual,
             "Invalid persisted colors must not bypass model validation.");
         var colorSettings = new IPhoneMirror.App.Updater.UpdateSettings();
@@ -278,6 +312,8 @@ internal static partial class Program
         projection.ConfigurePhoneFrame(() => (projectionEnabled, true, "所有独立投屏窗口统一显示手机边框，并在重启后保留。"),
             value => { if (!rejectChange) projectionEnabled = value; return Task.FromResult(!rejectChange); });
         projection.Show();
+        ((RadioButton)projection.FindName("ApplicationSettingsTab")).IsChecked = true;
+        projection.UpdateLayout();
         var projectionToggle = (CheckBox)projection.FindName("PhoneFrameCheckBox");
         projectionToggle.IsChecked = true;
         projectionToggle.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));

@@ -1,5 +1,6 @@
 ﻿using System.IO;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using IPhoneMirror.App.Services;
 using IPhoneMirror.App.Models;
 
@@ -19,11 +20,26 @@ public enum ApplicationDisplayMode
     Tray,
 }
 
+[Flags]
+internal enum SourceCardFields
+{
+    Icon = 1,
+    Name = 2,
+    Model = 4,
+    SystemVersion = 8,
+    Status = 16,
+    Transport = 32,
+    Default = Icon | Name | Status | Transport,
+    All = Default | Model | SystemVersion,
+}
+
 internal sealed class UpdateSettings
 {
     public bool PhoneFrameEnabled { get; set; }
     public Dictionary<string, bool> DeviceFrameEnabled { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, string> DeviceFrameColors { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public IndependentWindowLayoutMode? IndependentWindowStartupMode { get; set; } = IndependentWindowLayoutMode.Last;
+    public int IndependentWindowLayoutSchema { get; set; }
     public Dictionary<string, IndependentWindowLayout> IndependentWindowLayouts { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, IndependentWindowLayoutHistory> IndependentWindowLayoutHistoryByDevice { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, DeviceControlPreferences> DeviceControlPreferences { get; set; } = new(StringComparer.OrdinalIgnoreCase);
@@ -39,9 +55,9 @@ internal sealed class UpdateSettings
     public KeyboardMappingSettings KeyboardMapping { get; set; } = new();
     public bool CheckOnStartup { get; set; } = true;
     public bool AutoDownload { get; set; }
-    public bool AllowMirrorFallback { get; set; } = false;
+    public bool AllowMirrorFallback { get; set; } = true;
     public bool NotifyStableReleases { get; set; } = true;
-    public bool NotifyPrereleaseReleases { get; set; }
+    public bool NotifyPrereleaseReleases { get; set; } = true;
     public AppTheme Theme { get; set; } = AppTheme.System;
     public ApplicationDisplayMode ApplicationDisplayMode { get; set; } =
         ApplicationDisplayMode.Complete;
@@ -49,6 +65,9 @@ internal sealed class UpdateSettings
     public bool HideInterfaceDescriptions { get; set; } = true;
     public bool HidePreviewToolbar { get; set; }
     public bool HidePreviewStatusBar { get; set; }
+    public bool MainPreviewRoundedCorners { get; set; } = true;
+    public bool MainPreviewPhoneFrame { get; set; }
+    public SourceCardFields SourceCardFields { get; set; } = SourceCardFields.Default;
     public PreviewToolbarSettings? PreviewToolbar { get; set; }
     public WirelessReceiverBackend WirelessReceiverBackend { get; set; } =
         WirelessReceiverBackend.Original;
@@ -123,7 +142,7 @@ internal sealed class UpdateSettings
 
     internal UpdateSettings Clone() => new()
     {
-        DeviceControlPreferences = new(DeviceControlPreferences ?? [], StringComparer.OrdinalIgnoreCase),
+        DeviceControlPreferences = CopyDeviceSettings(DeviceControlPreferences),
         SettingsCategory = SettingsCategory,
         NetworkProxy = (NetworkProxy ?? new()).Clone(),
         SettingShortcuts = (SettingShortcuts ?? []).Where(binding => binding is not null && binding.IsValid)
@@ -134,11 +153,13 @@ internal sealed class UpdateSettings
         ShowNativeKeyboard = ShowNativeKeyboard,
         AutomationApi = (AutomationApi ?? new()).Clone(),
         PhoneFrameEnabled = PhoneFrameEnabled,
-        DeviceFrameEnabled = new(DeviceFrameEnabled ?? [], StringComparer.OrdinalIgnoreCase),
-        DeviceFrameColors = new(DeviceFrameColors ?? [], StringComparer.OrdinalIgnoreCase),
-        IndependentWindowLayouts = new(IndependentWindowLayouts ?? [], StringComparer.OrdinalIgnoreCase),
-        IndependentWindowLayoutHistoryByDevice = new(IndependentWindowLayoutHistoryByDevice ?? [], StringComparer.OrdinalIgnoreCase),
-        DeviceVideoPreferences = new(DeviceVideoPreferences ?? [], StringComparer.OrdinalIgnoreCase),
+        DeviceFrameEnabled = CopyDeviceSettings(DeviceFrameEnabled),
+        DeviceFrameColors = CopyDeviceSettings(DeviceFrameColors),
+        IndependentWindowStartupMode = IndependentWindowStartupMode,
+        IndependentWindowLayoutSchema = IndependentWindowLayoutSchema,
+        IndependentWindowLayouts = CopyDeviceSettings(IndependentWindowLayouts),
+        IndependentWindowLayoutHistoryByDevice = CopyDeviceSettings(IndependentWindowLayoutHistoryByDevice),
+        DeviceVideoPreferences = CopyDeviceSettings(DeviceVideoPreferences),
         KeyboardMapping = KeyboardMapping.Clone(),
         CheckOnStartup = CheckOnStartup,
         AutoDownload = AutoDownload,
@@ -151,6 +172,9 @@ internal sealed class UpdateSettings
         HideInterfaceDescriptions = HideInterfaceDescriptions,
         HidePreviewToolbar = HidePreviewToolbar,
         HidePreviewStatusBar = HidePreviewStatusBar,
+        MainPreviewRoundedCorners = MainPreviewRoundedCorners,
+        MainPreviewPhoneFrame = MainPreviewRoundedCorners && MainPreviewPhoneFrame,
+        SourceCardFields = SourceCardFields,
         PreviewToolbar = PreviewToolbar?.Clone(),
         WirelessReceiverBackend = WirelessReceiverBackend,
         WirelessDisplayProfileId = WirelessDisplayProfileId,
@@ -219,9 +243,19 @@ internal sealed class UpdateSettings
         BluetoothShortcutSchema = BluetoothShortcutSchema,
         BluetoothHidReportMapVersion = BluetoothHidReportMapVersion,
         BluetoothHidReportMapAcknowledgedVersion = BluetoothHidReportMapAcknowledgedVersion,
-        BluetoothControlDeviceBindings = new(BluetoothControlDeviceBindings,
-            StringComparer.OrdinalIgnoreCase),
+        BluetoothControlDeviceBindings = CopyDeviceSettings(BluetoothControlDeviceBindings),
     };
+
+    internal static Dictionary<string, T> CopyDeviceSettings<T>(Dictionary<string, T>? settings)
+    {
+        var copy = new Dictionary<string, T>(settings?.Count ?? 0, StringComparer.OrdinalIgnoreCase);
+        if (settings is null) return copy;
+        // Older files can list a device under different casings. Keep the
+        // last value in file order, as when an exact JSON key is repeated.
+        foreach (var (device, value) in settings)
+            if (value is not null) copy[device] = value;
+        return copy;
+    }
 }
 
 internal sealed class UpdateSettingsStore
@@ -230,6 +264,15 @@ internal sealed class UpdateSettingsStore
     {
         WriteIndented = true,
         PropertyNameCaseInsensitive = true,
+        Converters =
+        {
+            new DeviceSettingsConverter<bool>(),
+            new DeviceSettingsConverter<string>(),
+            new DeviceSettingsConverter<DeviceVideoPreferences>(),
+            new DeviceSettingsConverter<DeviceControlPreferences>(),
+            new DeviceSettingsConverter<IndependentWindowLayout>(),
+            new DeviceSettingsConverter<IndependentWindowLayoutHistory>(),
+        },
     };
     private readonly string _path;
 
@@ -242,11 +285,15 @@ internal sealed class UpdateSettingsStore
         _path = path ?? Path.Combine(UserDataDirectory, "settings.json");
     }
 
-    internal UpdateSettings Load()
+    internal UpdateSettings Load(bool persistMigrations = true) => Load(out _, persistMigrations);
+
+    internal UpdateSettings Load(out bool readFailed, bool persistMigrations = true)
     {
+        readFailed = false;
         try
         {
-            if (!File.Exists(_path)) return new UpdateSettings
+            var settingsJson = ReadSettingsJson(_path);
+            if (settingsJson is null) return new UpdateSettings
             {
                 BluetoothMouseSensitivitySchema = 2,
                 BluetoothMouseOrientationSchema = 1,
@@ -258,9 +305,7 @@ internal sealed class UpdateSettingsStore
                 BluetoothHidReportMapVersion = BluetoothHidProtocol.ReportMapVersion,
                 BluetoothHidReportMapAcknowledgedVersion = BluetoothHidProtocol.ReportMapVersion,
             };
-            var settingsJson = File.ReadAllText(_path);
-            var settings = JsonSerializer.Deserialize<UpdateSettings>(
-                settingsJson, JsonOptions) ?? new UpdateSettings();
+            var settings = DeserializeSettings(settingsJson);
             var migrationChanged = false;
             if (!AppProxyPolicy.TryNormalize(settings.NetworkProxy, out var proxySettings))
             {
@@ -274,6 +319,25 @@ internal sealed class UpdateSettingsStore
                 settings.NetworkProxy = proxySettings;
             }
             using var settingsDocument = JsonDocument.Parse(settingsJson);
+            // The retired C protocol (2) is normalized by DeviceVideoPreferences
+            // during deserialization. Persist that migration once, retaining all
+            // of the device's other video/audio preferences and stable 0/1 IDs.
+            foreach (var property in settingsDocument.RootElement.EnumerateObject())
+            {
+                if (!property.Name.Equals(nameof(UpdateSettings.DeviceVideoPreferences),
+                        StringComparison.OrdinalIgnoreCase) || property.Value.ValueKind != JsonValueKind.Object)
+                    continue;
+                foreach (var device in property.Value.EnumerateObject())
+                {
+                    if (device.Value.ValueKind != JsonValueKind.Object) continue;
+                    foreach (var preference in device.Value.EnumerateObject())
+                        if (preference.Name.Equals(nameof(Models.DeviceVideoPreferences.UsbProjectionMode),
+                                StringComparison.OrdinalIgnoreCase) &&
+                            preference.Value.ValueKind == JsonValueKind.Number &&
+                            preference.Value.TryGetUInt32(out var protocol) && protocol > 1)
+                            migrationChanged = true;
+                }
+            }
             if (settingsDocument.RootElement.ValueKind == JsonValueKind.Object &&
                 !settingsDocument.RootElement.EnumerateObject().Any(property =>
                     property.Name.Equals(nameof(UpdateSettings.PhoneFrameEnabled), StringComparison.OrdinalIgnoreCase)))
@@ -285,6 +349,13 @@ internal sealed class UpdateSettingsStore
             if (!Enum.IsDefined(settings.ApplicationDisplayMode))
             {
                 settings.ApplicationDisplayMode = ApplicationDisplayMode.Complete;
+                migrationChanged = true;
+            }
+            var sourceCardFields = settings.SourceCardFields & SourceCardFields.All;
+            if (sourceCardFields == 0) sourceCardFields = SourceCardFields.Default;
+            if (settings.SourceCardFields != sourceCardFields)
+            {
+                settings.SourceCardFields = sourceCardFields;
                 migrationChanged = true;
             }
             if (!Enum.IsDefined(settings.WirelessReceiverBackend))
@@ -314,11 +385,28 @@ internal sealed class UpdateSettingsStore
                 settings.WirelessReceiverName = normalizedReceiverName;
                 migrationChanged = true;
             }
-            settings.DeviceControlPreferences = new(settings.DeviceControlPreferences ?? [], StringComparer.OrdinalIgnoreCase);
-            settings.IndependentWindowLayouts = new(settings.IndependentWindowLayouts ?? [], StringComparer.OrdinalIgnoreCase);
-            settings.IndependentWindowLayoutHistoryByDevice = new(settings.IndependentWindowLayoutHistoryByDevice ?? [], StringComparer.OrdinalIgnoreCase);
-            settings.BluetoothControlDeviceBindings = NormalizeBluetoothBindings(
-                settings.BluetoothControlDeviceBindings);
+            migrationChanged |= WasRepaired(settings.DeviceControlPreferences) ||
+                WasRepaired(settings.IndependentWindowLayouts) ||
+                WasRepaired(settings.IndependentWindowLayoutHistoryByDevice) ||
+                WasRepaired(settings.DeviceVideoPreferences) ||
+                WasRepaired(settings.DeviceFrameEnabled) ||
+                WasRepaired(settings.DeviceFrameColors) ||
+                WasRepaired(settings.BluetoothControlDeviceBindings);
+            if (!settingsDocument.RootElement.EnumerateObject().Any(property =>
+                    property.Name.Equals(nameof(UpdateSettings.IndependentWindowStartupMode), StringComparison.OrdinalIgnoreCase)))
+                settings.IndependentWindowStartupMode = null;
+            migrationChanged |= MigrateIndependentWindowStartupMode(settings);
+            if (settings.IndependentWindowLayoutSchema < 1)
+            {
+                // Replace the old automatic default once; explicit choices made
+                // after this upgrade remain unchanged on subsequent launches.
+                if (settings.IndependentWindowStartupMode == IndependentWindowLayoutMode.Automatic)
+                    settings.IndependentWindowStartupMode = IndependentWindowLayoutMode.Last;
+                settings.IndependentWindowLayoutHistoryByDevice = settings.IndependentWindowLayoutHistoryByDevice
+                    .ToDictionary(pair => pair.Key, pair => pair.Value with { AutoFix = null }, StringComparer.OrdinalIgnoreCase);
+                settings.IndependentWindowLayoutSchema = 1;
+                migrationChanged = true;
+            }
             if (settings.BluetoothMouseSensitivitySchema < 1)
             {
                 settings.BluetoothMouseSensitivity = 500;
@@ -491,16 +579,58 @@ internal sealed class UpdateSettingsStore
             settings.SettingShortcuts = (settings.SettingShortcuts ?? [])
                 .Where(binding => binding is not null && binding.IsValid && settingIds.Add(binding.Id) &&
                     (!binding.Shortcut.IsBound || settingKeys.Add(binding.Shortcut))).Take(16).ToList();
-            if (migrationChanged) TrySaveMigration(settings);
+            if (migrationChanged && persistMigrations) TrySaveMigration(settings);
             return settings;
         }
         catch (Exception error) when (error is JsonException or IOException or
                                       UnauthorizedAccessException)
         {
+            readFailed = true;
             DiagnosticLogger.Exception("settings", "load_failed", error,
                 ("file", Path.GetFileName(_path)));
             return new UpdateSettings();
         }
+    }
+
+    internal static UpdateSettings DeserializeSettings(string json) =>
+        JsonSerializer.Deserialize<UpdateSettings>(json, JsonOptions) ?? throw new JsonException("Empty settings document.");
+
+    internal static string? ReadSettingsJson(string path)
+    {
+        try
+        {
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
+            using var reader = new StreamReader(stream);
+            return reader.ReadToEnd();
+        }
+        catch (FileNotFoundException) { return null; }
+        catch (DirectoryNotFoundException) { return null; }
+    }
+
+    private static bool MigrateIndependentWindowStartupMode(UpdateSettings settings)
+    {
+        if (settings.IndependentWindowStartupMode is { } mode && Enum.IsDefined(mode)) return false;
+
+        // Existing installs can carry different policies for different devices.
+        // Adopt an unambiguous policy and otherwise keep all bounds for manual selection.
+        var legacyModes = settings.IndependentWindowLayoutHistoryByDevice.Keys
+            .Union(settings.IndependentWindowLayouts.Keys, StringComparer.OrdinalIgnoreCase)
+            .Select(device =>
+            {
+                var history = settings.IndependentWindowLayoutHistoryByDevice.GetValueOrDefault(device);
+                if (history?.Mode is { } oldMode && Enum.IsDefined(oldMode)) return oldMode;
+                if (history?.UseLastLayout == true) return IndependentWindowLayoutMode.Last;
+                if (settings.IndependentWindowLayouts.GetValueOrDefault(device) is { IsValid: true, IsEmpty: false })
+                    return IndependentWindowLayoutMode.Preset;
+                return (IndependentWindowLayoutMode?)null;
+            })
+            .OfType<IndependentWindowLayoutMode>()
+            .Distinct()
+            .Take(2)
+            .ToArray();
+        settings.IndependentWindowStartupMode = legacyModes.Length == 1
+            ? legacyModes[0] : IndependentWindowLayoutMode.Last;
+        return true;
     }
 
     internal void Save(UpdateSettings settings)
@@ -513,7 +643,23 @@ internal sealed class UpdateSettingsStore
         {
             File.WriteAllText(temporary,
                 JsonSerializer.Serialize(settings, JsonOptions));
-            File.Move(temporary, _path, overwrite: true);
+            for (var attempt = 0; ; attempt++)
+            {
+                try
+                {
+                    File.Move(temporary, _path, overwrite: true);
+                    break;
+                }
+                catch (IOException error) when (attempt < 3 && error.HResult is unchecked((int)0x80070020) or unchecked((int)0x80070021))
+                {
+                    Thread.Sleep(25);
+                }
+                catch (UnauthorizedAccessException) when (attempt < 3 && File.Exists(_path))
+                {
+                    // A competing reader can briefly deny Windows an atomic replacement.
+                    Thread.Sleep(25);
+                }
+            }
         }
         finally
         {
@@ -530,7 +676,8 @@ internal sealed class UpdateSettingsStore
     internal void Update(Action<UpdateSettings> update)
     {
         ArgumentNullException.ThrowIfNull(update);
-        var settings = Load();
+        var settings = Load(out var readFailed, persistMigrations: false);
+        if (readFailed) throw new IOException("Existing settings could not be read.");
         update(settings);
         Save(settings);
     }
@@ -545,13 +692,69 @@ internal sealed class UpdateSettingsStore
         }
     }
 
-    private static Dictionary<string, string> NormalizeBluetoothBindings(
-        Dictionary<string, string>? bindings)
+    private static bool WasRepaired<T>(Dictionary<string, T>? settings) =>
+        settings is LoadedDeviceSettings<T> { Repaired: true };
+
+    private sealed class LoadedDeviceSettings<T>() : Dictionary<string, T>(StringComparer.OrdinalIgnoreCase)
     {
-        var normalized = new Dictionary<string, string>(
-            StringComparer.OrdinalIgnoreCase);
-        if (bindings is null) return normalized;
-        foreach (var pair in bindings) normalized[pair.Key] = pair.Value;
-        return normalized;
+        internal bool Repaired { get; set; }
+    }
+
+    private sealed class DeviceSettingsConverter<T> : JsonConverter<Dictionary<string, T>>
+    {
+        public override bool HandleNull => true;
+
+        public override Dictionary<string, T> Read(ref Utf8JsonReader reader, Type type, JsonSerializerOptions options)
+        {
+            using var document = JsonDocument.ParseValue(ref reader);
+            var result = new LoadedDeviceSettings<T>();
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                result.Repaired = true;
+                return result;
+            }
+
+            // Read each entry in JSON order so exact duplicates and case
+            // variants follow the same rule. A damaged later entry doesn't
+            // replace a usable earlier entry for that device.
+            foreach (var property in document.RootElement.EnumerateObject())
+            {
+                if (property.Value.ValueKind != JsonValueKind.Null)
+                {
+                    try
+                    {
+                        if (property.Value.Deserialize<T>(options) is { } value)
+                        {
+                            if (!result.TryAdd(property.Name, value))
+                            {
+                                result.Repaired = true;
+                                result[property.Name] = value;
+                            }
+                            continue;
+                        }
+                    }
+                    catch (JsonException) { /* Keep the other devices and settings. */ }
+                }
+                result.Repaired = true;
+            }
+            return result;
+        }
+
+        public override void Write(Utf8JsonWriter writer, Dictionary<string, T> value, JsonSerializerOptions options)
+        {
+            writer.WriteStartObject();
+            if (value is not null)
+            {
+                var entries = value.Comparer.Equals(StringComparer.OrdinalIgnoreCase)
+                    ? value : UpdateSettings.CopyDeviceSettings(value);
+                foreach (var (device, setting) in entries)
+                {
+                    if (setting is null) continue;
+                    writer.WritePropertyName(device);
+                    JsonSerializer.Serialize(writer, setting, options);
+                }
+            }
+            writer.WriteEndObject();
+        }
     }
 }

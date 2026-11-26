@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <format>
 #include <map>
 #include <span>
@@ -176,7 +177,8 @@ void list_devices_from_port(std::uint16_t port,
         if (!mux_device.connection_type.empty() &&
             _stricmp(mux_device.connection_type.c_str(), "USB") != 0)
             continue;
-        devices.insert_or_assign(mux_device.serial,
+        auto key = detail::canonical_device_udid(mux_device.serial);
+        devices.insert_or_assign(key.empty() ? mux_device.serial : key,
             MuxDeviceRecord{port, mux_device});
     }
 }
@@ -187,7 +189,8 @@ DeviceRecord make_presence_record(const MuxDeviceRecord& source) {
     record.mux_port = source.port;
     record.usb_connected = true;
     record.state = ConnectionState::Connected;
-    record.udid = widen(source.device.serial);
+    const auto udid = detail::canonical_device_udid(source.device.serial);
+    record.udid = widen(udid.empty() ? source.device.serial : udid);
     record.connection_type = widen(source.device.connection_type.empty()
         ? "USB" : source.device.connection_type);
     record.name = L"iPhone";
@@ -259,6 +262,53 @@ void enrich_device_metadata(const MuxDeviceRecord& source,
 }
 
 } // namespace
+
+std::string detail::canonical_device_udid(std::string_view serial) {
+    if (serial.size() == 25 && serial[8] == '-') {
+        auto compact = std::string(serial.substr(0, 8));
+        compact.append(serial.substr(9));
+        return canonical_device_udid(compact);
+    }
+    if (serial.size() != 24 && serial.size() != 40) return {};
+    std::string result;
+    for (const auto c : serial) {
+        if (!std::isxdigit(static_cast<unsigned char>(c))) return {};
+        result.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+    }
+    if (result.size() == 24) result.insert(8, 1, '-');
+    return result;
+}
+
+void detail::append_windows_usb_devices(std::vector<DeviceRecord>& records,
+    const std::vector<PhysicalAppleDevice>& physical,
+    const std::unordered_map<std::string, DeviceRecord>& metadata_cache) {
+    for (const auto& device : physical) {
+        if (!is_apple_mobile_capture_parent_instance_id(device.instance_id)) continue;
+        const auto separator = device.instance_id.rfind(L'\\');
+        const auto serial = device.instance_id.substr(separator + 1);
+        if (!std::all_of(serial.begin(), serial.end(), [](wchar_t c) { return c <= 127; })) continue;
+        std::string ascii;
+        ascii.reserve(serial.size());
+        for (const auto c : serial) ascii.push_back(static_cast<char>(c));
+        const auto key = canonical_device_udid(ascii);
+        if (key.empty()) continue;
+        const auto udid = widen(key);
+        if (std::any_of(records.begin(), records.end(), [&](const auto& present) {
+                return present.udid == udid;
+            }))
+            continue;
+        DeviceRecord record;
+        record.udid = udid;
+        record.name = device.description.empty() ? L"iPhone/iPad" : device.description;
+        record.state = ConnectionState::UsbPresentNoMux;
+        record.usb_connected = true;
+        record.connection_type = L"USB";
+        record.status = L"Detected by Windows; Apple communication unavailable";
+        if (const auto cached = metadata_cache.find(key); cached != metadata_cache.end())
+            preserve_cached_device_display_metadata(record, cached->second);
+        records.push_back(std::move(record));
+    }
+}
 
 EnvironmentRecord DeviceManager::environment() const {
     EnvironmentRecord result;
@@ -368,6 +418,7 @@ std::vector<DeviceRecord> DeviceManager::refresh(bool refresh_metadata,
         if (item.metadata_needed)
             enrich_device_metadata(*item.source, item.record);
 
+    const auto physical = discover_physical_apple_usb_devices();
     std::vector<DeviceRecord> result;
     result.reserve(work.size());
     {
@@ -393,6 +444,7 @@ std::vector<DeviceRecord> DeviceManager::refresh(bool refresh_metadata,
             }
             result.push_back(std::move(item.record));
         }
+        detail::append_windows_usb_devices(result, physical, metadata_cache_);
     }
     return result;
 }

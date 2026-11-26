@@ -78,6 +78,8 @@ internal sealed class DriverOperationClient
         var deviceFingerprint = DriverLogger.DeviceFingerprint(device.Serial);
         if (!DriverConstants.IsAppleMobileCaptureParent(device.InstanceId) ||
             (kind == DriverOperationKind.ParentRepair ? parentConsent?.Matches(device) != true : parentConsent is not null) ||
+            ((kind is DriverOperationKind.Install or DriverOperationKind.Repair) &&
+             !DriverOperationSafety.CanApplyCaptureFilter(device, kind)) ||
             !string.Equals(DriverConstants.NormalizeSerial(device.Serial), device.Serial,
                 StringComparison.OrdinalIgnoreCase))
         {

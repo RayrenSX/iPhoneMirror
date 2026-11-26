@@ -69,7 +69,7 @@ public partial class MainWindow
     {
         _workspaceLeftSurfaceStartWidth = GetLightweightElementWidth(LeftPanelHost);
         _workspaceRightSurfaceStartWidth = GetLightweightElementWidth(ControlPanel);
-        _workspaceLeftSurfaceTargetWidth = showLeft ? WorkspaceDeviceWidth : 0;
+        _workspaceLeftSurfaceTargetWidth = showLeft ? WorkspaceLeftWidth : 0;
         _workspaceRightSurfaceTargetWidth = showSettings ? WorkspaceRightWidth : 0;
         _workspaceLeftGapStartWidth = GetLightweightColumnWidth(LeftGapColumn);
         _workspaceRightGapStartWidth = GetLightweightColumnWidth(RightGapColumn);
@@ -150,6 +150,7 @@ public partial class MainWindow
             _lightweightWindowAnimationActive = false;
             _workspaceAnimationWindow = 0;
             CompleteWorkspaceSurfaceAnimation();
+            UpdateRightPanelPages();
             SetWorkspacePageImmediate(DevicePanel, _leftWorkspacePanel == LeftWorkspacePanel.Devices);
             SetWorkspacePageImmediate(MirroringPanel, _leftWorkspacePanel == LeftWorkspacePanel.Mirroring);
             ReleaseLightweightCenterWidth();

@@ -24,11 +24,12 @@ class DirectionTests(unittest.IsolatedAsyncioTestCase):
                 ipc = SimpleNamespace(wait_for_disconnect=disconnected.wait, close=AsyncMock())
                 session = SimpleNamespace(_start_capture_mux=AsyncMock(), _close_capture_mux=Mock())
                 lockdown = SimpleNamespace(udid=UDID, close=AsyncMock())
-                closed_service = asyncio.Event()
+                tried_service = asyncio.Event()
                 class Springboard:
-                    async def __aenter__(self): return self
-                    async def __aexit__(self, *args): closed_service.set()
+                    connect = AsyncMock()
+                    close = AsyncMock()
                     async def get_interface_orientation(self):
+                        tried_service.set()
                         if isinstance(failure, BaseException): raise failure
                         return failure
                 fake_bridge = SimpleNamespace(BridgeChannel=lambda: ipc,
@@ -40,7 +41,9 @@ class DirectionTests(unittest.IsolatedAsyncioTestCase):
                      contextlib.redirect_stdout(output):
                     task = asyncio.create_task(direction.observe_orientation(fake_bridge, UDID))
                     try:
-                        await asyncio.wait_for(closed_service.wait(), .5)
+                        await asyncio.wait_for(tried_service.wait(), .5)
+                        await asyncio.sleep(.03)
+                        self.assertIn('IM_MUX 31234', output.getvalue())
                         self.assertIn('IM_ORIENTATION_UNAVAILABLE', output.getvalue())
                         self.assertFalse(task.done(), 'direction failure must not terminate the shared mux owner')
                         session._close_capture_mux.assert_not_called()
@@ -51,6 +54,47 @@ class DirectionTests(unittest.IsolatedAsyncioTestCase):
                         await asyncio.gather(task, return_exceptions=True)
                 session._close_capture_mux.assert_called_once()
                 lockdown.close.assert_awaited_once()
+                Springboard.close.assert_awaited_once()
+
+    async def test_valid_readings_resume_after_unknown_and_disconnected_service(self):
+        disconnected = asyncio.Event()
+        recovered = asyncio.Event()
+        ipc = SimpleNamespace(wait_for_disconnect=disconnected.wait, close=AsyncMock())
+        session = SimpleNamespace(_start_capture_mux=AsyncMock(), _close_capture_mux=Mock())
+        lockdowns = [SimpleNamespace(udid=UDID, close=AsyncMock()) for _ in range(2)]
+        services = [
+            SimpleNamespace(connect=AsyncMock(), close=AsyncMock(),
+                get_interface_orientation=AsyncMock(side_effect=[
+                    3, ValueError('unknown orientation'), 0, 4, ConnectionError('service stopped')])),
+            SimpleNamespace(connect=AsyncMock(), close=AsyncMock(),
+                get_interface_orientation=AsyncMock(side_effect=lambda: recovered.set() or 3)),
+        ]
+        fake_bridge = SimpleNamespace(BridgeChannel=lambda: ipc,
+            TouchSession=lambda *args, **kwargs: session,
+            create_using_usbmux=AsyncMock(side_effect=lockdowns), _udid_matches=bridge._udid_matches)
+        output = io.StringIO()
+        with patch.dict(os.environ, {'USBMUXD_SOCKET_ADDRESS': '127.0.0.1:31234'}), \
+             patch.object(direction, 'SpringBoardServicesService', side_effect=services), \
+             contextlib.redirect_stdout(output):
+            task = asyncio.create_task(direction.observe_orientation(fake_bridge, UDID))
+            try:
+                await asyncio.wait_for(recovered.wait(), 3)
+                await asyncio.sleep(.03)
+                session._close_capture_mux.assert_not_called()
+                disconnected.set()
+                await asyncio.wait_for(task, .5)
+            finally:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+        self.assertEqual(output.getvalue().splitlines(), [
+            'IM_MUX 31234', 'IM_ORIENTATION 3', 'IM_ORIENTATION_UNAVAILABLE',
+            'IM_ORIENTATION 4', 'IM_ORIENTATION_UNAVAILABLE', 'IM_ORIENTATION 3',
+        ])
+        session._start_capture_mux.assert_awaited_once_with(attempts=1)
+        session._close_capture_mux.assert_called_once()
+        for lockdown, service in zip(lockdowns, services):
+            lockdown.close.assert_awaited_once()
+            service.close.assert_awaited_once()
 
     def test_identity_and_loopback_only(self):
         self.assertEqual(direction.capture_mux_environment_key(UDID),
@@ -103,8 +147,8 @@ class DirectionTests(unittest.IsolatedAsyncioTestCase):
         session = SimpleNamespace(_start_capture_mux=AsyncMock(), _close_capture_mux=Mock())
         lockdown = SimpleNamespace(udid=UDID, close=AsyncMock())
         class Springboard:
-            async def __aenter__(self): return self
-            async def __aexit__(self, *args): pass
+            connect = AsyncMock()
+            close = AsyncMock()
             async def get_interface_orientation(self):
                 done.set()
                 return 4

@@ -3,9 +3,26 @@
 All notable changes to iPhoneMirror are documented here. The project follows
 [Semantic Versioning](https://semver.org/) for published releases.
 
-## [Unreleased]
+## [1.8.5-pre7] - 2026-11-26
 
-No unreleased changes recorded yet.
+The local build is the final preview before the iPhoneMirror 1.8.5 stable release.
+
+### Added
+
+- Add paired-wireless discovery, merged device identities and experimental video-only CoreDevice mirroring for iOS/iPadOS 27+.
+- Add local screen-text recognition, preview file transfer, and IPA signing/install workflows.
+- Add a phone-only audio option for eligible USB mirroring sources and a skippable author-support page in the full setup wizard.
+- Expand accessible Explorer mappings and independent-window layout history, presets, custom placement and window-action shortcuts.
+
+### Changed
+
+- Keep two USB choices: recommended native AirPlay and compatible Demo. Remove the former fixed-size C mode and migrate its saved preference to AirPlay.
+- Save picture settings automatically and retain explicit confirmation for actions such as saving color adjustments and applying receiver settings.
+- Rewrite the user guide and align maintained documentation, SDK/MCP guidance and historical indexes with the local implementation. Real-device validation remains scoped to its individual records.
+
+### Fixed
+
+- Preserve rounded dialog corners and transparent overlay backgrounds.
 
 ## [1.8.5-pre6] - 2026-11-17
 
@@ -1800,7 +1817,7 @@ First public preview.
 - The first-time driver path still needs broader clean-machine validation.
 - Apple uses a private protocol and may change it in future iOS releases.
 
-[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.8.4-test4...HEAD
+[1.8.5-pre7]: docs/releases/v1.8.5-pre7.md
 [1.8.4-test4]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.8.3...v1.8.4-test4
 [1.8.3]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.8.2...v1.8.3
 [1.8.2]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.8.1...v1.8.2

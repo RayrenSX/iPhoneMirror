@@ -1,104 +1,52 @@
-# 文档索引
+# 文档
 
-本索引按用途组织仓库文档。2026-11-12 核对基线为项目版本 `1.8.5-pre5`（源码基线 `1eb833a`）。
-下载版本以 [GitHub Releases](https://github.com/RayrenSX/iPhoneMirror/releases) 为准；
-某项功能写入 `main` 或通过源码测试，不表示已经发布，也不表示所有设备已通过验收。
+[简体中文 README](../README.zh-CN.md) · [English documentation](en/README.md)
 
-## 从哪里开始
+现行文档以本地 main 的 v1.8.5-pre7 为基准。这是 1.8.5 正式发布前的最后一个预览版。[pre7 发布说明](zh-CN/RELEASE_NOTES.md)
 
-| 任务 | 入口 |
+公开安装包的功能以其各自的发布说明为准。[公开发行版](https://github.com/RayrenSX/iPhoneMirror/releases)
+
+## 使用与支持
+
+| 任务 | 文档 |
 |---|---|
-| 下载、了解功能 | [中文 README](../README.md) · [English README](../README.en.md) · [日本語 README](../README.ja.md) |
-| 安装驱动、投屏、反控、录制 | [完整使用教程](USER_GUIDE.md) |
-| 编译、运行测试、打包 | [开发与测试指南](DEVELOPMENT.md) · [贡献规范](../CONTRIBUTING.md) |
-| 了解模块和进程边界 | [软件架构](ARCHITECTURE.md) |
-| 报告问题或安全漏洞 | [支持说明](../SUPPORT.md) · [安全政策](../SECURITY.md) |
-| 查版本变化和待办 | [变更记录](../CHANGELOG.md) · [繁體中文變更記錄](../CHANGELOG.zh-TW.md) · [发布说明索引](releases/README.md) · [路线图](ROADMAP.md) |
-| 查许可与来源 | [项目许可证](../LICENSE) · [第三方声明](../THIRD_PARTY_NOTICES.md) · [桥接组件说明](USB_TOUCH_THIRD_PARTY_LICENSES.md) |
-| 编写自动化脚本 | [本地 HTTP API](api/README.md) · [Python 示例](api/python-example.py) · [PowerShell/curl 示例](api/curl-example.md) |
-| 查历史问题与验证证据 | [审计与设计记录](ARCHIVE.md) · [Issue 记录索引](issues/README.md) |
-| 参与社区 | [行为准则](../CODE_OF_CONDUCT.md) · [PR 模板](../.github/PULL_REQUEST_TEMPLATE.md) |
+| 下载与快速开始 | [English](../README.md) · [简体中文](../README.zh-CN.md) · [日本語](../README.ja.md) |
+| 安装、首次设置、投屏、反控与常见问题 | [使用指南](USER_GUIDE.md) · [首次设置](FIRST_RUN_SETUP.md) |
+| 配对无线投屏、预览工具与独立窗口 | [有线模式](USER_GUIDE.md#有线模式) · [无线发现](PAIRED_WIRELESS_DISCOVERY.md) · [画面、声音和预览工具](USER_GUIDE.md#画面声音和预览工具) · [独立窗口](USER_GUIDE.md#独立窗口与全屏) |
+| 键位映射与多设备 | [键位映射](KEYBOARD_MAPPING.md) · [多设备控屏](MULTI_DEVICE_CONTROL.md) |
+| 录制、直播、OBS 与虚拟摄像头 | [媒体输出](OBS_OUTPUT.md) |
+| 应用、文件与资源管理器映射 | [设备管理](DEV_DEVICE_HUB.zh-CN.md) |
+| IPA 签名与安装 | [IPA 安装](IPA_INSTALL.md) |
+| 自动化与 AI 客户端 | [HTTP API](zh-CN/AUTOMATION.md) · [Python SDK / stdio MCP](zh-CN/SDK.md) |
+| 问题反馈与安全漏洞 | [问题反馈与私密漏洞报告](zh-CN/SUPPORT.md) |
+| 支持作者 | [微信、支付宝与 PayPal 状态](zh-CN/DONATE.md) · [多语言赞赏说明](DONATE.md) |
 
-## 持续维护的技术说明
+## 开发与维护
 
-| 领域 | 文档及用途 |
+| 领域 | 文档 |
 |---|---|
-| USB 协议 | [PROTOCOL](PROTOCOL.md)：配置切换、QuickTime 包、CoreMedia 与协商 |
-| 显示与解码 | [D3D11_RENDERING](D3D11_RENDERING.md)：生产显示路径；[DECODER_GUI_ANALYSIS](DECODER_GUI_ANALYSIS.md)：设计依据与历史测量 |
-| 设备外形 | [DEVICE_CORNER_PROFILES](DEVICE_CORNER_PROFILES.md)：ProductType 匹配、圆角与拟合边界；[独立窗口边框](device-frames.md) · [覆盖目录](device-frame-coverage.md) · [机型与边框审查](device-frame-review.zh-CN.md) |
-| 面板目录 | [APPLE_DISPLAY_CATALOG](APPLE_DISPLAY_CATALOG.md)：型号、面板像素与实际编码尺寸的区别 |
-| 音频与输出 | [WASAPI_AUDIO](WASAPI_AUDIO.md)：播放与音频输出；[OBS_OUTPUT](OBS_OUTPUT.md)：OBS、录制、推流、虚拟摄像头 |
-| 驱动 | [DRIVER_DEPENDENCIES](DRIVER_DEPENDENCIES.md)：依赖及交付；[PARENT_DRIVER_MANAGEMENT](PARENT_DRIVER_MANAGEMENT.md)：父设备绑定、确认与恢复边界 |
-| 首次设置 | [FIRST_RUN_SETUP](FIRST_RUN_SETUP.md)：设置流程与草稿；[SETUP_TOOLS](SETUP_TOOLS.md)：设置中的检查及修复工具 |
-| 反控概览 | [USB_DIRECT_TOUCH](USB_DIRECT_TOUCH.md)：前置条件；[USB_TOUCH_ARCHITECTURE](USB_TOUCH_ARCHITECTURE.md)：进程与设备链路；[USB_TOUCH_DESIGN](USB_TOUCH_DESIGN.md)：状态机设计 |
-| 反控接口 | [USB_TOUCH_BRIDGE_USAGE](USB_TOUCH_BRIDGE_USAGE.md)：命令行、stdin/stdout、触控与键盘消息 |
-| 五点触控 | [FIVE_POINT_TOUCH](FIVE_POINT_TOUCH.md)：触摸屏、并发键位映射、有线/无线共享触点及报告布局 |
-| 兼容性 | [USB_TOUCH_DEVICE_COMPATIBILITY](USB_TOUCH_DEVICE_COMPATIBILITY.md)：实测记录及 DDI/HID 验证条件 |
-| UI 入口 | [REVERSE_CONTROL_UI_INVENTORY](REVERSE_CONTROL_UI_INVENTORY.md)：反控入口；[ERROR_DIALOG_CATALOG](ERROR_DIALOG_CATALOG.md)：错误和确认窗口 |
-| 顶部工具栏 | [TOP_TOOLBAR_CUSTOMIZATION](TOP_TOOLBAR_CUSTOMIZATION.zh-CN.md)：组件库、拖动排序、聚焦动画与验证范围 |
-| 输入焦点 | [KEYBOARD-FOCUS-CONTROL](KEYBOARD-FOCUS-CONTROL.md)：本地文本输入、快捷键与手机键盘路由 |
-| 键位映射 | [KEYBOARD_MAPPING](KEYBOARD_MAPPING.md)：创建映射、启停和输入边界 |
-| 多设备控屏 | [MULTI_DEVICE_CONTROL](MULTI_DEVICE_CONTROL.md)：连接保留、选项卡与独立窗口焦点、验证范围 |
-| 自动化接口 | [api/README](api/README.md)：鉴权、设备准备、控制租约、坐标、剪贴板与截图 |
-| 捐赠资源 | [收款码与完整性保护](DONATION_INTEGRITY.zh-CN.md) |
-| 台湾本地化 | [LOCALIZATION-TAIWAN](LOCALIZATION-TAIWAN.md)：资源、术语及验证入口 |
+| 构建、测试、打包与贡献 | [开发指南](DEVELOPMENT.md) · [贡献规范](zh-CN/CONTRIBUTING.md) · [工作区空间维护](WORKSPACE_STORAGE.md) |
+| 模块与数据流 | [软件架构](ARCHITECTURE.md) |
+| USB 音视频 | [协议](PROTOCOL.md) · [D3D11 解码与显示](D3D11_RENDERING.md) · [WASAPI 音频](WASAPI_AUDIO.md) |
+| 驱动 | [依赖及交付](DRIVER_DEPENDENCIES.md) · [父驱动管理](PARENT_DRIVER_MANAGEMENT.md) |
+| 反控 | [架构](USB_TOUCH_ARCHITECTURE.md) · [桥接接口](USB_TOUCH_BRIDGE_USAGE.md) · [兼容性](USB_TOUCH_DEVICE_COMPATIBILITY.md) · [五点触控](FIVE_POINT_TOUCH.md) · [键盘焦点](KEYBOARD-FOCUS-CONTROL.md) |
+| 无线设备发现 | [配对身份与 CoreDevice 条件](PAIRED_WIRELESS_DISCOVERY.md) |
+| 设置与界面 | [首次设置](FIRST_RUN_SETUP.md) · [工具栏](TOP_TOOLBAR_CUSTOMIZATION.zh-CN.md) · [错误与确认目录](ERROR_DIALOG_CATALOG.md) · [本地化](LOCALIZATION.md) |
+| 机型、圆角与边框 | [面板目录](APPLE_DISPLAY_CATALOG.md) · [圆角拟合](DEVICE_CORNER_PROFILES.md) · [边框来源](device-frames.md) · [覆盖目录](device-frame-coverage.md) |
+| 许可与来源 | [项目许可证](../LICENSE) · [第三方声明](zh-CN/THIRD_PARTY_NOTICES.md) · [桥接组件](USB_TOUCH_THIRD_PARTY_LICENSES.md) · [收款码完整性](DONATION_INTEGRITY.zh-CN.md) |
 
-上述技术文档中引用的历史性能数据和真机结果仍只适用于各自记录的环境。
+## 版本与研究记录
 
-## 专项审计与验证记录
+- [Changelog](../CHANGELOG.md) · [繁體中文變更記錄](../CHANGELOG.zh-TW.md) · [发布说明](releases/README.md) · [后续计划](ROADMAP.md)
+- [保留的设计与故障研究](ARCHIVE.md)：协议依据、驱动安全和有独立价值的验证记录。
+- [推流验证环境](../tools/srs-lab/README.md) · [旧 SRS 环境](../tools/srs-test/README.md) · [原生协议夹具](../src/Core/tests/fixtures/README.md) · [合成 HEVC 夹具](../tests/fixtures/coredevice/README.md)
+- [无线组件来源](../third_party/airplay-server/SOURCE.md) · [UxPlay 来源](../third_party/uxplay/SOURCE.md) · [桥接构建配方](../scripts/usb-bridge-recipe/SOURCE.md)
+- [社区行为准则](../CODE_OF_CONDUCT.md) · [PR 模板](../.github/PULL_REQUEST_TEMPLATE.md)
 
-这些文件保留审查时的发现、修复和验证结果。它们是特定工作区、日期或设备下的记录，
-不是所有版本的功能保证，也不表示本次文档整理重新执行了其中的真机或 UI 测试。
-发生冲突时，先核对当前源码和目标版本，再更新上面的持续维护文档；不要覆盖历史证据。
+## 文档维护
 
-| 主题 | 记录 |
-|---|---|
-| 项目文档核对 | [2026-11-12 复审](DOCUMENTATION_AUDIT_2026-11-12.md) · [2026-11-05 完善](DOCUMENTATION_AUDIT_2026-11-05.md) · [2026-10-01 核对](DOCUMENTATION_AUDIT_2026-10-01.md) |
-| GitHub 问题 | [2026-09-23 审计](GITHUB_ISSUE_AUDIT_2026-09-23.md) · [2026-10-01 审计](GITHUB_ISSUE_AUDIT_2026-10-01.md) · [2026-10-01 修复记录](GITHUB_ISSUE_FIXES_2026-10-01.md) |
-| 驱动错误 | [DRIVER_ERROR_AUDIT](DRIVER_ERROR_AUDIT.md) |
-| USB 蓝屏研究 | [软件内部的探测、配置切换与句柄释放调用链](diagnostics/confirmed-bsod-trigger-steps-20261116.zh-CN.md) |
-| USB 反控打包与签名错误 | [USB_BACKEND_PACKAGING_REPAIR](USB_BACKEND_PACKAGING_REPAIR.md) |
-| 外接键盘状态 | [连接注册、定时更新与取消清理审查](diagnostics/keyboard-attach-review-20261116.md) |
-| 有线恢复 | [WIRED_RECOVERY_FIX](WIRED_RECOVERY_FIX.md) · [WIRED_RECOVERY_REAUDIT](WIRED_RECOVERY_REAUDIT.md) · [WIRED_RECOVERY_LATENCY](WIRED_RECOVERY_LATENCY.md) · [WIRED_CONTROL_COUNTDOWN_FIX](WIRED_CONTROL_COUNTDOWN_FIX.md) |
-| 近期反控与预览排查 | [API 截图与反控稳定性](diagnostics/api-screenshot-stability-20261115.md) · [最后一次完整重试](diagnostics/wired-final-retry-20261115.md) · [预览黑屏](diagnostics/preview-black-screen-20261115.md) |
-| 原画横竖屏与方形画布 | [能力协商、实际帧和有效区域调查](diagnostics/original-quality-rotation-geometry-20261118.zh-CN.md) |
-| Metal 性能 HUD | [应用重启接入、自动化验证及 USB／AirPlay 实机边界](diagnostics/metal-hud-integration-20261118.zh-CN.md) |
-| 启动与设置绑定 | [隐藏启动绑定](diagnostics/hidden-startup-binding-review-20261115.md) · [托盘启动设置页](diagnostics/tray-startup-settings-20261115.md) |
-| 启动布局闪退 | [v1.8.5-pre5 Grid 数组越界复现与修复](diagnostics/startup-grid-crash-20261116.md) |
-| 设备实验室调研 | [rPlayHub 调研记录](RPLAYHUB_RESEARCH_2026-11-15.zh-CN.md) |
-| 交互与性能 | [INTERACTION-STABILITY-AUDIT](INTERACTION-STABILITY-AUDIT.md) · [PERFORMANCE-AUDIT](PERFORMANCE-AUDIT.md) |
-| UI 标准与一致性 | [UI-STANDARDS-REVIEW](UI-STANDARDS-REVIEW.md) · [UI-CONSISTENCY-AUDIT](UI-CONSISTENCY-AUDIT.md) |
-| 布局与圆角 | [UI-ADAPTIVE-LAYOUT-AUDIT](UI-ADAPTIVE-LAYOUT-AUDIT.md) · [UI-ROUNDED-WINDOW-AUDIT](UI-ROUNDED-WINDOW-AUDIT.md) |
-| 本地化 | [LOCALIZATION-AUDIT](LOCALIZATION-AUDIT.md) · [LOCALIZATION-RECHECK](LOCALIZATION-RECHECK.md) · [LOCALIZATION-VALIDATION](LOCALIZATION-VALIDATION.md) · [机器可读改动记录](localization-audit-changes.json) |
+用户流程变化更新使用指南和相关语言 README；接口、依赖与构建变化更新对应专题。功能实现、源码测试通过和真实设备验收应分别表述，发布说明只描述对应版本。
 
-此表只列常用入口，全部专项记录见[审计与设计记录索引](ARCHIVE.md)。
-历史报告中的 `work/`、`outputs/`、`outputs-next/`、`artifacts/` 等路径通常是审查者本机产物，
-不随 Git 仓库分发；源码链接已统一为相对路径，历史行号不保证对应当前文件。
+重复的审查过程、交付日志、逐键生成表和本机截图放在忽略的 `work/` 或 `outputs/diagnostics/`，不另建现行教程。只保留能解释设计、复现重要故障或提供独立证据的研究记录，并写明日期、范围及未验证项。
 
-[USB_TOUCH_DEMO_README.txt](USB_TOUCH_DEMO_README.txt) 是早期独立 Demo 的交付说明，
-不代表 `build.ps1` 会生成该 Demo。当前桥接器的构建配方见
-[scripts/usb-bridge-recipe/SOURCE.md](../scripts/usb-bridge-recipe/SOURCE.md)。
-
-## 仓库其他说明
-
-| 内容 | 入口 |
-|---|---|
-| 本地推流验证 | [Stream Lab](../tools/srs-lab/README.md) · [旧版 SRS Docker 环境](../tools/srs-test/README.md) |
-| 原生协议测试夹具 | [fixtures/README](../src/Core/tests/fixtures/README.md) |
-| 无线组件来源 | [AirPlay 源码与许可](../third_party/airplay-server/SOURCE.md) · [UxPlay 来源](../third_party/uxplay/SOURCE.md) |
-| USB 桥接构建来源 | [配方来源](../scripts/usb-bridge-recipe/SOURCE.md) · [固定依赖](../scripts/usb-bridge-recipe/requirements.txt) |
-
-第三方许可证及供应商附带说明按原文保留，由[第三方声明](../THIRD_PARTY_NOTICES.md)定位；
-`CMakeLists.txt`、依赖清单和配置文件属于构建输入，不按普通叙述文档改写。
-
-## 文档维护约定
-
-- 用户操作变化：同步中文、英文和日文 README 及使用教程，再补技术说明。
-- 协议、驱动、端口、进程或输出行为变化：更新对应专题和架构说明，写明实现入口。
-- 构建与测试变化：同步开发指南、贡献规范和实际脚本；示例默认读取项目版本，避免锁死旧版本。
-- 发布说明描述该版本的变化；审计记录保留日期、范围、证据和未验证项。
-- 截图、日志及示例使用脱敏设备标识；机器绝对路径改为仓库相对路径或明确的占位路径。
-- 新增文档时更新本索引；移动文件时同步所有相对链接。
-- 当前指南使用“已实现 / 待实机验证 / 计划”区分状态；历史报告保留原日期和结果，新增更正说明而不改写原测试结论。
-- 文档修改后从仓库根目录运行 `python scripts/verify_docs.py`，检查所有 Markdown 的本地链接、图片、标题锚点、围栏和 `docs` 索引可达性。
-  检查仅使用 Git 跟踪及未忽略文件，忽略目录中的本机产物不能使失效链接误报通过；外部 URL 不在离线检查范围内。
+新增文档从本页或研究／发布索引链接；移动、合并、删除后同步引用。从仓库根目录运行 `python scripts/verify_docs.py` 检查本地链接、图片、锚点、围栏和索引可达性；该检查不验证外部网页或设备行为。第三方许可证和版权文本保留原文。

@@ -931,13 +931,14 @@ static DNSServiceErrorType dns_service_register_impl(
     const auto mode = receiver_mode();
     const auto media_mode = mode == L"media" || mode == L"combined";
     const auto service_type = std::string_view(regtype);
+    const auto audio_withdrawal_test = iphone_mirror_diagnostic_mirror_audio_event() == 3;
 
     if (service_type == "_raop._tcp") {
         screen_mirroring_network_port.store(network_port, std::memory_order_release);
         // Legacy mirror-only mode exposes RAOP through its redirected AirPlay
         // record. Combined mode follows AirPlay receivers such as UxPlay and
         // publishes the matching RAOP and AirPlay records as one device.
-        if (!media_mode) {
+        if (!media_mode && !audio_withdrawal_test) {
             *output = registration.release();
             return 0;
         }
@@ -954,7 +955,7 @@ static DNSServiceErrorType dns_service_register_impl(
     }
 
     auto instance_name = widen(name);
-    if (service_type == "_raop._tcp" && media_mode) {
+    if (service_type == "_raop._tcp" && (media_mode || audio_withdrawal_test)) {
         const auto separator = instance_name.find(L'@');
         const auto display_name = separator == std::wstring::npos
             ? instance_name : instance_name.substr(separator + 1);
@@ -1108,6 +1109,13 @@ extern "C" __declspec(dllexport) DNSServiceErrorType __stdcall DNSServiceRegiste
         *output = nullptr;
         return -65539;
     }
+}
+
+extern "C" __declspec(dllexport) BOOL __stdcall IPhoneMirrorAirPlayRecordsReleased() {
+    ActiveServicesGuard lock;
+    return std::ranges::none_of(active_services, [](const auto& record) {
+        return record.second->regtype == "_airplay._tcp" || record.second->regtype == "_raop._tcp";
+    }) ? TRUE : FALSE;
 }
 
 extern "C" __declspec(dllexport) void __stdcall DNSServiceRefDeallocate(

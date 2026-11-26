@@ -122,6 +122,7 @@ public partial class FirstRunSetupWindow
             LocalizationService.Format("SetupCheckRemaining", remaining);
         DeviceLabel.Visibility = Visibility.Collapsed;
         StepIndicator.Visibility = Visibility.Collapsed;
+        PageSymbol.Visibility = Visibility.Visible;
         PageSymbol.Data = _assessing ? Geometry.Parse("M12,2 A10,10 0 1 1 2,12") : Symbol(remaining == 0 ? "check" : "settings");
     }
     private void RenderAssessment(bool preserveRows = false)

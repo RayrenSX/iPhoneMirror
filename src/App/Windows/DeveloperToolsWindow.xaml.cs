@@ -259,7 +259,11 @@ public partial class DeveloperToolsWindow : IPhoneMirror.UI.Controls.RoundedWind
     private void OnLanguageChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_updatingControls || LanguageComboBox.SelectedValue is not string value) return;
-        LocalizationService.SetLanguage(value);
+        if (!LocalizationService.SetLanguage(value))
+        {
+            SyncControls();
+            StatusText = LocalizationService.Get("SetupSaveFailed");
+        }
         RefreshDiagnostics();
     }
 
@@ -301,14 +305,14 @@ public partial class DeveloperToolsWindow : IPhoneMirror.UI.Controls.RoundedWind
     private void OnResetClick(object sender, RoutedEventArgs e)
     {
         ThemeService.Apply(AppTheme.System);
-        LocalizationService.SetLanguage(LocalizationService.SystemLanguage);
+        var languageSaved = LocalizationService.SetLanguage(LocalizationService.SystemLanguage);
         _owner.Opacity = 1;
         _owner.Topmost = false;
         _owner.WindowState = WindowState.Normal;
         _owner.Width = 1540;
         _owner.Height = 900;
         SyncControls();
-        StatusText = LocalizationService.Get("DeveloperParametersReset");
+        StatusText = LocalizationService.Get(languageSaved ? "DeveloperParametersReset" : "SetupSaveFailed");
         RefreshDiagnostics();
     }
 

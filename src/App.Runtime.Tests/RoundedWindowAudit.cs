@@ -33,9 +33,17 @@ internal static partial class Program
             bitmap.CopyPixels(new Int32Rect(x, y, 1, 1), pixel, 4, 0);
             return pixel[3];
         }
-        if (Alpha(0, 0) != 0 || Alpha(10, 10) > 64 ||
-            Alpha(bitmap.PixelWidth / 2, 12) < 240)
-            throw new InvalidOperationException($"{window.GetType().Name}: corner alpha is filled or frame is missing.");
+        var outerAlpha = Alpha(0, 0);
+        var cornerAlpha = Alpha(10, 10);
+        // Sample inside the painted surface, outside the antialiased frame edge.
+        var sample = surface.TranslatePoint(new Point(surface.ActualWidth / 2, surface.CornerRadius.TopLeft), window);
+        var frameAlpha = Alpha((int)sample.X, (int)sample.Y);
+        var brush = surface.Background as SolidColorBrush
+            ?? throw new InvalidOperationException($"{window.GetType().Name}: rounded frame background brush is missing.");
+        var expectedAlpha = brush.Color.A * brush.Opacity * surface.Opacity * window.Opacity;
+        if (outerAlpha != 0 || cornerAlpha > 64 || frameAlpha == 0 || frameAlpha + 3 < expectedAlpha)
+            throw new InvalidOperationException($"{window.GetType().Name}: corner alpha is filled or frame is missing " +
+                $"(outer={outerAlpha}, corner={cornerAlpha}, frame={frameAlpha}, expected={expectedAlpha:F1}).");
 
         var chromeType = window.GetType().BaseType!;
         var hook = chromeType.GetMethod("WindowProcedure", BindingFlags.Instance | BindingFlags.NonPublic)!;

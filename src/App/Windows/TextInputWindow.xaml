@@ -4,14 +4,15 @@
     xmlns:chrome="clr-namespace:IPhoneMirror.UI.Controls"
     xmlns:animations="clr-namespace:IPhoneMirror.UI.Animations"
     xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
-    Width="522" Height="342" MinWidth="342" MinHeight="272"
+    Width="522" SizeToContent="Height" MinWidth="342"
     WindowStartupLocation="CenterOwner" ResizeMode="CanResize" ShowInTaskbar="False"
     WindowStyle="None" AllowsTransparency="True" Background="Transparent"
     Foreground="{DynamicResource TextBrush}">
     <Grid Style="{StaticResource SubWindowPageRoot}" animations:PageTransition.IsEnabled="True">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*" MinHeight="{StaticResource DialogContentMinHeight}"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
         <Grid Style="{StaticResource SubWindowHeader}" animations:WindowDragBehavior.IsEnabled="True">
@@ -21,15 +22,13 @@
                 <ui:SymbolIcon Symbol="Dismiss20" Style="{StaticResource ButtonSymbolIcon}"/>
             </Button>
         </Grid>
-        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="0,16">
-            <StackPanel>
-                <TextBlock x:Name="InputLabel" TextWrapping="Wrap"/>
-                <TextBox x:Name="InputBox" Style="{StaticResource RoundedTextBox}" Margin="0,8,0,0"
-                         AutomationProperties.LabeledBy="{Binding ElementName=InputLabel}"
-                         TextChanged="OnTextChanged"/>
-            </StackPanel>
-        </ScrollViewer>
-        <WrapPanel Grid.Row="2" HorizontalAlignment="Right" Margin="{StaticResource DialogActionsInset}">
+        <StackPanel Grid.Row="1" Margin="0,12,0,16">
+            <TextBlock x:Name="InputLabel" TextWrapping="Wrap"/>
+            <TextBox x:Name="InputBox" Style="{StaticResource RoundedTextBox}" Margin="0,8,0,0"
+                     AutomationProperties.LabeledBy="{Binding ElementName=InputLabel}"
+                     TextChanged="OnTextChanged"/>
+        </StackPanel>
+        <WrapPanel Grid.Row="3" HorizontalAlignment="Right" Margin="{StaticResource DialogActionsInset}">
             <Button Content="{DynamicResource Cancel}" Click="OnCancelClick" IsCancel="True"
                     Margin="{StaticResource DialogActionMargin}" MinWidth="88"/>
             <Button x:Name="ConfirmButton" Content="{DynamicResource Apply}" Click="OnConfirmClick" IsDefault="True"

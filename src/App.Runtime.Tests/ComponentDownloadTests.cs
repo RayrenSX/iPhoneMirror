@@ -93,7 +93,7 @@ internal static partial class Program
             }
         }
         foreach (var text in ComponentVisuals<TextBlock>(window))
-            if (!string.IsNullOrWhiteSpace(text.Text) && text.ActualWidth <= 0)
+            if (!string.IsNullOrWhiteSpace(text.Text) && text.ActualWidth <= 0 && text.Visibility == Visibility.Visible)
                 throw new Exception("Component text has no layout width");
     }
 
@@ -171,6 +171,12 @@ internal static partial class Program
         ComponentPumpUntil(() => window.StatusText == LocalizationService.Get("UxPlayDownloadFindingMirror"));
         currentProgress.Report(new(0, null, 0, UpdateDownloadPhase.ThroughputTest));
         ComponentPumpUntil(() => window.StatusText == LocalizationService.Get("UxPlayDownloadTestingMirror"));
+        currentProgress.Report(new(2_000_000, null, 1_000_000));
+        ComponentPumpUntil(() => window.StatusText == LocalizationService.Get("DownloadProgressUnknownSize"));
+        if (!window.IsIndeterminate || window.DetailText.Contains(" / "))
+            throw new Exception("Unknown-size downloads must not show a fabricated total.");
+        window.UpdateLayout();
+        SaveWindowRender(window, Path.Combine(output, "uxplay-unknown-size.png"));
         currentProgress.Report(new(500, 1000, 50));
         ComponentPumpUntil(() => window.Percentage == 50);
         oldProgress!.Report(new(999, 1000, 50));

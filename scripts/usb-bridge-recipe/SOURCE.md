@@ -3,11 +3,15 @@ at commit 08a2114b3241b72b16fa84edaa0e48734c58548f.
 
 This recipe packages this repository's tools/usb_touch_bridge.py,
 tools/ddi_support.py, tools/mdns_discovery.py, tools/bridge_runtime_check.py
-and tools/iostouch. The tracked mDNS adapter must be included; editing an
+and tools/iostouch, together with the device-management, paired-discovery,
+file-service and signing helpers explicitly staged by UsbBridgeBuildSource.ps1.
+The tracked mDNS adapter must be included; editing an
 installed pymobiledevice3 copy does not repair the packaged bridge.
 It produces the schema 1 PyInstaller onedir runtime consumed by iPhoneMirror.
-Upstream main now builds a different Rust backend (schema 2); updating this recipe
-requires validating the application protocol and runtime integrity checks together.
+This integration targets the maintained Python implementation on iUsbBridge main.
+The Rust backend belongs on the separate codex/rust-backend branch and uses a
+different runtime schema; do not substitute it for this recipe. Updating the
+recipe requires validating the application protocol and runtime integrity checks together.
 
 Build through `New-UsbBridgeBuildSource` in `scripts/UsbBridgeBuildSource.ps1`.
 The staging step also verifies and copies the repository's pinned x64

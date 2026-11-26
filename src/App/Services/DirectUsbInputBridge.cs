@@ -80,7 +80,8 @@ public sealed partial class DirectUsbInputBridge : IAsyncDisposable
         string? udid = null,
         int rateHz = 120,
         bool wireless = false,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        (uint Width, uint Height) previewSize = default)
     {
         if (string.IsNullOrWhiteSpace(udid))
             throw new ArgumentException("Bridge transport requires an explicit Apple UDID.", nameof(udid));
@@ -100,6 +101,7 @@ public sealed partial class DirectUsbInputBridge : IAsyncDisposable
             Interlocked.Exchange(ref _terminalEventReceived, 0);
             AuthMode = null;
             SupportsNativeKeyboardVisibility = false;
+            SupportsTouchDisplayPreview = false;
             IsReady = false;
             GateOpen = false;
             _lastStandardError = null;
@@ -174,6 +176,12 @@ public sealed partial class DirectUsbInputBridge : IAsyncDisposable
             psi.ArgumentList.Add(rateHz.ToString(System.Globalization.CultureInfo.InvariantCulture));
             psi.ArgumentList.Add("--udid");
             psi.ArgumentList.Add(udid);
+            if (previewSize is { Width: > 0, Height: > 0 })
+            {
+                psi.ArgumentList.Add("--preview-size");
+                psi.ArgumentList.Add(previewSize.Width.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                psi.ArgumentList.Add(previewSize.Height.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            }
             if (GetPersonalizedDdiDirectory() is { } ddiDirectory)
             {
                 // Prefer the verified bundled Personalized DDI; an environment
@@ -370,6 +378,7 @@ public sealed partial class DirectUsbInputBridge : IAsyncDisposable
 
     private async Task StopCoreAsync()
     {
+        var gracefulExit = TimeSpan.FromSeconds(AuthMode == "mediastream" ? 12 : 8);
         Interlocked.Exchange(ref _stopping, 1);
         _readySignal?.TrySetCanceled();
         IsReady = false;
@@ -389,8 +398,7 @@ public sealed partial class DirectUsbInputBridge : IAsyncDisposable
         {
             try
             {
-                using var gracePeriod = new CancellationTokenSource(
-                    TimeSpan.FromSeconds(8));
+                using var gracePeriod = new CancellationTokenSource(gracefulExit);
                 await _process.WaitForExitAsync(gracePeriod.Token)
                     .ConfigureAwait(false);
             }
@@ -400,7 +408,7 @@ public sealed partial class DirectUsbInputBridge : IAsyncDisposable
         // A launcher exit does not prove its interpreter released USB. The
         // job includes every descendant, assigned before the first instruction.
         if (_ownedProcess is { } ownedProcess)
-            await ownedProcess.RetireAsync(TimeSpan.FromSeconds(8) - graceTimer.Elapsed)
+            await ownedProcess.RetireAsync(gracefulExit - graceTimer.Elapsed)
                 .ConfigureAwait(false);
         var reader = _readerTask;
         var errorDrain = _errorDrainTask;
@@ -550,6 +558,8 @@ public sealed partial class DirectUsbInputBridge : IAsyncDisposable
                     SupportsAutomationClipboard = root.TryGetProperty("capabilities", out var caps) &&
                         caps.ValueKind == JsonValueKind.Array && caps.EnumerateArray().Any(c =>
                             c.ValueKind == JsonValueKind.String && c.GetString() == "iphoneMirror.clipboard.rpc.v1");
+                    SupportsTouchDisplayPreview = caps.ValueKind == JsonValueKind.Array && caps.EnumerateArray().Any(c =>
+                        c.ValueKind == JsonValueKind.String && c.GetString() == "iphoneMirror.touch_display_preview.v1");
                     Udid = readyUdid;
                     SupportsDeviceHub = root.TryGetProperty("capabilities", out var hubCaps) &&
                         hubCaps.ValueKind == JsonValueKind.Array && hubCaps.EnumerateArray().Any(c =>

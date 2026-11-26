@@ -23,6 +23,15 @@ internal static class DriverFailureTests
         foreach (var kind in Enum.GetValues<DriverOperationKind>())
             Check(!DriverOperationSafety.IsReconnectComplete(Healthy with { ProblemCode = problem }, kind), "unhealthy reconnect");
         Check(DriverOperationSafety.IsReconnectComplete(Healthy, DriverOperationKind.Install), "healthy install");
+        var readyStack = new LibUsbStackStatus(true, true, true, "1.2.6.0", "");
+        Check(DriverOperationSafety.IsFilterReady(Healthy, readyStack), "working capture filter");
+        Check(!DriverOperationSafety.IsFilterReady(Healthy, readyStack with { ServiceRunning = false }), "stopped filter service");
+        Check(!DriverOperationSafety.IsFilterReady(Healthy, readyStack with { FilesMatch = false }), "changed filter files");
+        var wrongParent = Healthy with { Service = "libusb0" };
+        Check(!DriverOperationSafety.IsFilterReady(wrongParent, readyStack), "non-composite parent");
+        Check(!DriverOperationSafety.CanApplyCaptureFilter(wrongParent, DriverOperationKind.Install), "install on non-composite parent");
+        Check(!DriverOperationSafety.CanApplyCaptureFilter(Healthy with { ProblemCode = 10 }, DriverOperationKind.Install), "install on unhealthy parent");
+        Check(DriverOperationSafety.CanApplyCaptureFilter(Healthy with { ProblemCode = 10 }, DriverOperationKind.Repair), "repair a failing registered filter");
         Check(!DriverOperationSafety.IsReconnectComplete(Healthy, DriverOperationKind.Uninstall), "filter remains");
         Check(DriverOperationSafety.IsReconnectComplete(Healthy with { HasLibUsb0Filter = false }, DriverOperationKind.Uninstall), "removed filter");
         Check(!DriverOperationSafety.IsReconnectComplete(Healthy with { DriverInf = "oem42.inf" }, DriverOperationKind.ParentRepair, Composite), "binding mismatch");

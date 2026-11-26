@@ -55,6 +55,14 @@ internal sealed partial class DeviceHubPanel : UserControl, IDisposable
         _iconCacheDirectory = iconCacheDirectory ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "iPhoneMirror", "AppIcons");
         InitializeComponent();
+        if (!developerMode)
+        {
+            HubSurface.SetResourceReference(StyleProperty, "WorkspaceSidebarSurface");
+            DeviceSummary.Margin = new Thickness(0, 4, 0, 6);
+            DockPanel.SetDock(ConnectionText, Dock.Left);
+            ConnectionText.Margin = new Thickness(0);
+        }
+        else DeviceIdentitySummary.Visibility = Visibility.Visible;
         PageTabs.Columns = developerMode ? 6 : 2;
         foreach (RadioButton tab in PageTabs.Children)
             tab.Visibility = developerMode || tab.Tag?.ToString() is "1" or "3" ? Visibility.Visible : Visibility.Collapsed;
@@ -204,9 +212,13 @@ internal sealed partial class DeviceHubPanel : UserControl, IDisposable
     private void UpdateConnection()
     {
         if (!_initialized) return;
-        DeviceNameText.Text = _device?.DisplayName ?? L("PanelNoDevice");
-        DeviceDetailText.Text = _device is null ? L("PanelFollowsSelection") : $"{_device.ModelDisplay} · {_device.OsDisplay}";
+        if (_developerMode)
+        {
+            DeviceNameText.Text = _device?.DisplayName ?? L("PanelNoDevice");
+            DeviceDetailText.Text = _device is null ? "" : $"{_device.ModelDisplay} · {_device.OsDisplay}";
+        }
         ConnectionText.Text = _ready ? L("PanelConnected") : _connecting ? L("PanelConnecting") : _hasConnected ? L("PanelReconnecting") : "";
+        ConnectionText.Visibility = ConnectionText.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         var usable = CanConnect(_device);
         PromptTitle.Text = _device is null ? L("PanelNoDevice") :
             _device.IsMediaCast ? L("PanelPairedDevice") : !usable ? L("PanelOffline") :
@@ -217,6 +229,10 @@ internal sealed partial class DeviceHubPanel : UserControl, IDisposable
         PrepareButton.Visibility = usable && !_ready && !_connecting ? Visibility.Visible : Visibility.Collapsed;
         PrepareButton.IsEnabled = !_busy;
         var showContent = _ready || _hasConnected;
+        HubSurface.VerticalAlignment = _developerMode && !showContent ? VerticalAlignment.Top : VerticalAlignment.Stretch;
+        DeviceSummary.Visibility = _device is not null && (_developerMode || ConnectionText.Visibility == Visibility.Visible)
+            ? Visibility.Visible : Visibility.Collapsed;
+        PageTabs.Visibility = showContent ? Visibility.Visible : Visibility.Collapsed;
         Pages.Visibility = showContent ? Visibility.Visible : Visibility.Collapsed;
         ConnectionPrompt.Visibility = showContent ? Visibility.Collapsed : Visibility.Visible;
         Pages.IsEnabled = _ready && (!_busy || _quietOperation);
@@ -396,7 +412,7 @@ internal sealed partial class DeviceHubPanel : UserControl, IDisposable
 
     private async Task ExecuteActionAsync(Operation op, string action, HubRow? row = null)
     {
-        if (!_developerMode && action is not ("prepare" or "app-launch" or "app-metal-hud-restart" or "app-remove" or
+        if (!_developerMode && action is not ("prepare" or "app-launch" or "app-close" or "app-metal-hud-restart" or "app-remove" or
             "file-parent" or "file-browse" or "file-next" or "file-download" or "file-import" or "file-delete" or "file-export")) return;
         switch (action)
         {
@@ -406,6 +422,7 @@ internal sealed partial class DeviceHubPanel : UserControl, IDisposable
             case "tunnel": RenderDetails(DiagnosticRows, await op.Call("tunnel_info")); break;
             case "app-install": await InstallAsync(op, false); break;
             case "app-launch": await LaunchSelectedAsync(op, row); break;
+            case "app-close": await CloseSelectedAppAsync(op, row); break;
             case "app-metal-hud-restart": await RestartWithMetalHudAsync(op, row); break;
             case "app-remove": await RemoveAppAsync(op, row); break;
             case "profile-install": await InstallAsync(op, true); break;
@@ -431,10 +448,12 @@ internal sealed partial class DeviceHubPanel : UserControl, IDisposable
     private void UpdateCommands()
     {
         if (!_initialized) return;
+        HeaderRefresh.Visibility = _ready || _hasConnected ? Visibility.Visible : Visibility.Collapsed;
         HeaderRefresh.IsEnabled = _ready && (!_busy || _quietOperation);
         HeaderMore.IsEnabled = !_busy || _quietOperation;
-        HeaderMore.Visibility = _developerMode && (_page == 1 && Option(AppFilter) != "processes" || _page == 2 || _page == 4 && LogText.Text.Length > 0) ||
-            _page == 3 && Option(FileRoot) == "crashes" ||
+        HeaderMore.Visibility = (_ready || _hasConnected) &&
+            (_developerMode && (_page == 1 && Option(AppFilter) != "processes" || _page == 2 || _page == 4 && LogText.Text.Length > 0) ||
+            _page == 3 && Option(FileRoot) == "crashes") ||
             CanReconnectFromHeader ? Visibility.Visible : Visibility.Collapsed;
         FileNext.IsEnabled = _ready && !_busy && _fileNext.HasValue;
         FileNext.Visibility = _fileNext.HasValue ? Visibility.Visible : Visibility.Collapsed;

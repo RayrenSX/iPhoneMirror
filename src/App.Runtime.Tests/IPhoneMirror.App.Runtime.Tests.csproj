@@ -31,6 +31,6 @@
   </ItemGroup>
 
   <Target Name="RunSmokeTests" BeforeTargets="VSTest" DependsOnTargets="Build">
-    <Exec Command="dotnet run --no-restore --no-build --project &quot;$(MSBuildProjectFullPath)&quot; --configuration $(Configuration)" />
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)..\..\scripts\Invoke-NativeToolWithSanitizedEnvironment.ps1&quot; -ManagedTestAssembly &quot;$(TargetPath)&quot;" />
   </Target>
 </Project>

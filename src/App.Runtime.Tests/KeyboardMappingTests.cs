@@ -77,6 +77,14 @@ internal static partial class Program
         var initial = new UpdateSettingsStore(Path.Combine(output, $"missing-{Guid.NewGuid():N}.json")).Load();
         MappingAssert(!initial.KeyboardMapping.Enabled && initial.KeyboardMapping.Mappings.Count == 0,
             "Fresh installs must have no default bindings and no capture.");
+        var enabledEmpty = JsonSerializer.Deserialize<KeyboardMappingSettings>(
+            "{\"Enabled\":true,\"Mappings\":[]}")!;
+        MappingAssert(enabledEmpty.Enabled && !enabledEmpty.HasActiveMappings,
+            "An enabled, empty configuration must give direct input its keyboard ownership.");
+        enabledEmpty.Mappings.Add(MappingEntry() with { Enabled = false });
+        MappingAssert(!enabledEmpty.HasActiveMappings, "Disabled bindings must not claim keyboard ownership.");
+        enabledEmpty.Mappings[0] = MappingEntry();
+        MappingAssert(enabledEmpty.HasActiveMappings, "The first enabled binding must activate keyboard mapping.");
         initial.Language = "zh-HK";
         initial.KeyboardMapping = new() { Enabled = true, SuppressOriginalKey = true,
             Mappings = Enum.GetValues<MappedTouchAction>().Select((a, i) => MappingEntry(a) with
@@ -238,7 +246,7 @@ internal static partial class Program
                 control.Router.Begin(phone.Udid, mode);
                 AwaitMapping(TestFivePointMappingAsync(vm, packets, mode.ToString()));
                 foreach (var dimensions in new[] { (1170u, 2532u), (1668u, 2388u), (2532u, 1170u), (2388u, 1668u) })
-                foreach (var turn in new[] { 0, 1, 3 })
+                foreach (var turn in new[] { 0, 1, 2, 3 })
                 {
                     packets.SetLength(0);
                     var route = vm.CaptureMappingRoute(() => true, (x, y) =>
@@ -254,8 +262,8 @@ internal static partial class Program
                     // rotation followed by per-orientation direction mapping.
                     (double X, double Y) expected = (dimensions.Item1 < dimensions.Item2, turn) switch
                     {
-                        (true, 0) => (.2, .7), (true, 1) => (.8, .3), (true, 3) => (.2, .7),
-                        (false, 0) => (.3, .2), (false, 1) => (.3, .2), _ => (.7, .8),
+                        (true, 0 or 1) => (.2, .7), (true, 2 or 3) => (.8, .3),
+                        (false, 0 or 3) => (.3, .2), _ => (.7, .8),
                     };
                     var point = frames[0].GetProperty("points")[0];
                     MappingAssert(Math.Abs(point.GetProperty("normalizedX").GetDouble() - expected.X) < 1e-6 &&

@@ -1,0 +1,86 @@
+<chrome:RoundedWindow x:Class="IPhoneMirror.App.Windows.PreviewIpaInstallWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:chrome="clr-namespace:IPhoneMirror.UI.Controls"
+    xmlns:animations="clr-namespace:IPhoneMirror.UI.Animations"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    Title="{DynamicResource IpaInstallTitle}" Width="570" SizeToContent="Height" MaxHeight="830"
+    WindowStartupLocation="CenterOwner" ResizeMode="NoResize" ShowInTaskbar="False"
+    Foreground="{DynamicResource TextBrush}" WindowStyle="None" AllowsTransparency="True" Background="Transparent">
+    <Grid Style="{StaticResource SubWindowPageRoot}" animations:PageTransition.IsEnabled="True">
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+        <Grid Style="{StaticResource SubWindowHeader}" animations:WindowDragBehavior.IsEnabled="True">
+            <TextBlock Text="{DynamicResource IpaInstallTitle}" Style="{StaticResource SubWindowTitle}" Margin="0,0,48,0"/>
+            <Button x:Name="HeaderClose" Style="{StaticResource SubWindowCloseButton}" Click="CloseClick" ToolTip="{DynamicResource Close}"
+                    AutomationProperties.Name="{DynamicResource Close}">
+                <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Dismiss20" FontSize="18"/>
+            </Button>
+        </Grid>
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" MaxHeight="640" Margin="0,14,0,0">
+            <StackPanel>
+                <TextBlock x:Name="TargetText" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                <TextBlock x:Name="FilesText" Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" Margin="0,6,0,12"/>
+                <StackPanel x:Name="OptionsPanel">
+                    <TextBlock Text="{DynamicResource IpaSigningMode}" FontWeight="SemiBold" Margin="0,0,0,5"/>
+                    <ComboBox x:Name="SigningMode" SelectedIndex="0" SelectionChanged="ModeChanged" AutomationProperties.Name="{DynamicResource IpaSigningMode}">
+                        <ComboBoxItem Content="{DynamicResource IpaModeExisting}" Tag="existing"/>
+                        <ComboBoxItem Content="{DynamicResource IpaModeAppleId}" Tag="apple_id"/>
+                        <ComboBoxItem Content="{DynamicResource IpaModeP12}" Tag="p12"/>
+                        <ComboBoxItem Content="{DynamicResource IpaModePem}" Tag="pem"/>
+                    </ComboBox>
+                    <TextBlock x:Name="ModeHint" TextWrapping="Wrap" Foreground="{DynamicResource MutedTextBrush}" Margin="0,7,0,7"/>
+                    <StackPanel x:Name="ApplePanel" Visibility="Collapsed">
+                        <TextBlock Text="{DynamicResource IpaAppleId}" Margin="0,8,0,4"/>
+                        <TextBox x:Name="AppleId" AutomationProperties.Name="{DynamicResource IpaAppleId}"/>
+                        <TextBlock Text="{DynamicResource IpaApplePassword}" Margin="0,8,0,4"/>
+                        <PasswordBox x:Name="ApplePassword" AutomationProperties.Name="{DynamicResource IpaApplePassword}"/>
+                        <TextBlock Text="{DynamicResource IpaAnisetteServer}" Margin="0,8,0,4"/>
+                        <TextBox x:Name="AnisetteServer" AutomationProperties.Name="{DynamicResource IpaAnisetteServer}"/>
+                        <TextBlock Text="{DynamicResource IpaApplePrivacy}" Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" Margin="0,7,0,0"/>
+                        <Button x:Name="LoginButton" Content="{DynamicResource IpaLogin}" HorizontalAlignment="Left" Margin="0,10,0,0" Click="LoginClick"/>
+                        <StackPanel x:Name="CodePanel" Visibility="Collapsed" Margin="0,8,0,0">
+                            <TextBlock Text="{DynamicResource IpaVerificationCode}" Margin="0,0,0,4"/>
+                            <DockPanel>
+                                <Button x:Name="VerifyButton" DockPanel.Dock="Right" Content="{DynamicResource IpaVerify}" Margin="8,0,0,0" Click="VerifyClick"/>
+                                <TextBox x:Name="VerificationCode" MaxLength="6" AutomationProperties.Name="{DynamicResource IpaVerificationCode}"/>
+                            </DockPanel>
+                        </StackPanel>
+                    </StackPanel>
+                    <StackPanel x:Name="CertificatePanel" Visibility="Collapsed">
+                        <TextBlock Text="{DynamicResource IpaCertificate}" Margin="0,8,0,4"/>
+                        <DockPanel>
+                            <Button Content="{DynamicResource DeviceHubBrowse}" DockPanel.Dock="Right" Margin="8,0,0,0" Click="PickCertificateClick"/>
+                            <TextBox x:Name="CertificatePath" AutomationProperties.Name="{DynamicResource IpaCertificate}"/>
+                        </DockPanel>
+                        <StackPanel x:Name="PrivateKeyPanel" Visibility="Collapsed">
+                            <TextBlock Text="{DynamicResource IpaPrivateKey}" Margin="0,8,0,4"/>
+                            <DockPanel>
+                                <Button Content="{DynamicResource DeviceHubBrowse}" DockPanel.Dock="Right" Margin="8,0,0,0" Click="PickPrivateKeyClick"/>
+                                <TextBox x:Name="PrivateKeyPath" AutomationProperties.Name="{DynamicResource IpaPrivateKey}"/>
+                            </DockPanel>
+                        </StackPanel>
+                        <TextBlock Text="{DynamicResource IpaCertificatePassword}" Margin="0,8,0,4"/>
+                        <PasswordBox x:Name="CertificatePassword" AutomationProperties.Name="{DynamicResource IpaCertificatePassword}"/>
+                        <TextBlock Text="{DynamicResource IpaProfiles}" Margin="0,8,0,4"/>
+                        <DockPanel>
+                            <Button Content="{DynamicResource DeviceHubBrowse}" DockPanel.Dock="Right" Margin="8,0,0,0" Click="PickProfilesClick"/>
+                            <TextBox x:Name="ProfilePaths" IsReadOnly="True" TextWrapping="Wrap" AutomationProperties.Name="{DynamicResource IpaProfiles}"/>
+                        </DockPanel>
+                    </StackPanel>
+                    <StackPanel x:Name="SigningOptions" Visibility="Collapsed">
+                        <TextBlock Text="{DynamicResource IpaBundleId}" Margin="0,10,0,4"/>
+                        <TextBox x:Name="BundleId" AutomationProperties.Name="{DynamicResource IpaBundleId}"/>
+                        <CheckBox x:Name="RemoveExtensions" Content="{DynamicResource IpaRemoveExtensions}" Margin="0,10,0,0"/>
+                    </StackPanel>
+                </StackPanel>
+                <TextBlock x:Name="StatusText" TextWrapping="Wrap" Margin="0,14,0,6" AutomationProperties.LiveSetting="Polite"/>
+                <ProgressBar x:Name="Progress" Height="5" Visibility="Collapsed" IsIndeterminate="True" Margin="0,6,0,4"/>
+            </StackPanel>
+        </ScrollViewer>
+        <WrapPanel Grid.Row="2" Style="{StaticResource DialogActions}" Margin="0,14,0,0">
+            <Button x:Name="CloseButton" Content="{DynamicResource Close}" Click="CloseClick" Margin="{StaticResource DialogActionMargin}"/>
+            <Button x:Name="InstallButton" Content="{DynamicResource IpaInstall}" Click="InstallClick" Margin="{StaticResource DialogActionMargin}"
+                    Style="{StaticResource PrimaryButton}"/>
+        </WrapPanel>
+    </Grid>
+</chrome:RoundedWindow>

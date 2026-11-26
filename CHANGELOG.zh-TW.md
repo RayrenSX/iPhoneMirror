@@ -2,9 +2,26 @@
 
 iPhoneMirror 的重要變更均記錄於此。已發布版本遵循[語意化版本](https://semver.org/)規範。
 
-## [Unreleased]
+## [1.8.5-pre7] - 2026-11-26
 
-目前尚無未發布的變更紀錄。
+本機版本是 iPhoneMirror 1.8.5 正式發布前的最後一個預覽版。
+
+### 新增
+
+- 新增已配對無線裝置探索、裝置身分合併，以及 iOS／iPadOS 27+ 僅提供影像的實驗性 CoreDevice 鏡像。
+- 新增本機畫面文字辨識、預覽檔案傳送及 IPA 簽署／安裝流程。
+- 符合條件的 USB 鏡像可將聲音留在手機。完整設定精靈新增可略過的支持作者頁面。
+- 擴充可存取的檔案總管對應、獨立視窗上次配置記憶、預設與自訂位置，以及視窗動作快速鍵。
+
+### 變更
+
+- USB 僅保留建議的原生 AirPlay 與相容示範模式；移除舊固定尺寸 C 模式，並將其已儲存選擇移轉為 AirPlay。
+- 畫面設定改為自動儲存；色彩調整、接收端設定等操作仍保留各自的儲存或套用步驟。
+- 重寫使用指南，依本機實作更新維護中文件、SDK／MCP 說明及歷史索引；實機驗證範圍仍以各記錄為準。
+
+### 修復
+
+- 修復對話框圓角的背景填色，並保留透明覆蓋視窗的背景效果。
 
 ## [1.8.5-pre6] - 2026-11-17
 
@@ -1126,7 +1143,7 @@ Apple signing, DDI installation and control on target devices, and full installa
 - 首次驅動程式安裝流程仍需更廣泛的全新電腦驗證。
 - Apple 使用私人協定，可能在未來 iOS 版本中變更。
 
-[Unreleased]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.8.4-test4...HEAD
+[1.8.5-pre7]: docs/releases/v1.8.5-pre7.md
 [1.8.4-test4]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.8.3...v1.8.4-test4
 [1.8.3]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.8.2...v1.8.3
 [1.8.2]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.8.1...v1.8.2

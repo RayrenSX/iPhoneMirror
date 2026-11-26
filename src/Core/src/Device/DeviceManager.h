@@ -2,6 +2,7 @@
 
 #include "iPhoneMirror/CoreApi.h"
 #include "Protocol/Plist.h"
+#include "Device/AppleUsbDiscovery.h"
 
 #include <cstdint>
 #include <mutex>
@@ -30,6 +31,13 @@ struct DeviceRecord {
 };
 
 namespace detail {
+
+// Modern usbmux UDIDs use an 8-16 split. Windows may report the same
+// serial without that separator. Reject PnP-generated location IDs.
+[[nodiscard]] std::string canonical_device_udid(std::string_view serial);
+void append_windows_usb_devices(std::vector<DeviceRecord>& records,
+    const std::vector<PhysicalAppleDevice>& physical,
+    const std::unordered_map<std::string, DeviceRecord>& metadata_cache);
 
 // Lockdown returns these as either strings (names/hex/numeric codes) or integers.
 // Keep raw tokens: color codes are not portable between product generations.

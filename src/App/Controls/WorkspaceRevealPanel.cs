@@ -10,9 +10,12 @@ namespace IPhoneMirror.App.Controls;
 /// </summary>
 public sealed class WorkspaceRevealPanel : Grid
 {
+    public const double DefaultLeftContentWidth = 300;
+    public const double DefaultRightContentWidth = 362;
+
     public static readonly DependencyProperty ContentWidthProperty =
         DependencyProperty.Register(nameof(ContentWidth), typeof(double),
-            typeof(WorkspaceRevealPanel), new FrameworkPropertyMetadata(300d,
+            typeof(WorkspaceRevealPanel), new FrameworkPropertyMetadata(DefaultRightContentWidth,
                 FrameworkPropertyMetadataOptions.AffectsMeasure),
             value => value is double width && double.IsFinite(width) && width > 0);
 

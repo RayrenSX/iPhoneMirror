@@ -94,6 +94,15 @@ internal sealed class WirelessReceiverController(
                     StartError = null;
                     _automaticRestartBlocked = false;
                 }
+                else if (!_lastReceiverReachedReady && _lastReceiverStartUtc != default &&
+                    DateTime.UtcNow - _lastReceiverStartUtc >= StartupGracePeriod)
+                {
+                    StartError = LocalizationService.Get("WirelessStartupTimedOut");
+                    _automaticRestartBlocked = true;
+                    await Task.Run(core.StopWirelessReceiver);
+                    Running = Ready = false;
+                    return new(false, StartError, true);
+                }
                 return new(true, null, false);
             }
             if (automaticStart && _automaticRestartBlocked)
@@ -196,7 +205,8 @@ internal sealed class WirelessReceiverController(
                 WirelessReceiverConfiguration.GetBackendOption(Backend).Label);
         if (!Running && !string.IsNullOrWhiteSpace(StartError))
             return LocalizationService.Format("StartFailedFormat", StartError);
-        if (!Running || !Ready) return LocalizationService.Get("WirelessStarting");
+        if (!Running) return LocalizationService.Get("WirelessNotStarted");
+        if (!Ready) return LocalizationService.Get("WirelessStarting");
         return LocalizationService.Format("WirelessRunningWithBackendFormat",
             WirelessReceiverConfiguration.GetBackendOption(AppliedBackend).Label,
             AppliedReceiverName);

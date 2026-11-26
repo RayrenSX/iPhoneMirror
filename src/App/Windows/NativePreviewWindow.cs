@@ -57,6 +57,13 @@ internal sealed class NativePreviewWindow : IDisposable
     private const int WmSysKeyUp = 0x0105;
     private const int WmSysCommand = 0x0112;
     private const int WmDpiChanged = 0x02E0;
+    private const int WmDisplayChange = 0x007E;
+    private const int WmSettingChange = 0x001A;
+    private const int WmShowWindow = 0x0018;
+    private const int WmSize = 0x0005;
+    private const int WmEnterSizeMove = 0x0231;
+    private const int WmExitSizeMove = 0x0232;
+    private const int SetWorkArea = 0x002F;
     private const int WmWindowPosChanged = 0x0047;
     private const int ScSize = 0xF000;
     private const int ScMove = 0xF010;
@@ -72,6 +79,7 @@ internal sealed class NativePreviewWindow : IDisposable
     private const int VkControl = 0x11;
     private const int VkMenu = 0x12;
     private const int HtClient = 1;
+    private const int HtTransparent = -1;
     private const int HtCaption = 2;
     private const int HtLeft = 10;
     private const int HtRight = 11;
@@ -84,6 +92,9 @@ internal sealed class NativePreviewWindow : IDisposable
     private const int GwlStyle = -16;
     private const int GwlExStyle = -20;
     private const int WsExLayered = 0x00080000;
+    private const int WsExTopmost = 0x00000008;
+    private const int WsExTransparent = 0x00000020;
+    private const int WsExNoActivate = 0x08000000;
     private const uint LwaAlpha = 0x00000002;
     private const int WsPopup = unchecked((int)0x80000000);
     private const int WsCaption = 0x00C00000;
@@ -98,6 +109,7 @@ internal sealed class NativePreviewWindow : IDisposable
 
     private const int SwHide = 0;
     private const int SwShow = 5;
+    private const int SwShowNoActivate = 8;
     private const int SwRestore = 9;
     private const uint SwpNoSize = 0x0001;
     private const uint SwpNoMove = 0x0002;
@@ -119,11 +131,21 @@ internal sealed class NativePreviewWindow : IDisposable
 
     private readonly HwndSource _source;
     private readonly AspectRatioWindowController _aspectController;
+    private nint _startupMonitor;
+    private bool _usesAutomaticBounds;
+    private bool _isMovingOrSizing;
+    private bool _userArrangedWindow;
+    private bool _initialSourceDimensionsKnown;
+    private bool _displayRecoveryPending;
+    private bool _fullscreenDisplayChanged;
+    private DispatcherOperation? _displayRecovery;
     private Func<nint, bool> _attachPreview;
     private Action<nint> _detachPreview;
     private Func<nint, bool> _refreshPreview;
     private readonly Func<ulong, nint, double, double, bool> _setCornerProfile;
     private readonly ContextMenu _contextMenu;
+    private MenuItem? _copyScreenTextItem;
+    private Action<string[]>? _filesDropped;
     private readonly MenuItem _fullScreenItem;
     private readonly MenuItem _windowMenuItem;
     private readonly MenuItem _displayMenuItem;
@@ -173,7 +195,13 @@ internal sealed class NativePreviewWindow : IDisposable
     private bool _disposed;
     private bool _closeQueued;
     private bool _isTopMost;
+    internal bool IsClickThrough { get; private set; }
+    internal Func<bool, bool>? ClickThroughRequested { get; set; }
+    internal event Action<bool>? ClickThroughChanged;
+    private const double ClickThroughOpacityLimit = 0.8;
+    private bool CanEnableClickThrough => !_isFullScreen && _windowOpacity < ClickThroughOpacityLimit;
     private bool _isFixed;
+    private bool _controlInputSuspended;
     private bool _freezeFixedBounds;
     private bool _fitFirstFixedSource;
     private bool _cornersEnabled = true;
@@ -279,9 +307,10 @@ internal sealed class NativePreviewWindow : IDisposable
 
     internal bool IsFullScreen => _isFullScreen;
     private bool UsesWindowPointerControl => IsUsbControlEnabledForWindow || UsesBluetoothWindowMouse;
-    // Position-based control shares the drag surface. Unfixing gives it back to Windows,
-    // including keyboard input admitted through the global hook.
-    internal bool AllowsControlInput => !UsesWindowPointerControl || _isFixed || _isFullScreen;
+    // Explicit unfixing pauses the current window's position-based control.
+    // New windows can immediately use an already connected control route.
+    internal bool AllowsControlInput => !IsClickThrough && (!UsesWindowPointerControl ||
+        (!_isMovingOrSizing && (!_controlInputSuspended || _isFullScreen)));
     internal event Action<bool>? FullScreenChanged;
 
     private NativePreviewWindow(uint sourceWidth, uint sourceHeight, string title,
@@ -339,10 +368,11 @@ internal sealed class NativePreviewWindow : IDisposable
         _fullScreenItem = new MenuItem { Style = itemStyle };
         _fullScreenItem.Click += (_, _) => ToggleFullScreen();
         _windowMenuItem = new MenuItem { Style = submenuStyle };
-        _topMostItem = new MenuItem { Style = itemStyle };
+        _topMostItem = new MenuItem { Style = itemStyle, IsCheckable = true };
         _topMostItem.Click += (_, _) => ToggleTopMost();
-        _fixedItem = new MenuItem { Style = itemStyle };
-        _fixedItem.Click += (_, _) => ToggleFixedWindow();
+        _fixedItem = new MenuItem { Style = itemStyle, IsCheckable = true };
+        // The menu locks the bounds. The shortcut can also release automatic control.
+        _fixedItem.Click += (_, _) => SetFixedWindow(!_freezeFixedBounds);
         _styleItem = new MenuItem { Style = itemStyle };
         _styleItem.Click += (_, _) => ShowStyleSettings();
         if (_requestReverseControl is not null)
@@ -471,7 +501,8 @@ internal sealed class NativePreviewWindow : IDisposable
 
         _aspectController = new AspectRatioWindowController(_source,
             sourceWidth, sourceHeight,
-            () => !_disposed && !_isFullScreen && (!_freezeFixedBounds || _fitFirstFixedSource) && _handle != 0 &&
+            () => !_disposed && !_isFullScreen &&
+                (!_freezeFixedBounds || _fitFirstFixedSource) && _handle != 0 &&
                 !IsIconic(_handle) && !IsZoomed(_handle),
             minWidthDips: 96, minHeightDips: 96);
         // Install the instance hook only after every callback dependency is
@@ -495,7 +526,22 @@ internal sealed class NativePreviewWindow : IDisposable
     }
 
     internal event EventHandler? Closed;
+
+    internal void SetPreviewTools(Action selectScreenText,
+        Action<string[]>? dropFiles = null)
+    {
+        _filesDropped = dropFiles;
+        if (dropFiles is not null) NativeFileDrop.DragAcceptFiles(_handle, true);
+        _copyScreenTextItem = new MenuItem
+        {
+            Style = (Style)Application.Current.FindResource("DeviceMenuItemStyle"),
+        };
+        _copyScreenTextItem.Click += (_, _) => selectScreenText();
+        _contextMenu.Items.Insert(3, _copyScreenTextItem);
+        UpdateContextMenuLabels();
+    }
     internal IndependentWindowLayout? ClosedLayout { get; private set; }
+    internal Func<nint, PreviewWindowsHotkeyPolicy?>? WindowsHotkeysFor { get; set; }
     internal event Action<bool>? ActivationChanged;
     internal ulong SessionHandle => _sessionHandle;
     internal nint Handle => _handle;
@@ -517,14 +563,10 @@ internal sealed class NativePreviewWindow : IDisposable
             _attached = false;
         }
 
-        _sessionHandle = sessionHandle;
         _hasRendererDimensions = false;
         _ = RemovePropW(_handle, PendingPreviewGeometry);
         _ = SetPropW(_handle, AppliedPreviewGeometry, (nint)1);
-        _attachPreview = hwnd => NativeCore.AttachDevicePreview(sessionHandle, hwnd);
-        _detachPreview = hwnd => NativeCore.DetachDevicePreview(sessionHandle, hwnd);
-        _refreshPreview = hwnd => NativeCore.AttachDevicePreview(sessionHandle, hwnd);
-        if (!_attachPreview(_handle))
+        if (!NativeCore.AttachDevicePreview(sessionHandle, _handle))
         {
             Log("independent_window_rebind_failed",
                 ("mode", WindowMode), ("old_handle", AppLog.Handle(previousHandle)),
@@ -532,6 +574,10 @@ internal sealed class NativePreviewWindow : IDisposable
             return false;
         }
 
+        _sessionHandle = sessionHandle;
+        _attachPreview = hwnd => NativeCore.AttachDevicePreview(sessionHandle, hwnd);
+        _detachPreview = hwnd => NativeCore.DetachDevicePreview(sessionHandle, hwnd);
+        _refreshPreview = _attachPreview;
         _attached = true;
         if (_phoneFrameEnabled && DeviceFrame is { } frame)
             _ = NativeCore.SetDeviceWindowFrameArtwork(sessionHandle, _handle, frame);
@@ -578,7 +624,7 @@ internal sealed class NativePreviewWindow : IDisposable
         Action<nint>? requestUsbControl = null,
         Action<nint>? requestWirelessControl = null,
         Action<NativePreviewWindow>? beforeShow = null,
-        IndependentWindowLayout? layout = null)
+        IndependentWindowLayout? layout = null, nint startupMonitor = 0, bool sourceDimensionsKnown = false)
     {
         window = null;
         NativePreviewWindow? candidate = null;
@@ -603,6 +649,8 @@ internal sealed class NativePreviewWindow : IDisposable
                 return false;
             }
             candidate._attached = true;
+            candidate._startupMonitor = startupMonitor;
+            candidate._initialSourceDimensionsKnown = sourceDimensionsKnown;
             beforeShow?.Invoke(candidate);
             candidate.ShowWithInitialLayout(layout);
             if (Volatile.Read(ref BossKeyHidden) != 0)
@@ -691,17 +739,35 @@ internal sealed class NativePreviewWindow : IDisposable
             ("top_most", _isTopMost));
     }
 
-    private void ObserveNormalBounds()
+    private bool ObserveNormalBounds()
     {
         if (_managedContent is null && !_disposed && !_isFullScreen && _handle != 0 &&
             IsWindowVisible(_handle) && !IsIconic(_handle) && !IsZoomed(_handle) &&
             GetWindowRect(_handle, out var bounds))
+        {
             _lastNormalBounds = bounds;
+            return true;
+        }
+        return false;
+    }
+
+    internal IndependentWindowLayout? GetCurrentLayout() =>
+        ObserveNormalBounds() ? GetNormalLayout() : null;
+
+    private IndependentWindowLayout? GetNormalLayout()
+    {
+        if (_lastNormalBounds is not { } bounds) return null;
+        var layout = new IndependentWindowLayout(bounds.Left, bounds.Top,
+            bounds.Right - bounds.Left, bounds.Bottom - bounds.Top, _freezeFixedBounds);
+        return layout.IsValid ? layout : null;
     }
 
     private bool ApplyInitialLayout(IndependentWindowLayout? layout)
     {
-        if (layout is not { IsValid: true }) return _aspectController.ApplyInitialBounds();
+        if (layout is not { IsValid: true }) layout = new();
+        _usesAutomaticBounds = _managedContent is null && !layout.HasPosition && !layout.HasSize;
+        _aspectController.PlaceAutomaticBounds = _usesAutomaticBounds ? PlaceAutomaticBounds : null;
+        if (_managedContent is null && !layout.HasPosition) MoveHiddenWindowToStartupMonitor();
 
         if (layout.HasPosition && !layout.HasSize)
             _ = SetWindowPos(_handle, 0, layout.X!.Value, layout.Y!.Value, 0, 0,
@@ -713,8 +779,17 @@ internal sealed class NativePreviewWindow : IDisposable
             var height = layout.Height ?? (current.Bottom - current.Top);
             var x = layout.X ?? (current.Left + current.Right - width) / 2;
             var y = layout.Y ?? (current.Top + current.Bottom - height) / 2;
+            if (!layout.HasPosition && TryGetMonitorInfo(MonitorFromWindow(_handle, MonitorDefaultToNearest), out var startupInfo))
+            {
+                var work = ToPixelRect(startupInfo.WorkArea);
+                var preferred = new System.Drawing.Rectangle(x, y, width, height);
+                var positioned = PlaceAutomaticBounds(work, preferred, initial: false);
+                x = positioned.Left;
+                y = positioned.Top;
+            }
             var desired = new WindowRect { Left = x, Top = y, Right = x + width, Bottom = y + height };
-            var monitor = MonitorFromRect(ref desired, MonitorDefaultToNearest);
+            var monitor = layout.HasPosition ? MonitorFromRect(ref desired, MonitorDefaultToNearest) :
+                MonitorFromWindow(_handle, MonitorDefaultToNearest);
             var monitorInfo = new MonitorInfo { Size = (uint)Marshal.SizeOf<MonitorInfo>() };
             if (monitor != 0 && GetMonitorInfoW(monitor, ref monitorInfo))
             {
@@ -742,22 +817,110 @@ internal sealed class NativePreviewWindow : IDisposable
         }
         if (layout.Fixed)
         {
-            _fitFirstFixedSource = !layout.HasSize && _sessionHandle != 0 && !_hasRendererDimensions;
+            _fitFirstFixedSource = !layout.HasSize && _sessionHandle != 0 &&
+                !_hasRendererDimensions && !_initialSourceDimensionsKnown;
             SetFixedWindow(true);
         }
         return applied;
+    }
+
+    internal static nint CaptureStartupMonitor()
+    {
+        var foreground = GetForegroundWindow();
+        if (GetCursorPos(out var pointer) && (foreground == 0 ||
+            GetAncestor(WindowFromPoint(pointer), 3) == GetAncestor(foreground, 3))) // GA_ROOTOWNER
+            return MonitorFromPoint(pointer, MonitorDefaultToNearest);
+        if (foreground != 0) return MonitorFromWindow(foreground, MonitorDefaultToNearest);
+        return 0;
+    }
+
+    private void MoveHiddenWindowToStartupMonitor()
+    {
+        var monitor = _startupMonitor != 0 ? _startupMonitor : CaptureStartupMonitor();
+        if (!TryGetMonitorInfo(monitor, out var info) && !TryGetMonitorInfo(CaptureStartupMonitor(), out info)) return;
+        var work = info.WorkArea;
+        // Put the entire provisional HWND on the destination before querying its DPI.
+        _ = SetWindowPos(_handle, 0, work.Left, work.Top, 1, 1, SwpNoZOrder | SwpNoActivate);
+    }
+
+    private System.Drawing.Rectangle PlaceAutomaticBounds(System.Drawing.Rectangle work,
+        System.Drawing.Rectangle preferred, bool initial)
+    {
+        if (_userArrangedWindow) return preferred;
+        var occupied = new List<System.Drawing.Rectangle>();
+        foreach (var window in OpenWindows)
+            if (!ReferenceEquals(window, this) && window._handle != 0 && !window._isFullScreen &&
+                IsWindowVisible(window._handle) && !IsIconic(window._handle) && GetWindowRect(window._handle, out var bounds))
+            {
+                var other = ToPixelRect(bounds);
+                if (other.IntersectsWith(work)) occupied.Add(other);
+            }
+
+        var dpi = Math.Max(96u, GetDpiForWindow(_handle));
+        var gap = (int)Math.Round(16 * dpi / 96.0);
+        return IndependentWindowPlacement.Place(work, preferred, occupied, gap, (int)dpi, allowCompact: initial);
+    }
+
+    private static System.Drawing.Rectangle ToPixelRect(WindowRect rect) =>
+        System.Drawing.Rectangle.FromLTRB(rect.Left, rect.Top, rect.Right, rect.Bottom);
+
+    private static bool TryGetMonitorInfo(nint monitor, out MonitorInfo info)
+    {
+        info = new MonitorInfo { Size = (uint)Marshal.SizeOf<MonitorInfo>() };
+        return monitor != 0 && GetMonitorInfoW(monitor, ref info);
+    }
+
+    private void QueueDisplayRecovery()
+    {
+        if (!_displayRecoveryPending || _displayRecovery is not null || _disposed) return;
+        _displayRecovery = _source.Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
+        {
+            _displayRecovery = null;
+            if (_displayRecoveryPending) RecoverWindowOnWorkAreaChange();
+        });
+    }
+
+    private void RecoverWindowOnWorkAreaChange()
+    {
+        if (_disposed || _isMovingOrSizing || _handle == 0 ||
+            !IsWindowVisible(_handle) || IsIconic(_handle) || IsZoomed(_handle) ||
+            !GetWindowRect(_handle, out var bounds) ||
+            !TryGetMonitorInfo(MonitorFromWindow(_handle, MonitorDefaultToNearest), out var info)) return;
+
+        var workAreaChanged = _displayRecoveryPending;
+        _displayRecoveryPending = false;
+        var current = ToPixelRect(bounds);
+        var work = ToPixelRect(_isFullScreen ? info.Monitor : info.WorkArea);
+        if (_isFullScreen)
+        {
+            _fullscreenDisplayChanged |= workAreaChanged;
+            if (current != work)
+                _ = SetWindowPos(_handle, 0, work.Left, work.Top, work.Width, work.Height, SwpNoZOrder | SwpNoActivate);
+            return;
+        }
+        if (work.Contains(current)) return;
+        var visible = System.Drawing.Rectangle.Intersect(current, work);
+        if ((!workAreaChanged || !_usesAutomaticBounds) && visible.Width >= 48 && visible.Height >= 48)
+            return;
+
+        var target = IndependentWindowPlacement.FitOnResizedDisplay(work, current);
+        if (_usesAutomaticBounds) target = PlaceAutomaticBounds(work, target, initial: false);
+        if (target != current)
+            _ = SetWindowPos(_handle, 0, target.Left, target.Top, target.Width, target.Height, SwpNoZOrder | SwpNoActivate);
     }
 
     internal void Activate()
     {
         if (_disposed || _handle == 0) return;
         if (IsIconic(_handle)) _ = ShowWindow(_handle, SwRestore);
-        else _ = ShowWindow(_handle, SwShow);
+        else _ = ShowWindow(_handle, IsClickThrough ? SwShowNoActivate : SwShow);
+        RecoverWindowOnWorkAreaChange();
         if (!_attached && _attachPreview(_handle))
             _attached = true;
         else if (_attached)
             _ = _attachPreview(_handle);
         if (EffectiveWindowOpacity < 1.0) _ = ApplyWindowOpacity(EffectiveWindowOpacity, force: true);
+        if (IsClickThrough) return;
         _ = SetForegroundWindow(_handle);
         _ = SetFocus(_handle);
         Log("independent_window_activated",
@@ -787,7 +950,8 @@ internal sealed class NativePreviewWindow : IDisposable
             return;
         }
 
-        _ = ShowWindow(_handle, SwShow);
+        _ = ShowWindow(_handle, IsClickThrough ? SwShowNoActivate : SwShow);
+        RecoverWindowOnWorkAreaChange();
     }
 
     internal static void SetAllBossKeyHidden(bool hidden)
@@ -851,21 +1015,26 @@ internal sealed class NativePreviewWindow : IDisposable
 
     internal void ToggleFullScreen()
     {
-        if (_disposed || _handle == 0) return;
+        if (_disposed || _handle == 0 || IsClickThrough) return;
         if (_isFullScreen)
         {
             _isFullScreen = false;
-            if (!_isFixed && UsesWindowPointerControl) ResetTouchControlInput();
+            if (_controlInputSuspended && UsesWindowPointerControl) ResetTouchControlInput();
             _ = RemovePropW(_handle, "iPhoneMirrorFullScreen");
             _ = SetWindowLongPtrW(_handle, GwlStyle, _restoreStyle);
             _ = SetWindowPos(_handle, 0, _restoreRectangle.Left, _restoreRectangle.Top,
                 Math.Max(1, _restoreRectangle.Right - _restoreRectangle.Left),
                 Math.Max(1, _restoreRectangle.Bottom - _restoreRectangle.Top),
                 SwpNoZOrder | SwpFrameChanged | SwpShowWindow);
+            _displayRecoveryPending |= _fullscreenDisplayChanged;
+            _fullscreenDisplayChanged = false;
+            RecoverWindowOnWorkAreaChange();
             _aspectController.Reflow();
             _ = SetForegroundWindow(_handle);
             Log("independent_window_fullscreen",
                 ("mode", WindowMode), ("enabled", false));
+            _styleWindow?.SetClickThroughState(IsClickThrough, CanEnableClickThrough);
+            UpdateContextMenuLabels();
             FullScreenChanged?.Invoke(false);
             return;
         }
@@ -889,6 +1058,8 @@ internal sealed class NativePreviewWindow : IDisposable
         _ = SetForegroundWindow(_handle);
         Log("independent_window_fullscreen",
             ("mode", WindowMode), ("enabled", true));
+        _styleWindow?.SetClickThroughState(IsClickThrough, CanEnableClickThrough);
+        UpdateContextMenuLabels();
         FullScreenChanged?.Invoke(true);
     }
 
@@ -905,6 +1076,13 @@ internal sealed class NativePreviewWindow : IDisposable
     private nint WindowProcedure(nint hwnd, int message, nint wParam, nint lParam,
         ref bool handled)
     {
+        if (message == NativeFileDrop.Message)
+        {
+            var paths = NativeFileDrop.Read(wParam);
+            if (!IsClickThrough) _filesDropped?.Invoke(paths);
+            handled = true;
+            return 0;
+        }
         if (message == WmPreviewGeometryChanged && _managedContent is null)
         {
             // Read the newest geometry even if several notifications queued up.
@@ -937,13 +1115,12 @@ internal sealed class NativePreviewWindow : IDisposable
             return 0;
         }
         if (message == 0x007C && wParam.ToInt32() == GwlExStyle &&
-            lParam != 0 && _managedContent is not null) // WM_STYLECHANGING
+            lParam != 0 && (_managedContent is not null || IsClickThrough)) // WM_STYLECHANGING
         {
-            // HwndTarget normally strips WS_EX_LAYERED when not using per-pixel
-            // alpha. This host owns system-managed constant alpha, including the
-            // native caption. Preserve it across WPF resize/target updates.
+            // HwndTarget normally strips WS_EX_LAYERED without per-pixel
+            // alpha. Preserve it for click-through and managed-window opacity.
             var style = Marshal.ReadInt32(lParam, sizeof(int));
-            style = _appliedOpacity < 1.0 ? style | WsExLayered : style & ~WsExLayered;
+            style = IsClickThrough || _appliedOpacity < 1.0 ? style | WsExLayered : style & ~WsExLayered;
             Marshal.WriteInt32(lParam, sizeof(int), style);
             handled = true;
             return 0;
@@ -987,6 +1164,13 @@ internal sealed class NativePreviewWindow : IDisposable
             handled = true;
             return 0;
         }
+        // The hook has already let configured Windows chords through. Leave
+        // their key-down messages available for default handling (e.g. Alt+F4).
+        if (message is WmKeyDown or WmSysKeyDown && IsAllowedWindowsHotkey(hwnd, wParam.ToInt32()))
+            return 0;
+        if (message == WmSetCursor && (lParam.ToInt64() & 0xFFFF) != HtClient)
+            return 0;
+
         switch (message)
         {
             case WmMouseMove when IsPointerInputActive:
@@ -1120,12 +1304,14 @@ internal sealed class NativePreviewWindow : IDisposable
             case WmNcCalcSize when _managedContent is null:
                 handled = true;
                 return 0;
+            case WmNcHitTest when IsClickThrough:
+                handled = true;
+                return HtTransparent;
             case WmNcHitTest when _managedContent is null:
                 handled = true;
-                // Input capture is temporary; do not turn it into the user's
-                // persistent "fixed window" preference when control starts.
-                return _isFullScreen || _isFixed || IsPointerInputEnabledForWindow
-                    ? HtClient : HitTestWindow(lParam);
+                if (_isFullScreen || _freezeFixedBounds || _capturedMouseButtons != 0 ||
+                    (IsPointerInputEnabledForWindow && !UsesWindowPointerControl)) return HtClient;
+                return HitTestWindow(lParam, IsPointerInputEnabledForWindow);
             case WmContextMenu:
             case WmRightButtonUp:
                 handled = true;
@@ -1156,7 +1342,7 @@ internal sealed class NativePreviewWindow : IDisposable
                 handled = true;
                 QueueClose();
                 return 0;
-            case WmSysCommand when _isFixed && (wParam.ToInt32() & 0xFFF0) is ScSize or ScMove or ScMaximize:
+            case WmSysCommand when _freezeFixedBounds && (wParam.ToInt32() & 0xFFF0) is ScSize or ScMove or ScMaximize:
                 // Media casting retains the system title bar when fixed.
                 // Swallow size/move/maximize, keeping close and minimize.
                 handled = true;
@@ -1169,6 +1355,27 @@ internal sealed class NativePreviewWindow : IDisposable
                 _source.Dispatcher.BeginInvoke(DispatcherPriority.Loaded,
                     _aspectController.Reflow);
                 break;
+            case WmDisplayChange:
+            case WmSettingChange when wParam == SetWorkArea:
+                _displayRecoveryPending = true;
+                QueueDisplayRecovery();
+                break;
+            case WmSize when wParam == 0: // SIZE_RESTORED
+            case WmShowWindow when wParam != 0:
+                QueueDisplayRecovery();
+                break;
+            case WmEnterSizeMove:
+                var resetInput = UsesWindowPointerControl && IsPointerInputEnabledForWindow;
+                _isMovingOrSizing = true;
+                _userArrangedWindow = true;
+                if (resetInput) ResetTouchControlInput();
+                _aspectController.BeginInteractiveResize();
+                break;
+            case WmExitSizeMove:
+                _isMovingOrSizing = false;
+                QueueDisplayRecovery();
+                _aspectController.EndInteractiveResize();
+                break;
             case WmWindowPosChanged:
                 ObserveNormalBounds();
                 break;
@@ -1176,28 +1383,33 @@ internal sealed class NativePreviewWindow : IDisposable
         return 0;
     }
 
-    private nint HitTestWindow(nint packedScreenPoint)
+    private nint HitTestWindow(nint packedScreenPoint, bool controlInterior)
     {
         if (_handle == 0 || !GetWindowRect(_handle, out var bounds)) return HtClient;
         var packed = packedScreenPoint.ToInt64();
         var x = (short)(packed & 0xFFFF);
         var y = (short)((packed >> 16) & 0xFFFF);
         var dpi = GetDpiForWindow(_handle);
-        var border = Math.Max(6, (int)Math.Round(8.0 * (dpi == 0 ? 1.0 : dpi / 96.0)));
+        var scale = dpi == 0 ? 1.0 : dpi / 96.0;
+        var border = Math.Max(6, (int)Math.Round(8.0 * scale));
+        if (x < bounds.Left || x >= bounds.Right || y < bounds.Top || y >= bounds.Bottom)
+            return HtClient;
+        var corner = controlInterior ? Math.Max(border, (int)Math.Round(14.0 * scale)) : border;
+        var cornerLeft = x < bounds.Left + corner;
+        var cornerRight = x >= bounds.Right - corner;
+        if (y < bounds.Top + corner && cornerLeft) return HtTopLeft;
+        if (y < bounds.Top + corner && cornerRight) return HtTopRight;
+        if (y >= bounds.Bottom - corner && cornerLeft) return HtBottomLeft;
+        if (y >= bounds.Bottom - corner && cornerRight) return HtBottomRight;
 
         var left = x < bounds.Left + border;
         var right = x >= bounds.Right - border;
-        var top = y < bounds.Top + border;
         var bottom = y >= bounds.Bottom - border;
-        if (top && left) return HtTopLeft;
-        if (top && right) return HtTopRight;
-        if (bottom && left) return HtBottomLeft;
-        if (bottom && right) return HtBottomRight;
         if (left) return HtLeft;
         if (right) return HtRight;
-        if (top) return HtTop;
         if (bottom) return HtBottom;
-        return HtCaption;
+        if (!controlInterior) return y < bounds.Top + border ? HtTop : HtCaption;
+        return y < bounds.Top + Math.Round(28.0 * scale) ? HtCaption : HtClient;
     }
 
     private void QueueClose()
@@ -1224,26 +1436,31 @@ internal sealed class NativePreviewWindow : IDisposable
 
     private void ShowContextMenu()
     {
-        if (_disposed) return;
+        if (_disposed || IsClickThrough) return;
         UpdateContextMenuLabels();
         _contextMenu.IsOpen = true;
         Log("independent_window_context_menu",
             ("mode", WindowMode), ("full_screen", _isFullScreen),
-            ("top_most", _isTopMost), ("fixed", _isFixed));
+            ("top_most", _topMostItem.IsChecked), ("fixed", _freezeFixedBounds));
     }
 
     private void UpdateContextMenuLabels()
     {
+        if (_copyScreenTextItem is not null)
+        {
+            _copyScreenTextItem.Header = LocalizationService.Get("CopyScreenTextShortcut");
+            _copyScreenTextItem.IsEnabled = _protectedOverlay is null;
+        }
         _fullScreenItem.Header = LocalizationService.Get(
             _isFullScreen ? "IndependentWindowExitFullScreen" :
                 "IndependentWindowEnterFullScreen");
         _windowMenuItem.Header = LocalizationService.Get("IndependentWindowWindowMenu");
         _styleItem.Header = LocalizationService.Get("IndependentWindowStyle");
         _displayMenuItem.Header = LocalizationService.Get("IndependentWindowDisplayMenu");
-        _topMostItem.Header = LocalizationService.Get(
-            _isTopMost ? "IndependentWindowUnpin" : "IndependentWindowPin");
-        _fixedItem.Header = LocalizationService.Get(
-            _isFixed ? "IndependentWindowUnfix" : "IndependentWindowFix");
+        _topMostItem.Header = LocalizationService.Get("IndependentWindowPin");
+        UpdateTopmostMenuState();
+        _fixedItem.Header = LocalizationService.Get("IndependentWindowFix");
+        _fixedItem.IsChecked = _freezeFixedBounds;
         _fixedItem.IsEnabled = !_isFullScreen;
         if (_reverseControlMenuItem is not null)
         {
@@ -1274,7 +1491,7 @@ internal sealed class NativePreviewWindow : IDisposable
             _cornerItem.Header = LocalizationService.Get(
                 _cornersEnabled ? "IndependentWindowRemoveCorners" :
                     "IndependentWindowKeepCorners");
-            _cornerItem.IsEnabled = !_phoneFrameEnabled;
+            _cornerItem.IsEnabled = CanToggleCorners;
         }
         if (_imageSettingsItem is not null)
             _imageSettingsItem.Header = LocalizationService.Get(
@@ -1335,7 +1552,9 @@ internal sealed class NativePreviewWindow : IDisposable
         var window = new WindowStyleSettingsWindow(_windowOpacity, SetWindowOpacity,
             _opaqueOnHover, SetOpaqueOnHover, PhoneFramePreference?.Invoke() ?? _phoneFramePreferred,
             _managedContent is null && _sessionHandle != 0 ? enabled => PhoneFramePreferenceRequested?.Invoke(enabled) ?? SetPhoneFrame(enabled) : null,
-            PhoneFrameDescription, PhoneFramePreferenceRequested is not null || CanShowPhoneFrame);
+            PhoneFrameDescription, PhoneFramePreferenceRequested is not null || CanShowPhoneFrame,
+            ClickThroughRequested);
+        window.SetClickThroughState(IsClickThrough, CanEnableClickThrough);
         _ = new WindowInteropHelper(window) { Owner = _handle };
         _styleWindow = window;
         window.Closed += (_, _) => _styleWindow = null;
@@ -1381,6 +1600,7 @@ internal sealed class NativePreviewWindow : IDisposable
         ResetTouchControlInput();
         _phoneFrameEnabled = enabled;
         _phoneFrameHitTest = hitTest;
+        if (_cornerItem is not null) _cornerItem.IsEnabled = CanToggleCorners;
         if (notify) PhoneFrameChanged?.Invoke();
         ApplyRotatedDimensions();
         return true;
@@ -1402,9 +1622,11 @@ internal sealed class NativePreviewWindow : IDisposable
     {
         if (_disposed || _handle == 0 || !double.IsFinite(opacity)) return false;
         opacity = Math.Clamp(opacity, 0.1, 1.0);
+        if (IsClickThrough && opacity >= ClickThroughOpacityLimit && !SetClickThrough(false)) return false;
         var previous = _windowOpacity;
         _windowOpacity = opacity;
         if (!ApplyWindowOpacity(EffectiveWindowOpacity)) { _windowOpacity = previous; return false; }
+        _styleWindow?.SetClickThroughState(IsClickThrough, CanEnableClickThrough);
         return true;
     }
 
@@ -1417,8 +1639,16 @@ internal sealed class NativePreviewWindow : IDisposable
 
     private bool EffectiveOpaqueOnHover => TemporaryBoolean(PreviewShortcutSetting.OpaqueOnHover, _opaqueOnHover);
 
-    private double EffectiveWindowOpacity => TemporaryValue(PreviewShortcutSetting.Opacity) is { } percent
-        ? percent / 100 : EffectiveOpaqueOnHover && _isPointerOverWindow ? 1.0 : _windowOpacity;
+    private double EffectiveWindowOpacity
+    {
+        get
+        {
+            var shortcutOpacity = TemporaryValue(PreviewShortcutSetting.Opacity) / 100;
+            if (IsClickThrough)
+                return shortcutOpacity is { } opacity && opacity < ClickThroughOpacityLimit ? opacity : _windowOpacity;
+            return shortcutOpacity ?? (EffectiveOpaqueOnHover && _isPointerOverWindow ? 1.0 : _windowOpacity);
+        }
+    }
 
     internal Action? BeginTemporarySetting(SettingShortcutBinding binding)
     {
@@ -1434,7 +1664,12 @@ internal sealed class NativePreviewWindow : IDisposable
             PreviewShortcutSetting.PhoneFrame => ApplyPhoneFrame(EffectivePhoneFrame && CanShowPhoneFrame, notify: false),
             _ => false,
         };
-        if (!Apply()) { _temporarySettings.Remove(token); return null; }
+        if (!Apply())
+        {
+            _temporarySettings.Remove(token);
+            if (binding.Setting == PreviewShortcutSetting.Topmost) UpdateTopmostMenuState();
+            return null;
+        }
         return () =>
         {
             if (!_temporarySettings.Remove(token) || _disposed) return;
@@ -1469,7 +1704,7 @@ internal sealed class NativePreviewWindow : IDisposable
 
     private bool IsPointerOverPreview()
     {
-        if (_disposed || _handle == 0 || !IsWindowVisible(_handle) || IsIconic(_handle) ||
+        if (_disposed || IsClickThrough || _handle == 0 || !IsWindowVisible(_handle) || IsIconic(_handle) ||
             !GetCursorPos(out var point)) return false;
         var hovered = WindowFromPoint(point);
         return hovered == _handle || GetAncestor(hovered, 2) == _handle;
@@ -1497,10 +1732,11 @@ internal sealed class NativePreviewWindow : IDisposable
             var previousOpacity = _appliedOpacity;
             _appliedOpacity = opacity;
             var style = GetWindowLongPtrW(_handle, GwlExStyle);
-            _ = SetWindowLongPtrW(_handle, GwlExStyle, opacity < 1.0
+            var layered = opacity < 1.0 || IsClickThrough;
+            _ = SetWindowLongPtrW(_handle, GwlExStyle, layered
                 ? (nint)(style.ToInt64() | WsExLayered)
                 : (nint)(style.ToInt64() & ~WsExLayered));
-            if (opacity < 1.0 && !SetLayeredWindowAttributes(_handle, 0, (byte)Math.Round(opacity * 255), LwaAlpha))
+            if (layered && !SetLayeredWindowAttributes(_handle, 0, (byte)Math.Round(opacity * 255), LwaAlpha))
             {
                 _appliedOpacity = previousOpacity;
                 _ = SetWindowLongPtrW(_handle, GwlExStyle, style);
@@ -1523,36 +1759,112 @@ internal sealed class NativePreviewWindow : IDisposable
     {
         if (_disposed || _handle == 0) return;
         _isTopMost = !_isTopMost;
-        _ = ApplyTopmost();
-        UpdateContextMenuLabels();
+        if (!ApplyTopmost()) _isTopMost = !_isTopMost;
         Log("independent_window_topmost",
             ("mode", WindowMode), ("enabled", _isTopMost));
     }
 
-    private bool ApplyTopmost() => SetWindowPos(_handle,
-        TemporaryBoolean(PreviewShortcutSetting.Topmost, _isTopMost) ? HwndTopMost : HwndNoTopMost,
-        0, 0, 0, 0, SwpNoSize | SwpNoMove | SwpNoActivate);
+    internal bool SetClickThrough(bool enabled)
+    {
+        if (_disposed || _handle == 0 || enabled && !CanEnableClickThrough) return false;
+        if (IsClickThrough == enabled) return true;
+        if (enabled) _contextMenu.IsOpen = false;
+
+        IsClickThrough = enabled;
+        if (!ApplyClickThroughStyles() ||
+            (enabled && (!ApplyWindowOpacity(EffectiveWindowOpacity) || !ApplyTopmost())) ||
+            !SetWindowInputEnabled(!enabled))
+        {
+            IsClickThrough = !enabled;
+            _ = ApplyClickThroughStyles();
+            _ = ApplyWindowOpacity(EffectiveWindowOpacity);
+            _ = SetWindowInputEnabled(enabled);
+            _ = ApplyTopmost();
+            return false;
+        }
+        if (!enabled)
+        {
+            // Input recovery must work while the renderer is detached. A
+            // rebind reapplies opacity and the current window preferences.
+            _ = ApplyWindowOpacity(EffectiveWindowOpacity, force: _managedContent is not null);
+            _ = ApplyTopmost();
+        }
+        if (_filesDropped is not null) NativeFileDrop.DragAcceptFiles(_handle, !enabled);
+        if (enabled)
+        {
+            _windowMouse.OnLeave();
+            ResetTouchControlInput();
+            ActivationChanged?.Invoke(false);
+            UpdateHoverState(false);
+        }
+        _styleWindow?.SetClickThroughState(IsClickThrough, CanEnableClickThrough);
+        ClickThroughChanged?.Invoke(enabled);
+        Log("independent_window_click_through", ("mode", WindowMode), ("enabled", enabled));
+        return true;
+    }
+
+    private bool SetWindowInputEnabled(bool enabled)
+    {
+        _ = EnableWindow(_handle, enabled);
+        return IsWindowEnabled(_handle) == enabled;
+    }
+
+    private bool ApplyClickThroughStyles()
+    {
+        // Windows routes input through layered, transparent windows even
+        // across processes. Native previews keep their DirectComposition
+        // opacity and need full alpha on the layered HWND itself.
+        const int inputStyles = WsExTransparent | WsExNoActivate;
+        var styles = GetWindowLongPtrW(_handle, GwlExStyle).ToInt64();
+        styles = IsClickThrough ? styles | inputStyles | WsExLayered : styles & ~inputStyles;
+        if (!IsClickThrough && (_managedContent is null || _appliedOpacity == 1.0)) styles &= ~WsExLayered;
+        _ = SetWindowLongPtrW(_handle, GwlExStyle, (nint)styles);
+        if (!IsClickThrough) return (GetWindowLongPtrW(_handle, GwlExStyle).ToInt64() & inputStyles) == 0;
+
+        const int layeredInputStyles = inputStyles | WsExLayered;
+        return (GetWindowLongPtrW(_handle, GwlExStyle).ToInt64() & layeredInputStyles) == layeredInputStyles &&
+            (_managedContent is not null
+                ? ApplyWindowOpacity(EffectiveWindowOpacity, force: true)
+                : SetLayeredWindowAttributes(_handle, 0, 255, LwaAlpha));
+    }
+
+    private bool ApplyTopmost()
+    {
+        var applied = SetWindowPos(_handle,
+            IsClickThrough || TemporaryBoolean(PreviewShortcutSetting.Topmost, _isTopMost) ? HwndTopMost : HwndNoTopMost,
+            0, 0, 0, 0, SwpNoSize | SwpNoMove | SwpNoActivate);
+        UpdateTopmostMenuState();
+        return applied;
+    }
+
+    private void UpdateTopmostMenuState()
+    {
+        _topMostItem.IsChecked = _handle != 0 && (GetWindowLongPtrW(_handle, GwlExStyle).ToInt64() & WsExTopmost) != 0;
+        _topMostItem.IsEnabled = !IsClickThrough && TemporaryValue(PreviewShortcutSetting.Topmost) is null;
+    }
 
     internal void ToggleFixedWindow() => SetFixedWindow(!_isFixed);
 
     private void SetFixedWindow(bool enabled, bool freezeBounds = true)
     {
-        if (_disposed || _handle == 0 || _isFullScreen || _isFixed == enabled) return;
+        var freeze = enabled && freezeBounds;
+        if (_disposed || _handle == 0 || _isFullScreen || (_isFixed == enabled && _freezeFixedBounds == freeze)) return;
         _isFixed = enabled;
-        _freezeFixedBounds = enabled && freezeBounds;
+        _controlInputSuspended = !enabled;
+        _freezeFixedBounds = freeze;
         if (!_isFixed) _fitFirstFixedSource = false;
         if (!_isFixed && UsesWindowPointerControl)
             ResetTouchControlInput();
         var style = GetWindowLongPtrW(_handle, GwlStyle).ToInt64();
         var resizeStyle = (uint)(_managedContent is null ? WsThickFrame : WsThickFrame | WsMaximizeBox);
-        style = _isFixed ? style & ~resizeStyle : style | resizeStyle;
+        style = _freezeFixedBounds ? style & ~resizeStyle : style | resizeStyle;
         _ = SetWindowLongPtrW(_handle, GwlStyle, (nint)style);
         _ = SetWindowPos(_handle, 0, 0, 0, 0, 0,
             SwpNoSize | SwpNoMove | SwpNoZOrder | SwpNoActivate | SwpFrameChanged);
         if (!_isFixed) _aspectController.Reflow();
         UpdateContextMenuLabels();
         Log("independent_window_fixed",
-            ("mode", WindowMode), ("enabled", _isFixed));
+            ("mode", WindowMode), ("enabled", _freezeFixedBounds));
     }
 
     private void ResetTouchControlInput()
@@ -1582,7 +1894,7 @@ internal sealed class NativePreviewWindow : IDisposable
     private bool IsPointerInputEnabledForWindow =>
         AllowsControlInput && (IsReverseControlEnabledForWindow || IsUsbControlEnabledForWindow);
     private bool IsPointerInputActive =>
-        AllowsControlInput && (IsReverseControlActive || (IsUsbControlEnabledForWindow &&
+        !_isMovingOrSizing && AllowsControlInput && (IsReverseControlActive || (IsUsbControlEnabledForWindow &&
             _inputForegroundWindow() == _handle));
 
     private void EnableReverseControl()
@@ -1594,6 +1906,16 @@ internal sealed class NativePreviewWindow : IDisposable
 
 
     private static bool IsKeyDown(int virtualKey) => GetKeyState(virtualKey) < 0;
+
+    private bool IsAllowedWindowsHotkey(nint hwnd, int virtualKey)
+    {
+        if (WindowsHotkeysFor?.Invoke(hwnd) is not { } policy) return false;
+        var modifiers = (IsKeyDown(VkMenu) ? KeyboardShortcut.Alt : 0) |
+                        (IsKeyDown(VkControl) ? KeyboardShortcut.Control : 0) |
+                        (IsKeyDown(VkShift) ? KeyboardShortcut.Shift : 0) |
+                        (IsKeyDown(0x5B) || IsKeyDown(0x5C) ? KeyboardShortcut.Windows : 0);
+        return policy.Match(virtualKey, modifiers) == WindowsHotkeyDisposition.Allow;
+    }
 
     private void HideSystemCursor()
     {
@@ -1636,7 +1958,7 @@ internal sealed class NativePreviewWindow : IDisposable
 
     internal void PrepareForUsbControl()
     {
-        if (_disposed || _handle == 0) return;
+        if (_disposed || _handle == 0 || IsClickThrough) return;
         if (!_isFixed) SetFixedWindow(true, freezeBounds: false);
         if (!_isTopMost) ToggleTopMost();
         _ = SetForegroundWindow(_handle);
@@ -1645,7 +1967,7 @@ internal sealed class NativePreviewWindow : IDisposable
 
     internal void PrepareForBluetoothControl()
     {
-        if (_disposed || _handle == 0 || !UsesBluetoothWindowMouse) return;
+        if (_disposed || _handle == 0 || IsClickThrough || !UsesBluetoothWindowMouse) return;
         if (!_isFixed && !_isFullScreen) SetFixedWindow(true, freezeBounds: false);
     }
 
@@ -1692,12 +2014,15 @@ internal sealed class NativePreviewWindow : IDisposable
         return latest;
     }
 
+    private bool CanToggleCorners => _managedContent is null && _sessionHandle != 0 && _handle != 0 &&
+        !_isFullScreen && !IsZoomed(_handle) && !_phoneFrameEnabled;
+
     private void ToggleCorners()
     {
-        if (_managedContent is not null || _sessionHandle == 0 || _handle == 0) return;
-        _cornersEnabled = !_cornersEnabled;
-        _ = _setCornerProfile(_sessionHandle, _handle,
-            _cornersEnabled ? _cornerRadius : 0, _cornerExponent);
+        if (!CanToggleCorners) return;
+        var enabled = !_cornersEnabled;
+        if (!_setCornerProfile(_sessionHandle, _handle, enabled ? _cornerRadius : 0, _cornerExponent)) return;
+        _cornersEnabled = enabled;
         UpdateContextMenuLabels();
         Log("independent_window_corners",
             ("mode", WindowMode), ("enabled", _cornersEnabled));
@@ -1744,16 +2069,12 @@ internal sealed class NativePreviewWindow : IDisposable
     {
         if (_disposed) return;
         ObserveNormalBounds();
-        if ((_isFullScreen ? _restoreRectangle : _lastNormalBounds) is { } bounds)
-        {
-            var layout = new IndependentWindowLayout(bounds.Left, bounds.Top,
-                bounds.Right - bounds.Left, bounds.Bottom - bounds.Top, _isFixed);
-            if (layout.IsValid) ClosedLayout = layout;
-        }
+        ClosedLayout = GetNormalLayout();
         Log("independent_window_dispose_begin",
             ("mode", WindowMode), ("attached", _attached),
             ("full_screen", _isFullScreen));
         _disposed = true;
+        _displayRecovery?.Abort();
         _phoneFrameHitTest = null;
         _hoverOpacityTimer.Stop();
         OpenWindows.Remove(this);
@@ -1907,6 +2228,14 @@ internal sealed class NativePreviewWindow : IDisposable
     private static extern bool SetForegroundWindow(nint window);
 
     [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool EnableWindow(nint window, [MarshalAs(UnmanagedType.Bool)] bool enabled);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindowEnabled(nint window);
+
+    [DllImport("user32.dll")]
     private static extern int ShowCursor([MarshalAs(UnmanagedType.Bool)] bool show);
 
     [DllImport("user32.dll")]
@@ -1964,6 +2293,9 @@ internal sealed class NativePreviewWindow : IDisposable
 
     [DllImport("user32.dll")]
     private static extern nint MonitorFromWindow(nint window, uint flags);
+
+    [DllImport("user32.dll")]
+    private static extern nint MonitorFromPoint(HoverPoint point, uint flags);
 
     [DllImport("user32.dll")]
     private static extern nint MonitorFromRect(ref WindowRect rectangle, uint flags);

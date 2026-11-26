@@ -46,13 +46,13 @@ class AppDocumentsTests(unittest.IsolatedAsyncioTestCase):
         return dict(root='documents', bundleId='com.test.documents', **kwargs)
 
     async def test_vend_before_reader_and_confined_listing(self):
-        with patch('device_management.HouseArrestService', return_value=self.files):
+        with patch('explorer_file_roots.HouseArrestService', return_value=self.files):
             result = await self.hub._list_dir(self.scope(path=''))
         self.assertEqual([x['name'] for x in result['entries']], ['中文.txt'])
         self.assertTrue(self.files.closed)
 
     async def test_write_time_rename_delete_stay_in_documents(self):
-        with patch('device_management.HouseArrestService', return_value=self.files):
+        with patch('explorer_file_roots.HouseArrestService', return_value=self.files):
             with tempfile.TemporaryDirectory() as directory:
                 source = Path(directory) / 'source.txt'
                 source.write_bytes(b'new content')
@@ -69,14 +69,14 @@ class AppDocumentsTests(unittest.IsolatedAsyncioTestCase):
         for path in ('../Library', 'a/../../Library', 'a\\b'):
             with self.assertRaises(ValueError):
                 DocumentsFiles.path(path)
-        with patch('device_management.HouseArrestService') as factory:
+        with patch('explorer_file_roots.HouseArrestService') as factory:
             with self.assertRaises(ValueError):
                 await self.hub._stat_file(dict(root='documents', bundleId='../bad', path=''))
             factory.assert_not_called()
 
     async def test_failed_vend_closes_service_before_afc_reader(self):
         self.files.send_command = AsyncMock(side_effect=ConnectionError('denied'))
-        with patch('device_management.HouseArrestService', return_value=self.files):
+        with patch('explorer_file_roots.HouseArrestService', return_value=self.files):
             with self.assertRaises(ConnectionError):
                 await self.hub._list_dir(self.scope(path=''))
         self.assertTrue(self.files.closed)
@@ -84,7 +84,7 @@ class AppDocumentsTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_cancelled_listing_closes_and_symlinks_cannot_escape(self):
         self.files.block_list = '/Documents'
-        with patch('device_management.HouseArrestService', return_value=self.files):
+        with patch('explorer_file_roots.HouseArrestService', return_value=self.files):
             task = asyncio.create_task(self.hub._list_dir(self.scope(path='')))
             await self.files.started.wait()
             task.cancel()

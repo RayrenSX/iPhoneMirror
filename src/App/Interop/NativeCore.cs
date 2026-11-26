@@ -898,7 +898,7 @@ internal sealed partial class NativeCore : IDisposable
 
     public NativeSessionCreateResult CreateDeviceSession(string udid,
         uint width, uint height, uint fps, bool playAudio, double volume,
-        uint usbWidth = 0, uint usbHeight = 0, uint usbProjectionMode = 0,
+        uint usbWidth = 0, uint usbHeight = 0, uint usbProjectionMode = 1,
         uint decoderPreference = 0, uint colorOutputPreference = 0)
     {
         var options = new NativeCaptureOptions
@@ -914,7 +914,7 @@ internal sealed partial class NativeCore : IDisposable
         };
         options.Reserved[0] = usbWidth;
         options.Reserved[1] = usbHeight;
-        options.Reserved[2] = Math.Min(usbProjectionMode, 2U);
+        options.Reserved[2] = usbProjectionMode <= 1U ? usbProjectionMode : 1U;
         options.Reserved[3] = Math.Min(decoderPreference, 2U);
         options.Reserved[4] = Math.Min(colorOutputPreference, 2U);
         var result = im_session_create(udid, ref options, out var handle);

@@ -68,6 +68,26 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        <Style x:Key="WorkspaceSidebarSurface" TargetType="Border" BasedOn="{StaticResource WorkspaceCardBorder}">
+            <!-- Tint the window backdrop; a shadow on the full panel darkens its translucent fill. -->
+            <Setter Property="Background" Value="{DynamicResource WorkspaceSidebarBrush}"/>
+            <Setter Property="Effect" Value="{x:Null}"/>
+            <Setter Property="Padding" Value="16"/>
+        </Style>
+        <Style x:Key="WorkspacePanelTitle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="{DynamicResource FontSize16}"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Margin" Value="0,0,8,0"/>
+        </Style>
+        <Style x:Key="WorkspacePanelHeaderButton" TargetType="Button" BasedOn="{StaticResource IconButton}">
+            <Setter Property="Width" Value="32"/>
+            <Setter Property="Height" Value="32"/>
+            <Setter Property="MinHeight" Value="32"/>
+            <Setter Property="Margin" Value="0"/>
+            <Setter Property="Padding" Value="0"/>
+        </Style>
         <Style x:Key="DeviceContextMenuStyle" TargetType="ContextMenu">
             <Setter Property="Background" Value="{DynamicResource PanelRaisedBrush}"/>
             <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
@@ -101,11 +121,24 @@
                     <ControlTemplate TargetType="MenuItem">
                         <Border x:Name="MenuRoot" Background="{TemplateBinding Background}"
                                  CornerRadius="8" Padding="{TemplateBinding Padding}">
-                            <ContentPresenter ContentSource="Header"
-                                              TextElement.Foreground="{TemplateBinding Foreground}"
-                                              VerticalAlignment="Center"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <ContentPresenter ContentSource="Header"
+                                                  TextElement.Foreground="{TemplateBinding Foreground}"
+                                                  VerticalAlignment="Center"/>
+                                <Path x:Name="CheckIndicator" Grid.Column="1" Margin="12,0,0,0"
+                                      Data="M 1,5 L 4,8 L 10,1" StrokeThickness="2"
+                                      Stroke="{DynamicResource AccentBrush}" StrokeStartLineCap="Round"
+                                      StrokeEndLineCap="Round" VerticalAlignment="Center" Visibility="Collapsed"/>
+                            </Grid>
                         </Border>
                         <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="CheckIndicator" Property="Visibility" Value="Visible"/>
+                            </Trigger>
                             <Trigger Property="IsHighlighted" Value="True">
                                 <Setter TargetName="MenuRoot" Property="Background" Value="{DynamicResource ControlHoverBrush}"/>
                             </Trigger>

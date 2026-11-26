@@ -24,37 +24,58 @@ public partial class FirstRunSetupWindow
             _verified = HasSavedBinding();
             if (_verified) Status.Text = L("SetupBindingSaved");
         }
-        Body.Children.Add(CreateToolCard(driver, () => RunAsync(false)));
+        Body.Children.Add(CreateToolCard(driver, () => RunAsync(false), compact: driver));
         var hint = Text("SetupToolsReturnHint", 13);
         hint.TextAlignment = TextAlignment.Center;
         hint.SetResourceReference(TextBlock.ForegroundProperty, "MutedTextBrush");
         Body.Children.Add(hint);
     }
 
-    private Button CreateToolCard(bool driver, Func<Task> open)
+    private Button CreateToolCard(bool driver, Func<Task> open, bool compact = false)
     {
+        var toolTitle = driver ? "DriverManagerTitle" : "DeviceBindingTitle";
+        var titleKey = compact ? "SetupToolsOpenDriver" : toolTitle;
         var content = new StackPanel();
         var icon = new System.Windows.Shapes.Path { Data = Symbol(driver ? "settings" : "link"),
             Width = 28, Height = 28, Stretch = Stretch.Uniform, StrokeThickness = 1.6,
             StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round,
             HorizontalAlignment = HorizontalAlignment.Left, Margin = new(0, 0, 0, 16) };
         icon.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, "AccentBrush");
-        content.Children.Add(icon);
-        var title = Text(driver ? "DriverManagerTitle" : "DeviceBindingTitle", 18);
+        var title = Text(titleKey, 18);
         title.FontWeight = FontWeights.SemiBold; title.Margin = new(0, 0, 0, 8);
         content.Children.Add(title);
         var detail = Text(driver ? "SetupToolsDriverHint" : "SetupToolsBindingHint", 13);
         detail.SetResourceReference(TextBlock.LineHeightProperty, "ReleaseNotesLineHeight"); detail.Margin = new(0, 0, 0, 18);
         detail.SetResourceReference(TextBlock.ForegroundProperty, "MutedTextBrush");
         content.Children.Add(detail);
-        var action = Text("SetupToolsOpen", 13); action.Margin = new(0);
-        action.SetResourceReference(TextBlock.ForegroundProperty, "AccentBrush");
-        content.Children.Add(action);
-        var button = Action(driver ? "DriverManagerTitle" : "DeviceBindingTitle", open);
+        var button = Action(titleKey, open);
         Body.Children.Remove(button);
-        button.Content = content; button.Margin = new(0);
+        button.Margin = new(0);
         button.SetResourceReference(StyleProperty, "SetupToolCard");
-        System.Windows.Automation.AutomationProperties.SetName(button, L(driver ? "DriverManagerTitle" : "DeviceBindingTitle"));
+        if (compact)
+        {
+            button.Padding = new(16, 14, 16, 14);
+            icon.Margin = new(0, 2, 14, 0);
+            icon.VerticalAlignment = VerticalAlignment.Top;
+            title.Margin = new(0, 0, 0, 4);
+            title.SetResourceReference(TextBlock.ForegroundProperty, "AccentBrush");
+            detail.Margin = new(0);
+            var row = new DockPanel();
+            DockPanel.SetDock(icon, Dock.Left);
+            row.Children.Add(icon);
+            row.Children.Add(content);
+            button.Content = row;
+            System.Windows.Automation.AutomationProperties.SetAutomationId(button, "SetupOpenDriverManager");
+        }
+        else
+        {
+            content.Children.Insert(0, icon);
+            var action = Text("SetupToolsOpen", 13); action.Margin = new(0);
+            action.SetResourceReference(TextBlock.ForegroundProperty, "AccentBrush");
+            content.Children.Add(action);
+            button.Content = content;
+        }
+        button.SetResourceReference(System.Windows.Automation.AutomationProperties.NameProperty, titleKey);
         return button;
     }
 

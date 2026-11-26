@@ -3,28 +3,45 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:animations="clr-namespace:IPhoneMirror.UI.Animations"
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
-        Width="642" Height="522" ResizeMode="NoResize"
+        Width="520" SizeToContent="Height" MaxHeight="560" ResizeMode="NoResize"
         WindowStartupLocation="CenterOwner"
         Foreground="{DynamicResource TextBrush}" ShowInTaskbar="False"
         xmlns:chrome="clr-namespace:IPhoneMirror.UI.Controls"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent">
     <Border Padding="26" Style="{StaticResource RoundedWindowContent}">
+        <Border.Resources>
+            <Style x:Key="RecoveryStepNumber" TargetType="Border">
+                <Setter Property="MinWidth" Value="24"/>
+                <Setter Property="MinHeight" Value="24"/>
+                <Setter Property="Padding" Value="5,1"/>
+                <Setter Property="Margin" Value="0,0,10,0"/>
+                <Setter Property="HorizontalAlignment" Value="Left"/>
+                <Setter Property="VerticalAlignment" Value="Top"/>
+                <Setter Property="CornerRadius" Value="8"/>
+                <Setter Property="Background" Value="{DynamicResource ControlFillBrush}"/>
+            </Style>
+        </Border.Resources>
         <Grid animations:PageTransition.IsEnabled="True">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="16"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="18"/>
-                <RowDefinition Height="*" MinHeight="{StaticResource DialogContentMinHeight}"/>
+                <RowDefinition Height="*"/>
                 <RowDefinition Height="18"/>
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
             <Grid Style="{StaticResource SubWindowHeader}"
                   animations:WindowDragBehavior.IsEnabled="True">
-                <TextBlock Text="{DynamicResource CaptureNoPingTitle}"
-                           Style="{StaticResource SubWindowTitle}" Margin="0,0,48,0"/>
-                <Button Style="{StaticResource SubWindowCloseButton}"
+                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <Border Style="{StaticResource NoticeHeaderIcon}" Background="{DynamicResource WarningSurfaceBrush}">
+                    <ui:SymbolIcon Symbol="UsbPlug20" Foreground="{DynamicResource WarningBrush}" FontSize="20"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+                <TextBlock Grid.Column="1" Text="{DynamicResource CaptureNoPingTitle}"
+                           Style="{StaticResource NoticeHeaderTitle}"/>
+                <Button Grid.Column="2" Style="{StaticResource NoticeHeaderCloseButton}"
                         ToolTip="{DynamicResource Close}"
                         Click="OnCloseClick">
                 <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Dismiss20" FontSize="18"/>
@@ -32,63 +49,49 @@
             </Grid>
 
             <TextBlock Grid.Row="2" Text="{DynamicResource CaptureNoPingSummary}"
-                       Foreground="{DynamicResource MutedTextBrush}"
-                       FontSize="{DynamicResource SectionTitleFontSize}" TextWrapping="Wrap"/>
+                       Style="{StaticResource BodyText}"/>
 
             <ScrollViewer Grid.Row="4" VerticalScrollBarVisibility="Auto"><StackPanel>
-                <Border Background="{DynamicResource WarningSurfaceBrush}"
-                        BorderBrush="{DynamicResource WarningBrush}"
-                        BorderThickness="1" CornerRadius="16" Padding="18,16">
+                <Border Style="{StaticResource NoticeDetailsSurface}">
                     <Grid>
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="48"/>
+                            <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
-                        <Border MinWidth="34" MinHeight="34" Padding="5,2" VerticalAlignment="Top" CornerRadius="17"
-                                Background="{DynamicResource WarningBrush}">
-                            <TextBlock Text="1" Foreground="{DynamicResource OnAccentBrush}" FontSize="{DynamicResource FontSize18}"
+                        <Border Style="{StaticResource RecoveryStepNumber}">
+                            <TextBlock Text="1" Foreground="{DynamicResource TextBrush}" FontSize="{DynamicResource BodyFontSize}"
                                        FontWeight="Bold" HorizontalAlignment="Center"
                                        VerticalAlignment="Center"/>
                         </Border>
                         <TextBlock Grid.Column="1"
                                    Text="{DynamicResource CaptureNoPingRestartAction}"
                                    Foreground="{DynamicResource TextBrush}"
-                                   FontSize="{DynamicResource FontSize19}" FontWeight="SemiBold"
+                                   FontSize="{DynamicResource FontSize18}" FontWeight="SemiBold"
                                    TextWrapping="Wrap" VerticalAlignment="Center"/>
                     </Grid>
                 </Border>
 
-                <Border Background="{DynamicResource WarningSurfaceBrush}"
-                        BorderBrush="{DynamicResource WarningBrush}"
-                        BorderThickness="1" CornerRadius="16" Padding="18,16"
-                        Margin="0,12,0,0">
+                <Border Style="{StaticResource NoticeDetailsSurface}" Margin="0,8,0,0">
                     <Grid>
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="48"/>
+                            <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
-                        <Border MinWidth="34" MinHeight="34" Padding="5,2" VerticalAlignment="Top" CornerRadius="17"
-                                Background="{DynamicResource WarningBrush}">
-                            <TextBlock Text="2" Foreground="{DynamicResource OnAccentBrush}" FontSize="{DynamicResource FontSize18}"
+                        <Border Style="{StaticResource RecoveryStepNumber}">
+                            <TextBlock Text="2" Foreground="{DynamicResource TextBrush}" FontSize="{DynamicResource BodyFontSize}"
                                        FontWeight="Bold" HorizontalAlignment="Center"
                                        VerticalAlignment="Center"/>
                         </Border>
                         <TextBlock Grid.Column="1"
                                    Text="{DynamicResource CaptureNoPingCableAction}"
                                    Foreground="{DynamicResource TextBrush}"
-                                   FontSize="{DynamicResource FontSize19}" FontWeight="SemiBold"
+                                   FontSize="{DynamicResource FontSize18}" FontWeight="SemiBold"
                                    TextWrapping="Wrap" VerticalAlignment="Center"/>
                     </Grid>
                 </Border>
 
-                <Border Background="{DynamicResource ControlFillBrush}"
-                        BorderBrush="{DynamicResource BorderBrush}"
-                        BorderThickness="1" CornerRadius="12" Padding="14,11"
-                        Margin="0,12,0,0">
-                    <TextBlock Text="{DynamicResource CaptureNoPingUnlockHint}"
-                               FontSize="{DynamicResource BodyFontSize}" FontWeight="SemiBold"
-                               TextWrapping="Wrap" TextAlignment="Center"/>
-                </Border>
+                <TextBlock Text="{DynamicResource CaptureNoPingUnlockHint}" Margin="0,12,0,0"
+                           Style="{StaticResource SecondaryText}"/>
             </StackPanel></ScrollViewer>
 
             <Button Grid.Row="6" Content="{DynamicResource Close}"

@@ -107,8 +107,7 @@ internal static partial class Program
         var originalStarted = KeyboardField(app, "_startupUpdateCheckStarted");
         using var handler = new TrayUpdateHandler();
         using var http = new HttpClient(handler);
-        using var client = (IDisposable)Activator.CreateInstance(originalClient.GetType(),
-            KeyboardTestMembers, null, [http, null], null)!;
+        using var client = new GitHubReleaseClient(http);
         void SetSetting(string name, bool value) => settings.GetType().GetProperty(name)!.SetValue(settings, value);
         void Reset(bool enabled = true, bool compact = false)
         {

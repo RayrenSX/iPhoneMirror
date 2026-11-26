@@ -73,6 +73,7 @@ internal static class DriverLocalization
             ("Selected-device capture filter installed. Reconnect the device to complete activation.", "DriverFilterInstalledReconnect"),
             ("Parent driver repair stopped after the removal request began. Reconnect the iPhone and review the operation log. ", "DriverParentRepairStopped"),
             ("Parent driver repair was rejected before any system change. ", "DriverParentRepairRejected"),
+            ("Driver operation was rejected before any system change. ", "DriverOperationRejected"),
             ("Driver operation failed and all captured state was restored. ", "DriverOperationRolledBack"),
             ("Driver operation failed and rollback was incomplete. Review the operation log. ", "DriverOperationRollbackIncomplete"),
         ];

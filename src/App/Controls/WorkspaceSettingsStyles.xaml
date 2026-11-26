@@ -1,0 +1,348 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:chrome="clr-namespace:IPhoneMirror.UI.Controls">
+    <Style x:Key="SettingsActionButton" TargetType="Button" BasedOn="{StaticResource SecondaryButton}">
+        <!-- SecondaryButton already draws focus on its rounded border.
+             Avoid a second rectangular adorner when returning from a dialog. -->
+        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+        <Setter Property="HorizontalAlignment" Value="Stretch"/>
+        <Setter Property="MinWidth" Value="0"/>
+        <Setter Property="MinHeight" Value="40"/>
+        <Setter Property="Margin" Value="0"/>
+    </Style>
+
+    <Style x:Key="SettingsScrollThumb" TargetType="Thumb">
+        <Setter Property="MinHeight" Value="28"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Thumb">
+                    <Grid Background="Transparent">
+                        <Border x:Name="Grip" Width="2" HorizontalAlignment="Center" CornerRadius="2"
+                                Background="{DynamicResource ScrollThumbBrush}"/>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Grip" Property="Width" Value="4"/>
+                            <Setter TargetName="Grip" Property="Background" Value="{DynamicResource ScrollThumbHoverBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsDragging" Value="True">
+                            <Setter TargetName="Grip" Property="Width" Value="4"/>
+                            <Setter TargetName="Grip" Property="Background" Value="{DynamicResource ScrollThumbPressedBrush}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="SettingsScrollBar" TargetType="ScrollBar">
+        <Setter Property="Width" Value="10"/>
+        <Setter Property="MinWidth" Value="0"/>
+        <Setter Property="MinHeight" Value="0"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="Focusable" Value="False"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ScrollBar">
+                    <Grid Background="Transparent">
+                        <Track x:Name="PART_Track" IsDirectionReversed="True" Orientation="Vertical"
+                               Minimum="{TemplateBinding Minimum}" Maximum="{TemplateBinding Maximum}"
+                               ViewportSize="{TemplateBinding ViewportSize}"
+                               Value="{Binding Value, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
+                            <Track.DecreaseRepeatButton>
+                                <RepeatButton Command="ScrollBar.PageUpCommand" CommandTarget="{Binding RelativeSource={RelativeSource TemplatedParent}}"
+                                              Style="{StaticResource InvisibleScrollRepeatButtonStyle}"/>
+                            </Track.DecreaseRepeatButton>
+                            <Track.Thumb><Thumb Style="{StaticResource SettingsScrollThumb}"/></Track.Thumb>
+                            <Track.IncreaseRepeatButton>
+                                <RepeatButton Command="ScrollBar.PageDownCommand" CommandTarget="{Binding RelativeSource={RelativeSource TemplatedParent}}"
+                                              Style="{StaticResource InvisibleScrollRepeatButtonStyle}"/>
+                            </Track.IncreaseRepeatButton>
+                        </Track>
+                    </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="SettingsScrollViewer" TargetType="ScrollViewer">
+        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ScrollViewer">
+                    <Grid Background="Transparent" ClipToBounds="True">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="4"/><ColumnDefinition Width="10"/></Grid.ColumnDefinitions>
+                        <ScrollContentPresenter x:Name="PART_ScrollContentPresenter"
+                            Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}"
+                            CanContentScroll="{TemplateBinding CanContentScroll}"/>
+                        <ScrollBar x:Name="PART_VerticalScrollBar" Grid.Column="2" Style="{StaticResource SettingsScrollBar}"
+                            Orientation="Vertical" Maximum="{TemplateBinding ScrollableHeight}"
+                            ViewportSize="{TemplateBinding ViewportHeight}"
+                            Value="{Binding VerticalOffset, RelativeSource={RelativeSource TemplatedParent}, Mode=OneWay}"
+                            Visibility="{TemplateBinding ComputedVerticalScrollBarVisibility}"/>
+                    </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="ControlSectionCard" TargetType="Border">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderSoftBrush}"/>
+        <Setter Property="BorderThickness" Value="0,1,0,0"/>
+        <Setter Property="CornerRadius" Value="0"/>
+        <Setter Property="Padding" Value="0,14,0,0"/>
+        <Setter Property="Margin" Value="0,14,0,0"/>
+    </Style>
+
+    <Style x:Key="SettingsOpeningSection" TargetType="Border" BasedOn="{StaticResource ControlSectionCard}">
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Padding" Value="0"/>
+        <Setter Property="Margin" Value="0"/>
+    </Style>
+
+    <Style x:Key="ControlSectionTitle" TargetType="TextBlock">
+        <Setter Property="TextWrapping" Value="Wrap"/>
+        <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+        <Setter Property="FontSize" Value="{DynamicResource FontSize13}"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+
+    <Style x:Key="SettingsSwitchRow" TargetType="CheckBox" BasedOn="{StaticResource {x:Type CheckBox}}">
+        <Setter Property="Padding" Value="12,8"/>
+        <Setter Property="MinHeight" Value="44"/>
+    </Style>
+
+    <Style x:Key="PreviewAppearanceOptions" TargetType="Border">
+        <Setter Property="Margin" Value="0,10,0,0"/>
+        <Setter Property="Background" Value="{DynamicResource WorkspaceItemBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderSoftBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="12"/>
+    </Style>
+
+    <DataTemplate x:Key="MainPreviewAppearanceSettings">
+        <Border Style="{StaticResource ControlSectionCard}">
+            <StackPanel>
+                <TextBlock Text="{DynamicResource MainPreviewAppearanceTitle}" Style="{StaticResource ControlSectionTitle}"/>
+                <Border Style="{StaticResource PreviewAppearanceOptions}">
+                    <StackPanel>
+                        <CheckBox Style="{StaticResource SettingsSwitchRow}"
+                                  Content="{DynamicResource MainPreviewRoundedCorners}"
+                                  IsChecked="{Binding MainPreviewRoundedCorners, Mode=TwoWay}"
+                                  AutomationProperties.AutomationId="MainPreviewRoundedCornersCheckBox"/>
+                        <Border Height="1" Margin="12,0" Background="{DynamicResource BorderSoftBrush}"/>
+                        <CheckBox Style="{StaticResource SettingsSwitchRow}"
+                                  Content="{DynamicResource MainPreviewPhoneFrame}"
+                                  IsChecked="{Binding MainPreviewPhoneFrame, Mode=TwoWay}"
+                                  IsEnabled="{Binding MainPreviewRoundedCorners}"
+                                  AutomationProperties.AutomationId="MainPreviewPhoneFrameCheckBox"/>
+                        <TextBlock Margin="12,0,12,10" TextWrapping="Wrap"
+                                   FontSize="{DynamicResource CaptionFontSize}"
+                                   AutomationProperties.AutomationId="MainPreviewPhoneFrameHint"
+                                   AutomationProperties.LiveSetting="Polite">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}"/>
+                                    <Setter Property="Text" Value="{DynamicResource MainPreviewPhoneFrameHelp}"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding MainPreviewPhoneFrameApplyFailed}" Value="True">
+                                            <Setter Property="Text" Value="{DynamicResource MainPreviewPhoneFrameFailed}"/>
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding MainPreviewRoundedCorners}" Value="False">
+                                            <Setter Property="Text" Value="{DynamicResource MainPreviewPhoneFrameNeedsCorners}"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </StackPanel>
+                </Border>
+                <TextBlock Text="{DynamicResource SetupSaveFailed}" TextWrapping="Wrap" Margin="0,6,0,0"
+                           FontSize="{DynamicResource CaptionFontSize}" Foreground="{DynamicResource ErrorBrush}"
+                           AutomationProperties.LiveSetting="Polite">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding MainPreviewAppearanceSaveFailed}" Value="True">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+            </StackPanel>
+        </Border>
+    </DataTemplate>
+
+    <Style x:Key="SettingsCategoryTab" TargetType="RadioButton">
+        <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="FontSize" Value="{DynamicResource CaptionFontSize}"/>
+        <Setter Property="MinHeight" Value="44"/>
+        <Setter Property="HorizontalContentAlignment" Value="Center"/>
+        <Setter Property="Template">
+            <Setter.Value><ControlTemplate TargetType="RadioButton">
+                <Grid Background="Transparent">
+                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" Margin="4,8,4,10" RecognizesAccessKey="True">
+                        <ContentPresenter.Resources><Style TargetType="TextBlock"><Setter Property="TextWrapping" Value="Wrap"/><Setter Property="TextAlignment" Value="Center"/></Style></ContentPresenter.Resources>
+                    </ContentPresenter>
+                    <Border x:Name="Indicator" Height="3" Margin="16,0,16,0" VerticalAlignment="Bottom" CornerRadius="2" Background="{DynamicResource AccentBrush}" Visibility="Collapsed"/>
+                </Grid>
+                <ControlTemplate.Triggers>
+                    <Trigger Property="IsChecked" Value="True"><Setter Property="Foreground" Value="{DynamicResource TextBrush}"/><Setter Property="FontWeight" Value="SemiBold"/><Setter TargetName="Indicator" Property="Visibility" Value="Visible"/></Trigger>
+                </ControlTemplate.Triggers>
+            </ControlTemplate></Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="UsbModeTabItem" TargetType="ListBoxItem">
+        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+        <Setter Property="VerticalContentAlignment" Value="Stretch"/>
+        <Setter Property="Margin" Value="2"/>
+        <Setter Property="Padding" Value="7,6"/>
+        <Setter Property="MinHeight" Value="38"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ListBoxItem">
+                    <Border x:Name="TabRoot" Background="{TemplateBinding Background}"
+                            BorderBrush="Transparent" BorderThickness="1"
+                            CornerRadius="10" Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="TabRoot" Property="Background" Value="{DynamicResource ControlHoverBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter TargetName="TabRoot" Property="Background" Value="{DynamicResource AccentBrush}"/>
+                            <Setter TargetName="TabRoot" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource OnAccentBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.4"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="UsbModeInfoButton" TargetType="Button">
+        <Setter Property="Width" Value="18"/>
+        <Setter Property="Height" Value="18"/>
+        <Setter Property="MinHeight" Value="18"/>
+        <Setter Property="Padding" Value="0"/>
+        <Setter Property="FontSize" Value="{DynamicResource FontSize11}"/>
+        <Setter Property="FontWeight" Value="Bold"/>
+        <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}"/>
+        <Setter Property="Background" Value="{DynamicResource ControlFillBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource MutedTextBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="InfoRoot" Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="9">
+                        <TextBlock Text="!" Foreground="{TemplateBinding Foreground}"
+                                   FontSize="{TemplateBinding FontSize}"
+                                   FontWeight="{TemplateBinding FontWeight}"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="InfoRoot" Property="Background" Value="{DynamicResource ControlHoverBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="InfoRoot" Property="Background" Value="{DynamicResource ControlPressedBrush}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <DataTemplate x:Key="WirelessSettingsForm">
+        <StackPanel>
+            <StackPanel>
+                <TextBlock Text="{DynamicResource WirelessReceiverTitle}" Style="{StaticResource ControlSectionTitle}"/>
+                <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Margin="0,4,0,0"
+                    TextWrapping="Wrap"
+                    Text="{DynamicResource WirelessServiceAlwaysOn}"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Center"
+                    Foreground="{DynamicResource MutedTextBrush}"
+                    FontSize="{DynamicResource CaptionFontSize}"/>
+            </StackPanel>
+            <TextBlock Text="{DynamicResource WirelessBackendLabel}" Style="{StaticResource DetailLabel}" Margin="0,10,0,5"/>
+            <ComboBox AutomationProperties.Name="{DynamicResource WirelessBackendLabel}"
+                ItemsSource="{Binding WirelessReceiverBackends}"
+                DisplayMemberPath="Label"
+                SelectedItem="{Binding SelectedWirelessReceiverBackend, Mode=TwoWay}"
+                AutomationProperties.AutomationId="WirelessBackendComboBox"/>
+            <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{Binding AppliedWirelessBackendDisplay}"
+                Foreground="{DynamicResource MutedTextBrush}"
+                FontSize="{DynamicResource CaptionFontSize}"
+                TextWrapping="Wrap"
+                Margin="1,4,0,0"/>
+            <TextBlock Text="{DynamicResource WirelessResolutionLabel}" Style="{StaticResource DetailLabel}" Margin="0,10,0,5"/>
+            <ComboBox AutomationProperties.Name="{DynamicResource WirelessResolutionLabel}"
+                ItemsSource="{Binding WirelessDisplayProfiles}"
+                DisplayMemberPath="Label"
+                SelectedItem="{Binding SelectedWirelessDisplayProfile, Mode=TwoWay}"
+                AutomationProperties.AutomationId="WirelessResolutionComboBox"/>
+            <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource WirelessResolutionHelp}"
+                Foreground="{DynamicResource MutedTextBrush}"
+                FontSize="{DynamicResource CaptionFontSize}"
+                TextWrapping="Wrap"
+                Margin="0,6,0,0"/>
+            <StackPanel Visibility="{Binding WirelessRaopPortVisibility}" Margin="0,10,0,0">
+                <TextBlock Text="{DynamicResource WirelessRaopPortLabel}" Style="{StaticResource DetailLabel}" Margin="0,0,0,5"/>
+                <TextBox AutomationProperties.Name="{DynamicResource WirelessRaopPortLabel}"
+                         AutomationProperties.AutomationId="WirelessRaopPortTextBox"
+                         Text="{Binding WirelessRaopPortText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                         Style="{StaticResource ReceiverTextBox}" MaxLength="5"/>
+                <TextBlock Text="{Binding WirelessRaopPortValidation}" Visibility="{Binding WirelessRaopPortValidationVisibility}"
+                           TextWrapping="Wrap" Foreground="{DynamicResource ErrorBrush}" FontSize="{DynamicResource CaptionFontSize}" Margin="0,5,0,0"/>
+                <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource WirelessRaopPortHelp}" TextWrapping="Wrap"
+                           Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}" Margin="0,5,0,0"/>
+            </StackPanel>
+            <StackPanel Margin="0,10,0,0">
+                <TextBlock Text="{DynamicResource WirelessReceiverNameLabel}" Style="{StaticResource DetailLabel}" Margin="0,0,0,5"/>
+                <TextBox AutomationProperties.Name="{DynamicResource WirelessReceiverNameLabel}"
+                    Text="{Binding WirelessReceiverName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                    Style="{StaticResource ReceiverTextBox}"
+                    MaxLength="63"
+                    ToolTip="{DynamicResource WirelessReceiverNameLabel}"/>
+                <Button Margin="0,8,0,0"
+                    Content="{DynamicResource ApplyWirelessSettings}"
+                    Command="{Binding ApplyWirelessSettingsCommand}"
+                    Style="{StaticResource SettingsActionButton}"/>
+            </StackPanel>
+            <DockPanel Margin="1,8,0,0">
+                <Ellipse Width="6"
+                    Height="6"
+                    chrome:StatusAppearance.Tone="{Binding WirelessStatusTone}"
+                    VerticalAlignment="Center"
+                    Margin="0,0,7,0"/>
+                <TextBlock Text="{Binding WirelessStatus}"
+                    chrome:StatusAppearance.Tone="{Binding WirelessStatusTone}"
+                    FontSize="{DynamicResource CaptionFontSize}"
+                    TextWrapping="Wrap"/>
+            </DockPanel>
+            <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{Binding AppliedWirelessProfileDisplay}"
+                Foreground="{DynamicResource MutedTextBrush}"
+                FontSize="{DynamicResource CaptionFontSize}"
+                TextWrapping="Wrap"
+                Margin="1,4,0,0"/>
+        </StackPanel>
+    </DataTemplate>
+</ResourceDictionary>

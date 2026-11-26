@@ -15,42 +15,112 @@ internal sealed class DeviceHubExplorerFileStore : IExplorerFileStore
     private const int PageSize = 500;
     private const int MaximumEntries = 100_000;
     private readonly Func<string, object?, CancellationToken, Task<JsonElement>> _request;
+    private readonly string _root;
+    private readonly string? _bundleId;
+    private readonly string? _domain;
+    private readonly string? _identifier;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly TimeSpan _queueTimeout;
     private readonly ConditionalWeakTable<ExplorerFileEntry, Snapshot> _snapshots = new();
     // AFC has no Windows creation/access/archive properties. These values
     // belong only to this mapping session and expire with its phone snapshot.
     private readonly Dictionary<string, WindowsOverlay> _windowsProperties = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _readOnlyPaths = new(StringComparer.Ordinal);
     private int _admitted;
+    private readonly ExplorerTreeCache? _treeCache;
+    private readonly string? _cacheScope;
+    private readonly Action? _foregroundAccess;
 
     internal DeviceHubExplorerFileStore(Func<string, object?, CancellationToken, Task<JsonElement>> request,
-        TimeSpan? queueTimeout = null)
+        TimeSpan? queueTimeout = null, string root = "media", string? bundleId = null,
+        string? domain = null, string? identifier = null, ExplorerTreeCache? treeCache = null,
+        string? cacheScope = null, Action? foregroundAccess = null)
     {
         _request = request ?? throw new ArgumentNullException(nameof(request));
+        if (root is not ("media" or "crashes" or "documents" or "container" or "coredevice" or "system" or "symbols") ||
+            (root is "documents" or "container") != (bundleId is not null) || (root == "coredevice") != (domain is not null))
+            throw new ArgumentException("Choose a phone file service and its document application.", nameof(root));
+        _root = root;
+        _bundleId = bundleId;
+        _domain = domain;
+        _identifier = identifier;
+        (_treeCache, _cacheScope, _foregroundAccess) = (treeCache, cacheScope, foregroundAccess);
         _queueTimeout = queueTimeout ?? TimeSpan.FromSeconds(15);
         if (_queueTimeout <= TimeSpan.Zero || _queueTimeout > TimeSpan.FromMinutes(1))
             throw new ArgumentOutOfRangeException(nameof(queueTimeout));
     }
 
-    public bool IsReadOnly => false;
+    public bool IsReadOnly => _root is "crashes" or "coredevice" or "system" or "symbols";
 
-    public Task<ExplorerFileEntry?> StatAsync(string path, CancellationToken cancellation) => RunAsync(async () =>
+    public Task<ExplorerFileEntry?> StatAsync(string path, CancellationToken cancellation)
+    {
+        cancellation.ThrowIfCancellationRequested();
+        ValidatePath(path, allowRoot: true);
+        if (_treeCache is not null && _cacheScope is not null && _treeCache.TryDirectoryMetadata(_cacheScope, path, out var cached))
+        {
+            try
+            {
+                var entry = ParseEntry(cached, path, cached: true);
+                _treeCache.RequestRefresh(_cacheScope, path);
+                return Task.FromResult<ExplorerFileEntry?>(entry);
+            }
+            catch (IOException) { _treeCache.Invalidate(_cacheScope, path); }
+        }
+        return StatFreshAsync(path, cancellation);
+    }
+
+    public Task<ExplorerFileEntry?> StatFreshAsync(string path, CancellationToken cancellation) => RunAsync(async () =>
     {
         ValidatePath(path, allowRoot: true);
         try
         {
             var value = await RequestAsync("stat_file", new { root = "media", path }, cancellation).ConfigureAwait(false);
-            if (value.ValueKind != JsonValueKind.Null) return ParseEntry(value, path);
+            if (value.ValueKind != JsonValueKind.Null)
+            {
+                var entry = ParseEntry(value, path);
+                RememberStat(path, value, entry.IsReadOnly);
+                return entry;
+            }
+            InvalidateTree(path);
             ClearProperties(path);
             return null;
         }
-        catch (FileNotFoundException) { ClearProperties(path); return null; }
+        catch (FileNotFoundException) { InvalidateTree(path); ClearProperties(path); return null; }
     }, cancellation);
 
-    public Task<IReadOnlyList<ExplorerFileEntry>> ListAsync(string path, CancellationToken cancellation) => RunAsync<IReadOnlyList<ExplorerFileEntry>>(async () =>
+    public Task<IReadOnlyList<ExplorerFileEntry>> ListAsync(string path, CancellationToken cancellation)
+    {
+        cancellation.ThrowIfCancellationRequested();
+        ValidatePath(path, allowRoot: true);
+        if (_treeCache is not null && _cacheScope is not null && _treeCache.TryDirectory(_cacheScope, path, out var cached))
+        {
+            try
+            {
+                IReadOnlyList<ExplorerFileEntry> entries = cached.Select(item => ParseEntry(item, item.GetProperty("path").GetString()!, cached: true)).ToArray();
+                _treeCache.RequestRefresh(_cacheScope, path);
+                return Task.FromResult(entries);
+            }
+            catch (IOException) { _treeCache.Invalidate(_cacheScope, path); }
+        }
+        return RunAsync(() => ListLiveAsync(path, cancellation), cancellation);
+    }
+
+    internal Task RefreshDirectoryAsync(string path, CancellationToken cancellation) =>
+        RunAsync(async () =>
+        {
+            var value = await RequestAsync("stat_file", new { root = "media", path }, cancellation).ConfigureAwait(false);
+            if (value.ValueKind == JsonValueKind.Null) { InvalidateTree(path); throw new DirectoryNotFoundException("The phone directory no longer exists."); }
+            var entry = ParseEntry(value, path);
+            RememberStat(path, value, entry.IsReadOnly);
+            if (!entry.IsDirectory) { InvalidateTree(path); throw new DirectoryNotFoundException("The phone path is no longer a directory."); }
+            return await ListLiveAsync(path, cancellation).ConfigureAwait(false);
+        }, cancellation, background: true);
+
+    private async Task<IReadOnlyList<ExplorerFileEntry>> ListLiveAsync(string path, CancellationToken cancellation)
     {
         ValidatePath(path, allowRoot: true);
         var entries = new List<ExplorerFileEntry>();
+        var metadata = new List<JsonElement>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
         int offset = 0;
         int? total = null;
@@ -77,7 +147,9 @@ internal sealed class DeviceHubExplorerFileStore : IExplorerFileStore
                 // 'other'. They must never become traversable mapped entries.
                 var type = String(child, "type");
                 if (type == "other") { ClearProperties(childPath); continue; }
-                entries.Add(ParseEntry(child, childPath));
+                var entry = ParseEntry(child, childPath);
+                entries.Add(entry);
+                if (_treeCache is not null) metadata.Add(CacheMetadata(child, entry.IsReadOnly));
                 if (entries.Count > MaximumEntries) throw InvalidResponse();
             }
             if (next.ValueKind == JsonValueKind.Null)
@@ -88,13 +160,14 @@ internal sealed class DeviceHubExplorerFileStore : IExplorerFileStore
                     var child = prefix + known[prefix.Length..].Split('/')[0];
                     if (!seen.Contains(child)) ClearProperties(child);
                 }
+                if (_treeCache is not null && _cacheScope is not null) _treeCache.RememberDirectory(_cacheScope, path, metadata.ToArray());
                 return entries;
             }
             if (!next.TryGetInt32(out var nextOffset) || nextOffset != offset + PageSize ||
                 nextOffset >= currentTotal || nextOffset > MaximumEntries) throw InvalidResponse();
             offset = nextOffset;
         }
-    }, cancellation);
+    }
 
     public Task<ReadOnlyMemory<byte>> ReadAsync(ExplorerFileEntry expected, long offset, int count,
         CancellationToken cancellation) => RunAsync<ReadOnlyMemory<byte>>(async () =>
@@ -178,6 +251,8 @@ internal sealed class DeviceHubExplorerFileStore : IExplorerFileStore
         CancellationToken cancellation) => RunAsync(async () =>
     {
         ValidatePath(expected.Path, allowRoot: false);
+        if (IsReadOnly || expected.IsReadOnly || _readOnlyPaths.Any(root => IsRooted(expected.Path, root)))
+            throw new UnauthorizedAccessException("The mapped phone file or folder is read-only.");
         var previous = Expected(expected);
         if (properties.Win32Attributes is { } attributes &&
             attributes is not (0 or 32 or 128) && !(expected.IsDirectory && attributes == 16))
@@ -192,6 +267,7 @@ internal sealed class DeviceHubExplorerFileStore : IExplorerFileStore
             throw new FileNotFoundException("The phone file was not found.");
         }
         var fresh = ParseEntry(value, expected.Path);
+        if (fresh.IsReadOnly) throw new UnauthorizedAccessException("The mapped phone file or folder is read-only.");
         if (!MetadataMatches(previous.Metadata, Expected(fresh).Metadata))
             throw new ExplorerFileConflictException("The phone file changed before its metadata update.");
         var existing = fresh.WindowsProperties!;
@@ -208,12 +284,14 @@ internal sealed class DeviceHubExplorerFileStore : IExplorerFileStore
             properties.LastAccessTime ?? existing.LastAccessTime, fresh.Modified,
             properties.Win32Attributes ?? existing.Win32Attributes);
         _windowsProperties[expected.Path] = new(Expected(fresh), merged);
+        InvalidateTree(expected.Path);
         return true;
     }, cancellation);
 
-    private async Task<T> RunAsync<T>(Func<Task<T>> operation, CancellationToken cancellation)
+    private async Task<T> RunAsync<T>(Func<Task<T>> operation, CancellationToken cancellation, bool background = false)
     {
         cancellation.ThrowIfCancellationRequested();
+        if (!background) _foregroundAccess?.Invoke();
         if (Interlocked.Increment(ref _admitted) > 32)
         {
             Interlocked.Decrement(ref _admitted);
@@ -236,9 +314,29 @@ internal sealed class DeviceHubExplorerFileStore : IExplorerFileStore
 
     private async Task<JsonElement> RequestAsync(string action, object arguments, CancellationToken cancellation)
     {
-        try { return await _request(action, arguments, cancellation).ConfigureAwait(false); }
+        var scoped = JsonSerializer.SerializeToElement(arguments).EnumerateObject()
+            .ToDictionary(p => p.Name, p => p.Value.Clone());
+        var writing = action is not ("stat_file" or "list_dir" or "read_file");
+        var path = scoped["path"].GetString()!;
+        if (writing && (IsReadOnly || _readOnlyPaths.Any(root => IsRooted(path, root)) ||
+            action == "move_file" && _readOnlyPaths.Any(root => IsRooted(scoped["destination"].GetString()!, root))))
+            throw new UnauthorizedAccessException("The mapped phone file or folder is read-only.");
+        scoped["root"] = JsonSerializer.SerializeToElement(_root);
+        scoped["mappedNames"] = JsonSerializer.SerializeToElement(true);
+        if (_bundleId is not null) scoped["bundleId"] = JsonSerializer.SerializeToElement(_bundleId);
+        if (_domain is not null)
+        {
+            scoped["domain"] = JsonSerializer.SerializeToElement(_domain);
+            scoped["identifier"] = JsonSerializer.SerializeToElement(_identifier ?? "");
+        }
+        // Refresh crash reports only at the start of a root enumeration, not
+        // during a file read or between pages of the same listing.
+        if (_root == "crashes" && action == "list_dir" && scoped["path"].GetString() == "" && scoped["offset"].GetInt32() == 0)
+            scoped["refresh"] = JsonSerializer.SerializeToElement(true);
+        try { return await _request(action, scoped, cancellation).ConfigureAwait(false); }
         catch (AutomationException error)
         {
+            if (writing && error.Code is "FILE_ACCESS_DENIED" or "ACCESS_DENIED") _readOnlyPaths.Add(path);
             throw error.Code switch
             {
                 "FILE_MAPPING_CONFLICT" or "FILE_CHANGED" => new ExplorerFileConflictException("The phone file changed; refresh and retry."),
@@ -248,9 +346,34 @@ internal sealed class DeviceHubExplorerFileStore : IExplorerFileStore
                 _ => new IOException("The phone file operation failed."),
             };
         }
+        finally
+        {
+            if (writing)
+            {
+                InvalidateTree(path);
+                if (action == "move_file") InvalidateTree(scoped["destination"].GetString()!);
+            }
+        }
     }
 
-    private ExplorerFileEntry ParseEntry(JsonElement value, string path)
+    private void InvalidateTree(string path)
+    {
+        if (_treeCache is not null && _cacheScope is not null) _treeCache.Invalidate(_cacheScope, path);
+    }
+
+    private void RememberStat(string path, JsonElement value, bool readOnly)
+    {
+        if (_treeCache is not null && _cacheScope is not null) _treeCache.RememberStat(_cacheScope, path, CacheMetadata(value, readOnly));
+    }
+
+    private static JsonElement CacheMetadata(JsonElement value, bool readOnly)
+    {
+        var fields = value.EnumerateObject().ToDictionary(field => field.Name, field => field.Value.Clone());
+        fields["readOnly"] = JsonSerializer.SerializeToElement(readOnly);
+        return JsonSerializer.SerializeToElement(fields);
+    }
+
+    private ExplorerFileEntry ParseEntry(JsonElement value, string path, bool cached = false)
     {
         ValidatePath(path, allowRoot: true);
         if (value.ValueKind != JsonValueKind.Object || String(value, "path") != path ||
@@ -262,13 +385,29 @@ internal sealed class DeviceHubExplorerFileStore : IExplorerFileStore
         var snapshot = new Snapshot(JsonSerializer.SerializeToElement(new { type, size = length, modified }), modified.Clone());
         var timestamp = ParseModified(modified);
         var properties = new ExplorerFileProperties(timestamp, timestamp, timestamp, type == "directory" ? 16u : 32u);
+        if (cached)
+        {
+            var locked = IsReadOnly || value.TryGetProperty("readOnly", out var flag) && flag.ValueKind == JsonValueKind.True;
+            if (locked) properties = properties with { Win32Attributes = properties.Win32Attributes | 1u };
+            var preview = new ExplorerFileEntry(path, String(value, "name"), type == "directory", length, timestamp, properties, locked);
+            _snapshots.Add(preview, snapshot);
+            return preview;
+        }
+        if (value.TryGetProperty("readOnly", out var access))
+        {
+            if (access.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) throw InvalidResponse();
+            if (access.GetBoolean()) _readOnlyPaths.Add(path);
+            else _readOnlyPaths.Remove(path);
+        }
         if (_windowsProperties.TryGetValue(path, out var overlay))
         {
             if (MetadataMatches(snapshot.Metadata, overlay.Snapshot.Metadata)) properties = overlay.Properties;
             else if (type == "directory") _windowsProperties.Remove(path);
             else ClearProperties(path);
         }
-        var entry = new ExplorerFileEntry(path, String(value, "name"), type == "directory", length, timestamp, properties);
+        var readOnly = IsReadOnly || _readOnlyPaths.Any(root => IsRooted(path, root));
+        if (readOnly) properties = properties with { Win32Attributes = properties.Win32Attributes | 1u };
+        var entry = new ExplorerFileEntry(path, String(value, "name"), type == "directory", length, timestamp, properties, readOnly);
         // DateTimeOffset cannot represent every nanosecond reported by AFC.
         // Keep the exact wire snapshot for preconditions and every read block.
         _snapshots.Add(entry, snapshot);
@@ -326,7 +465,7 @@ internal sealed class DeviceHubExplorerFileStore : IExplorerFileStore
         value.TryGetProperty(property, out var item) && item.ValueKind == JsonValueKind.String
             ? item.GetString()! : throw InvalidResponse();
 
-    private static void ValidatePath(string path, bool allowRoot)
+    internal static void ValidatePath(string path, bool allowRoot)
     {
         if (path is null || path.Length > 2048 || path.Length == 0 && !allowRoot || path.Contains('\\') || path.Contains(':') ||
             path.Any(char.IsControl) || path.Length > 0 && path.Split('/').Any(part => part.Length == 0 || part is "." or ".." || Encoding.UTF8.GetByteCount(part) > 255))

@@ -3,65 +3,56 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:animations="clr-namespace:IPhoneMirror.UI.Animations"
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
-        Title="iPhoneMirror" Width="702" Height="462"
-        MinWidth="642" MinHeight="422" ResizeMode="CanResize"
+        Title="iPhoneMirror" Width="560" SizeToContent="Height" MaxHeight="600"
+        ResizeMode="NoResize"
         WindowStartupLocation="CenterScreen"
         Foreground="{DynamicResource TextBrush}"
         AutomationProperties.AutomationId="StartupErrorWindow"
         xmlns:chrome="clr-namespace:IPhoneMirror.UI.Controls"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent">
-    <Grid Style="{StaticResource SubWindowPageRoot}"
+    <Border Padding="24" Style="{StaticResource RoundedWindowContent}">
+    <Grid
           animations:PageTransition.IsEnabled="True">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="16"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="20"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="14"/>
-            <RowDefinition Height="*" MinHeight="{StaticResource DialogContentMinHeight}"/>
+            <RowDefinition Height="*"/>
             <RowDefinition Height="20"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <Grid Style="{StaticResource SubWindowHeader}"
+        <Grid x:Name="NoticeHeader" Style="{StaticResource SubWindowHeader}"
               animations:WindowDragBehavior.IsEnabled="True">
-            <TextBlock x:Name="HeadingText" Style="{StaticResource SubWindowTitle}"
-                       Margin="0,0,48,0"/>
-            <Button Style="{StaticResource SubWindowCloseButton}" Click="OnCloseClick">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <Border x:Name="HeaderIcon" Style="{StaticResource NoticeHeaderIcon}"
+                    Background="{DynamicResource ErrorSurfaceBrush}">
+                <ui:SymbolIcon Symbol="ErrorCircle20" Foreground="{DynamicResource ErrorBrush}"
+                               FontSize="20" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <TextBlock x:Name="HeadingText" Grid.Column="1" Style="{StaticResource NoticeHeaderTitle}"/>
+            <Button x:Name="HeaderClose" Grid.Column="2" Style="{StaticResource NoticeHeaderCloseButton}" Click="OnCloseClick">
                 <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Dismiss20" FontSize="18"/>
             </Button>
         </Grid>
-        <TextBlock x:Name="SummaryText" Grid.Row="2" FontSize="{DynamicResource SectionTitleFontSize}"
-                   Foreground="{DynamicResource MutedTextBrush}"
-                   TextWrapping="Wrap"/>
-
-        <StackPanel Grid.Row="4">
-            <TextBlock x:Name="LogLabelText" FontSize="{DynamicResource SecondaryFontSize}" Margin="0,0,0,7"/>
-            <TextBox x:Name="LogPathTextBox" Style="{StaticResource RoundedTextBox}"
-                     IsReadOnly="True" MinHeight="38" VerticalContentAlignment="Center"/>
+        <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel>
+        <TextBlock x:Name="SummaryText" Style="{StaticResource BodyText}"/>
+        <TextBox x:Name="DetailsTextBox" Style="{StaticResource NoticeDiagnosticText}"
+                 Margin="0,10,0,0"/>
         </StackPanel>
-
-        <ScrollViewer Grid.Row="6" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-        <Expander x:Name="DetailsExpander" IsExpanded="False"
-                  Foreground="{DynamicResource TextBrush}">
-            <Border Style="{StaticResource SettingsSection}" CornerRadius="12"
-                    Padding="0" Margin="0,8,0,0">
-                <TextBox x:Name="DetailsTextBox" IsReadOnly="True" MinHeight="100" MaxHeight="220"
-                         Background="Transparent" Foreground="{DynamicResource MutedTextBrush}"
-                         BorderThickness="0" FontFamily="{StaticResource CodeFontFamily}" FontSize="{DynamicResource SecondaryFontSize}"
-                         TextWrapping="NoWrap" HorizontalScrollBarVisibility="Auto"
-                         VerticalScrollBarVisibility="Auto" Padding="10"/>
-            </Border>
-        </Expander>
         </ScrollViewer>
 
-        <StackPanel Grid.Row="8" Orientation="Horizontal" HorizontalAlignment="Right">
+        <WrapPanel Grid.Row="4" HorizontalAlignment="Right">
             <Button x:Name="OpenLogButton" MinWidth="132" Margin="0,0,8,0"
                     Click="OnOpenLogClick"/>
             <Button x:Name="CloseButton" MinWidth="96"
-                    Style="{StaticResource PrimaryButton}" IsDefault="True"
+                    Style="{StaticResource PrimaryButton}" IsDefault="True" IsCancel="True"
                     Click="OnCloseClick"/>
-        </StackPanel>
+        </WrapPanel>
     </Grid>
+    </Border>
 </chrome:RoundedWindow>

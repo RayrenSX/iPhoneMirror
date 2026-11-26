@@ -40,7 +40,7 @@ public:
     ~UsbOrientationMonitor();
     UsbOrientationMonitor(const UsbOrientationMonitor&) = delete;
     UsbOrientationMonitor& operator=(const UsbOrientationMonitor&) = delete;
-    [[nodiscard]] bool start(std::string_view serial, std::stop_token stop);
+    [[nodiscard]] bool start(std::string_view serial, std::stop_token stop, bool required = true);
     void stop() noexcept;
     [[nodiscard]] std::optional<unsigned> at(detail::OrientationTimeline::Clock::time_point time) const;
 private:

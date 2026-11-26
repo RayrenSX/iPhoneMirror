@@ -17,9 +17,7 @@ internal sealed partial class DeviceHubPanel
         _viewModel.PropertyChanged += OnExplorerMappingStateChanged;
 
     private bool OwnsExplorerMapping => _device is not null &&
-        DeviceViewModel.UdidEquals(_device.Udid, _viewModel.ExplorerMappingDeviceUdid) &&
-        _viewModel.ExplorerMappingDriveName.Length > 0 &&
-        _viewModel.ExplorerMappingBundleId == SelectedDocumentBundle;
+        DeviceViewModel.UdidEquals(_device.Udid, _viewModel.ExplorerMappingDeviceUdid);
 
     private void OnExplorerMappingStateChanged(object? sender, PropertyChangedEventArgs e)
     {
@@ -40,19 +38,18 @@ internal sealed partial class DeviceHubPanel
         if (!_initialized || _disposed) return;
         var own = OwnsExplorerMapping;
         var busy = _explorerMappingUiPending || _viewModel.ExplorerMappingBusy;
-        var media = Option(FileRoot) != "crashes";
         var fileToolsVisible = _page == 3 && (_ready || _hasConnected || own);
         FileToolbar.Visibility = fileToolsVisible ? Visibility.Visible : Visibility.Collapsed;
         FileToolbar.IsEnabled = _ready && (!_busy || _quietOperation);
-        ExplorerMappingRow.Visibility = fileToolsVisible && media
+        ExplorerMappingRow.Visibility = fileToolsVisible
             ? Visibility.Visible : Visibility.Collapsed;
         _syncingExplorerMapping = true;
         try { ExplorerMappingToggle.IsChecked = own; }
         finally { _syncingExplorerMapping = false; }
-        ExplorerMappingToggle.IsEnabled = !busy && _device is not null &&
-            (own || _ready && media && !_busy);
-        ExplorerMappingOpen.Visibility = own ? Visibility.Visible : Visibility.Collapsed;
-        ExplorerMappingOpen.IsEnabled = own && !busy;
+        ExplorerMappingToggle.IsEnabled = _device is not null && (own || !busy && _ready && !_busy);
+        var mapped = own && _viewModel.ExplorerMappingDriveName.Length > 0;
+        ExplorerMappingOpen.Visibility = mapped ? Visibility.Visible : Visibility.Collapsed;
+        ExplorerMappingOpen.IsEnabled = mapped && !busy;
         var help = L("ExplorerHelp");
         if (_viewModel.ExplorerMappingLimitBytes > 0)
             help += Environment.NewLine + F("ExplorerLimitFormat", FormatBytes(_viewModel.ExplorerMappingLimitBytes));
@@ -61,7 +58,8 @@ internal sealed partial class DeviceHubPanel
         ExplorerMappingOpen.ToolTip = L("ExplorerOpen");
         var error = _explorerMappingOpenError ??
             (_viewModel.ExplorerMappingHasError ? _viewModel.ExplorerMappingStatus : null);
-        ExplorerMappingFeedback.Text = error ?? (own ? F("ExplorerMappedFormat", _viewModel.ExplorerMappingDriveName) : "");
+        ExplorerMappingFeedback.Text = error ?? (own || busy ? _viewModel.ExplorerMappingStatus :
+            own ? F("ExplorerMappedFormat", _viewModel.ExplorerMappingDriveName) : "");
         ExplorerMappingFeedback.Visibility = ExplorerMappingFeedback.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         ExplorerMappingFeedback.SetResourceReference(TextBlock.ForegroundProperty,
             error is not null ? "ErrorBrush" : "MutedTextBrush");
@@ -69,12 +67,11 @@ internal sealed partial class DeviceHubPanel
 
     private async void OnExplorerMappingChanged(object sender, RoutedEventArgs e)
     {
-        if (!_initialized || _disposed || _syncingExplorerMapping || _explorerMappingUiPending) return;
+        if (!_initialized || _disposed || _syncingExplorerMapping) return;
         var device = _device;
         var enable = ExplorerMappingToggle.IsChecked == true;
         var own = OwnsExplorerMapping;
-        if (device is null || _viewModel.ExplorerMappingBusy ||
-            enable && (!_ready || _busy || Option(FileRoot) == "crashes") || !enable && !own)
+        if (device is null || enable && (_explorerMappingUiPending || _viewModel.ExplorerMappingBusy || !_ready || _busy) || !enable && !own)
         { SyncExplorerMapping(); return; }
         _explorerMappingUiPending = true;
         _explorerMappingOpenError = null;
@@ -83,7 +80,7 @@ internal sealed partial class DeviceHubPanel
         {
             // The view model owns mapping lifetime. Changing tabs or hiding this
             // panel must not cancel a valid Explorer connection.
-            await _viewModel.SetExplorerDocumentMappingAsync(device, enable, SelectedDocumentBundle);
+            await _viewModel.SetExplorerMappingAsync(device, enable);
         }
         catch (Exception error)
         {

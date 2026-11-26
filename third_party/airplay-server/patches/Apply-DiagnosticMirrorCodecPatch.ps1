@@ -24,6 +24,8 @@ $globalBefore = '#define GLOBAL_FEATURES_2 0x00000400U'
 $globalAfter = @'
 /* IPHONE_MIRROR_DIAGNOSTIC_MIRROR_CODEC_POLICY */
 #include "airplay-mirror-codec-policy.h"
+#undef GLOBAL_FEATURES_1
+#define GLOBAL_FEATURES_1 (iphone_mirror_mirror_features_low())
 #define GLOBAL_FEATURES_2 (iphone_mirror_mirror_features_high())
 '@ -replace '\r\n', "`n"
 $global = Replace-ExactlyOnce $global $globalBefore $globalAfter.TrimEnd("`n") 'global mirror feature word'
@@ -40,7 +42,147 @@ if (-not $info.Contains('IPHONE_MIRROR_NO_COMBINED_HANDOFF') -or
     -not $info.Contains('IPHONE_MIRROR_MEDIA_NO_DISPLAY')) {
     throw 'Apply the complete AirPlay role/control recipes before diagnostic codec policy.'
 }
+$infoBefore = @'
+	const char *data;
+	int datalen;
+	data = http_request_get_data(request, &datalen);
+
+	// Binary plist with display capabilities
+'@
+$infoAfter = @'
+	(void)conn;
+	(void)request;
+
+	// Binary plist with display capabilities
+'@
+$info = Replace-ExactlyOnce $info $infoBefore $infoAfter '/info reuse on event channel'
+$infoBefore = "`tif (capability_root) plist_to_bin(capability_root, response_data, &encoded_len);"
+$infoAfter = @'
+	if (capability_root && iphone_mirror_diagnostic_video_only_capabilities()) {
+		plist_dict_remove_item(capability_root, "audioFormats");
+		plist_dict_remove_item(capability_root, "audioLatencies");
+	}
+	if (capability_root) plist_to_bin(capability_root, response_data, &encoded_len);
+'@
+$info = Replace-ExactlyOnce $info $infoBefore $infoAfter 'video-only /info audio capability removal'
+$setup = "static void`nraop_handler_setup("
+$info = Replace-ExactlyOnce $info $setup ('#include "airplay-audio-event-test.h"' + "`n`n" + $setup) 'audio event functions'
+$eventSetupBefore = @'
+		if (deviceId != NULL) {
+			free(deviceId); deviceId = NULL;
+		}
+	}
+	else if (stream_type == 110) { // mirror stream setup
+'@
+$eventSetupAfter = @'
+		if (deviceId != NULL) {
+			free(deviceId); deviceId = NULL;
+		}
+		if (conn->raop_rtp_mirror && iphone_mirror_diagnostic_mirror_audio_event()) {
+			const unsigned short event_port = iphone_mirror_event_start(conn);
+			if (event_port) {
+				plist_t setup = plist_new_dict();
+				plist_dict_set_item(setup, "eventPort", plist_new_uint(event_port));
+				uint32_t encoded_length = 0;
+				plist_to_bin(setup, response_data, &encoded_length);
+				plist_free(setup);
+				if (*response_data) {
+					*response_datalen = (int)encoded_length;
+					http_response_add_header(response, "Content-Type", "application/x-apple-binary-plist");
+				}
+			}
+		}
+	}
+	else if (stream_type == 110) { // mirror stream setup
+'@
+$info = Replace-ExactlyOnce $info $eventSetupBefore $eventSetupAfter 'initial audio event port'
+$legacyEventPort = 'plist_t event_port_node = plist_new_uint(conn->raop->port);'
+$diagnosticEventPort = 'plist_t event_port_node = plist_new_uint(iphone_mirror_diagnostic_mirror_audio_event() ? iphone_mirror_event_start(conn) : conn->raop->port);'
+$info = Replace-ExactlyOnce $info $legacyEventPort $diagnosticEventPort 'mirror event port'
+$teardownBefore = "`tif (type == 96) {"
+$teardownAfter = @'
+	if (iphone_mirror_diagnostic_mirror_audio_event())
+		logger_log(conn->raop->logger, LOGGER_INFO,
+			"IPHONE_MIRROR_VIDEO_DIAG 40 %d 5 %d 0 0 0",
+			iphone_mirror_diagnostic_mirror_audio_event(), (int)type);
+	if (type == 96) {
+'@
+$info = Replace-ExactlyOnce $info $teardownBefore $teardownAfter 'audio/video teardown observation'
 $edits += @{ Path = $infoPath; Text = $info }
+
+$raopPath = Join-Path $source 'AirPlayServerLib/lib/raop.c'
+$raop = [IO.File]::ReadAllText($raopPath).Replace("`r`n", "`n")
+$raop = Replace-ExactlyOnce $raop 'int mirror_started;' "int mirror_started;`n`tstruct iphone_mirror_event_s *audio_event;" 'per-connection audio event state'
+$raop = Replace-ExactlyOnce $raop 'free(conn->local);' "iphone_mirror_event_stop(conn);`n`tfree(conn->local);" 'stop and join audio event listener'
+$edits += @{ Path = $raopPath; Text = $raop }
+
+$wrapperHeaderPath = Join-Path $source 'airplay2dll/FgAirplayServer.h'
+$wrapperHeader = [IO.File]::ReadAllText($wrapperHeaderPath).Replace("`r`n", "`n")
+$wrapperHeader = Replace-ExactlyOnce $wrapperHeader 'void stop();' @'
+void stop();
+	bool setAudioDiscoveryWithdrawn(bool withdrawn);
+'@ 'audio discovery API'
+$wrapperHeader = Replace-ExactlyOnce $wrapperHeader 'dnssd_t*' @'
+std::string discoveryName;
+	unsigned short discoveryRaopPort{};
+	unsigned short discoveryAirplayPort{};
+	char discoveryAddress[6]{};
+	dnssd_t*
+'@ 'audio discovery snapshot'
+$edits += @{ Path = $wrapperHeaderPath; Text = $wrapperHeader }
+
+$wrapperPath = Join-Path $source 'airplay2dll/src/FgAirplayServer.cpp'
+$wrapper = [IO.File]::ReadAllText($wrapperPath).Replace("`r`n", "`n")
+$wrapper = Replace-ExactlyOnce $wrapper 'm_pDnsSd = dnssd_init(&ret);' @'
+discoveryName = serverName;
+		discoveryRaopPort = raop_port;
+		discoveryAirplayPort = airplay_port;
+		memcpy(discoveryAddress, hwaddr, sizeof(discoveryAddress));
+		m_pDnsSd = dnssd_init(&ret);
+'@ 'save DNS-SD registration values'
+$stopSignature = "void FgAirplayServer::stop()"
+$discoveryMethod = @'
+// Called by the host's receiver-control loop, alongside start/stop.
+bool FgAirplayServer::setAudioDiscoveryWithdrawn(bool withdrawn)
+{
+	if (!m_pDnsSd || discoveryName.empty()) return false;
+	using RecordsReleased = BOOL (WINAPI*)();
+	const auto shim = GetModuleHandleW(L"dnssd.dll");
+	const auto released = shim ? reinterpret_cast<RecordsReleased>(
+		GetProcAddress(shim, "IPhoneMirrorAirPlayRecordsReleased")) : nullptr;
+	if (!released) return false;
+
+	dnssd_unregister_airplay(m_pDnsSd);
+	dnssd_unregister_raop(m_pDnsSd);
+	const auto started = GetTickCount64();
+	while (!released() && GetTickCount64() - started < 1500) Sleep(15);
+	const bool drained = released() != FALSE;
+	const auto apply = drained && SetEnvironmentVariableW(
+		L"IPHONE_MIRROR_DIAGNOSTIC_RAOP_WITHDRAWN", withdrawn ? L"1" : nullptr);
+	if (!apply) SetEnvironmentVariableW(L"IPHONE_MIRROR_DIAGNOSTIC_RAOP_WITHDRAWN", nullptr);
+	const bool publishAudio = !apply || !withdrawn;
+	const bool audio = !publishAudio || dnssd_register_raop(m_pDnsSd, discoveryName.c_str(),
+		discoveryRaopPort, discoveryAddress, sizeof(discoveryAddress), 0) > 0;
+	const auto video = dnssd_register_airplay(m_pDnsSd, discoveryName.c_str(),
+		discoveryAirplayPort, discoveryAddress, sizeof(discoveryAddress));
+	return apply && audio && video == 0;
+}
+
+'@
+$wrapper = Replace-ExactlyOnce $wrapper $stopSignature ($discoveryMethod + "`n" + $stopSignature) 'audio discovery withdrawal and restore'
+$edits += @{ Path = $wrapperPath; Text = $wrapper }
+
+$exportsPath = Join-Path $source 'airplay2dll/src/Airplay2Export.cpp'
+$exports = [IO.File]::ReadAllText($exportsPath).Replace("`r`n", "`n")
+$exportsAnchor = 'float fgServerScale(void* handle, float fRatio)'
+$exports = Replace-ExactlyOnce $exports $exportsAnchor (@'
+extern "C" __declspec(dllexport) int fgServerSetAudioDiscoveryWithdrawn(void* handle, int withdrawn)
+{
+	return handle && static_cast<FgAirplayServer*>(handle)->setAudioDiscoveryWithdrawn(withdrawn != 0);
+}
+
+'@ + "`n" + $exportsAnchor) 'export audio discovery update'
+$edits += @{ Path = $exportsPath; Text = $exports }
 
 $mirrorPath = Join-Path $source 'AirPlayServerLib/lib/raop_rtp_mirror.c'
 $mirror = [IO.File]::ReadAllText($mirrorPath).Replace("`r`n", "`n")
@@ -119,16 +261,21 @@ $edits += @{ Path = $mirrorPath; Text = $mirror }
 # Validate every preimage first; a changed later source must not leave the
 # earlier files only partly upgraded. Restore all bytes on any write failure.
 $backups = @($edits | ForEach-Object { @{ Path = $_.Path; Bytes = [IO.File]::ReadAllBytes($_.Path) } })
-$headerPath = Join-Path $source 'AirPlayServerLib/lib/airplay-mirror-codec-policy.h'
-$headerExisted = Test-Path -LiteralPath $headerPath
-$headerBackup = if ($headerExisted) { [IO.File]::ReadAllBytes($headerPath) } else { $null }
+$headers = @('airplay-mirror-codec-policy.h', 'airplay-audio-event-test.h') | ForEach-Object {
+    $path = Join-Path $source "AirPlayServerLib/lib/$_"
+    @{ Name = $_; Path = $path; Backup = if (Test-Path -LiteralPath $path) { [IO.File]::ReadAllBytes($path) } else { $null } }
+}
 try {
-    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'airplay-mirror-codec-policy.h') -Destination $headerPath -Force
+    foreach ($header in $headers) {
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot $header.Name) -Destination $header.Path -Force
+    }
     foreach ($edit in $edits) { [IO.File]::WriteAllText($edit.Path, $edit.Text, $utf8) }
 } catch {
     foreach ($backup in $backups) { [IO.File]::WriteAllBytes($backup.Path, $backup.Bytes) }
-    if ($headerExisted) { [IO.File]::WriteAllBytes($headerPath, $headerBackup) }
-    else { Remove-Item -LiteralPath $headerPath -ErrorAction SilentlyContinue }
+    foreach ($header in $headers) {
+        if ($null -ne $header.Backup) { [IO.File]::WriteAllBytes($header.Path, $header.Backup) }
+        else { Remove-Item -LiteralPath $header.Path -ErrorAction SilentlyContinue }
+    }
     throw
 }
-Write-Host 'Applied diagnostic-only mirror AVC capability policy; default and media profiles unchanged.'
+Write-Host 'Applied opt-in mirror AVC-only and no-audio capability diagnostics.'

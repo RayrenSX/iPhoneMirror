@@ -10,8 +10,6 @@ public partial class MainWindow
     private DeviceHubPanel? _deviceHubPanel;
     internal MainViewModel DeviceHubViewModel => _viewModel;
     private bool IsRightWorkspacePanelVisible => _isSettingsPanelVisible || _isDeviceHubPanelVisible;
-    private double WorkspaceRightWidth => _isDeviceHubPanelVisible
-        ? 432 * (1 + .5 * (WorkspaceReadingScale - 1)) : WorkspaceSettingsWidth;
 
     private void OnNavigateDeviceHubClick(object sender, RoutedEventArgs e)
     {
@@ -26,6 +24,7 @@ public partial class MainWindow
         if (visible)
         {
             _isSettingsPanelVisible = false;
+            _workspacePrefersRightPanel = true;
             if (_deviceHubPanel is null)
             {
                 _deviceHubPanel = new DeviceHubPanel(_viewModel);
@@ -39,9 +38,16 @@ public partial class MainWindow
 
     private void SynchronizeRightPanelContent()
     {
-        ControlPanelContent.Visibility = _isDeviceHubPanelVisible ? Visibility.Collapsed : Visibility.Visible;
-        DeviceHubPanelHost.Visibility = _isDeviceHubPanelVisible ? Visibility.Visible : Visibility.Collapsed;
+        UpdateRightPanelPages(keepClosingPage: true);
         _deviceHubPanel?.SetDevice(_viewModel.SelectedDevice, _isDeviceHubPanelVisible && !_isFullScreen);
+    }
+
+    private void UpdateRightPanelPages(bool keepClosingPage = false)
+    {
+        // The shared sidebar clips the outgoing page until its close animation ends.
+        if (keepClosingPage && !IsRightWorkspacePanelVisible) return;
+        ControlPanelContent.Visibility = _isSettingsPanelVisible ? Visibility.Visible : Visibility.Collapsed;
+        DeviceHubPanelHost.Visibility = _isDeviceHubPanelVisible ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void RefreshDeviceHubContext(string? property)

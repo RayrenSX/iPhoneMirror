@@ -13,7 +13,8 @@ internal enum SetupStep { Welcome, Preferences, Usage, ControlIntroduction, Conn
     DeviceComplete, Display, Validation, Completed,
     // Append values to preserve existing numeric checkpoints.
     ApplicationMode, Appearance, WirelessIntroduction, BluetoothIntroduction,
-    WirelessBackend, WirelessDisplay, WiredDisplay, WiredFrameRate, WiredDecoder, MirrorConnection, ControlReadiness }
+    WirelessBackend, WirelessDisplay, WiredDisplay, WiredFrameRate, WiredDecoder, MirrorConnection, ControlReadiness,
+    FreeSoftwareNotice, SupportAuthor }
 internal enum SetupOutcome { Pending, Verified, Skipped }
 internal sealed class SetupDevice
 {
@@ -48,13 +49,13 @@ internal sealed class FirstRunSetupState
     [JsonIgnore] public bool ShouldOpen => Disposition == SetupDisposition.New;
     [JsonIgnore] public SetupCategory Category => Step switch
     {
-        SetupStep.Welcome or SetupStep.Preferences or SetupStep.ApplicationMode or SetupStep.Appearance or SetupStep.Usage
+        SetupStep.Welcome or SetupStep.Preferences or SetupStep.FreeSoftwareNotice or SetupStep.SupportAuthor or SetupStep.ApplicationMode or SetupStep.Appearance or SetupStep.Usage
             => SetupCategory.Basics,
         SetupStep.Display or SetupStep.WirelessDisplay or SetupStep.WiredDisplay or SetupStep.WiredFrameRate or
             SetupStep.WiredDecoder or SetupStep.Validation or SetupStep.Completed => SetupCategory.Experience,
         _ => SetupCategory.Devices
     };
-    [JsonIgnore] public bool IsChoiceStep => Step is SetupStep.Welcome or SetupStep.Preferences or
+    [JsonIgnore] public bool IsChoiceStep => Step is SetupStep.Welcome or SetupStep.Preferences or SetupStep.FreeSoftwareNotice or SetupStep.SupportAuthor or
         SetupStep.ApplicationMode or SetupStep.Appearance or SetupStep.Usage or SetupStep.ControlIntroduction or
         SetupStep.WirelessIntroduction or SetupStep.BluetoothIntroduction or SetupStep.MirrorConnection or SetupStep.Display or
         SetupStep.WirelessBackend or SetupStep.WirelessDisplay or SetupStep.WiredDisplay or SetupStep.WiredFrameRate or SetupStep.WiredDecoder;
@@ -66,7 +67,7 @@ internal sealed class FirstRunSetupState
     [JsonIgnore] public bool Optional => Usage == SetupUsage.MirrorAndControl && Step is
         SetupStep.WirelessBackend or SetupStep.Wireless or SetupStep.Bluetooth;
     [JsonIgnore] public bool CanSkip => Step != SetupStep.Completed;
-    [JsonIgnore] public bool HasSkippedSteps => GlobalOutcomes.Values.Contains(SetupOutcome.Skipped) ||
+    [JsonIgnore] public bool HasSkippedSteps => GlobalOutcomes.Any(pair => pair.Key != SetupStep.SupportAuthor && pair.Value == SetupOutcome.Skipped) ||
         Devices.Any(d => d.Outcomes.Values.Contains(SetupOutcome.Skipped));
     [JsonIgnore] public bool HasSavedDevices => Usage == SetupUsage.WirelessOnly
         ? GlobalOutcomes.GetValueOrDefault(SetupStep.Wireless) == SetupOutcome.Verified && Devices.Count > 0
@@ -77,7 +78,7 @@ internal sealed class FirstRunSetupState
     {
         if (Usage == usage) return;
         Usage = usage; Devices.Clear(); DeviceIndex = DisplayDeviceIndex = 0;
-        foreach (var step in GlobalOutcomes.Keys.Where(s => s is not (SetupStep.Welcome or SetupStep.Preferences or SetupStep.ApplicationMode or SetupStep.Appearance)).ToArray())
+        foreach (var step in GlobalOutcomes.Keys.Where(s => s is not (SetupStep.Welcome or SetupStep.Preferences or SetupStep.FreeSoftwareNotice or SetupStep.SupportAuthor or SetupStep.ApplicationMode or SetupStep.Appearance)).ToArray())
             GlobalOutcomes.Remove(step);
         WirelessRestarted = false;
     }
@@ -147,7 +148,9 @@ internal sealed class FirstRunSetupState
         Step = Step switch
         {
             SetupStep.Welcome => SetupStep.Preferences,
-            SetupStep.Preferences => SetupStep.ApplicationMode,
+            SetupStep.Preferences => SetupStep.FreeSoftwareNotice,
+            SetupStep.FreeSoftwareNotice => SetupStep.SupportAuthor,
+            SetupStep.SupportAuthor => SetupStep.ApplicationMode,
             SetupStep.ApplicationMode => SetupStep.Appearance,
             SetupStep.Appearance => SetupStep.Usage,
             SetupStep.Usage => Usage == SetupUsage.MirrorAndControl ? SetupStep.ControlIntroduction : SetupStep.MirrorConnection,
@@ -179,7 +182,9 @@ internal sealed class FirstRunSetupState
         Step = Step switch
         {
             SetupStep.Preferences => SetupStep.Welcome,
-            SetupStep.ApplicationMode => SetupStep.Preferences,
+            SetupStep.FreeSoftwareNotice => SetupStep.Preferences,
+            SetupStep.SupportAuthor => SetupStep.FreeSoftwareNotice,
+            SetupStep.ApplicationMode => SetupStep.SupportAuthor,
             SetupStep.Appearance => SetupStep.ApplicationMode,
             SetupStep.Usage => SetupStep.Appearance,
             SetupStep.ControlIntroduction => SetupStep.Usage,
@@ -262,7 +267,7 @@ internal sealed class FirstRunSetupStore(string? path = null)
                 state.Step = state.CurrentDevice?.Outcomes.GetValueOrDefault(SetupStep.Profile) == SetupOutcome.Verified ||
                     state.CurrentDevice?.Outcomes.GetValueOrDefault(SetupStep.ReDetection) == SetupOutcome.Verified
                     ? SetupStep.Profile : SetupStep.ReDetection;
-            if (state.Usage == SetupUsage.WirelessOnly && state.Step is not (SetupStep.Welcome or SetupStep.Preferences or SetupStep.ApplicationMode or
+            if (state.Usage == SetupUsage.WirelessOnly && state.Step is not (SetupStep.Welcome or SetupStep.Preferences or SetupStep.FreeSoftwareNotice or SetupStep.SupportAuthor or SetupStep.ApplicationMode or
                 SetupStep.Appearance or SetupStep.Usage or SetupStep.MirrorConnection or SetupStep.Wireless or SetupStep.Display or SetupStep.WirelessBackend or
                 SetupStep.WirelessDisplay or SetupStep.Validation or SetupStep.Completed)) state.Step = SetupStep.Usage;
             if (state.Usage == SetupUsage.WiredOnly && state.Step is SetupStep.ControlIntroduction or SetupStep.WirelessIntroduction or

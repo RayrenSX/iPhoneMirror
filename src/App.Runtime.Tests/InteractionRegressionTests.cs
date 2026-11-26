@@ -41,40 +41,27 @@ internal static partial class Program
         InteractionAssert(child != 0, "Create preview test HWND");
         var hostType = typeof(App).Assembly.GetType("IPhoneMirror.App.Controls.NativePreviewHost", true)!;
         var host = Activator.CreateInstance(hostType, nonPublic: true)!;
-        var profileType = typeof(App).Assembly.GetType("IPhoneMirror.App.Models.DeviceCornerProfile", true)!;
-        var profile = Activator.CreateInstance(profileType, InteractionMembers, null,
-            ["test-rounded", true, 0.08, 4.0, 0.08], null);
         var region = InteractionCreateRectRgn(0, 0, 0, 0);
         try
         {
             InteractionSet(host, "_window", child);
-            InteractionSet(host, "_cornerProfile", profile);
-            InteractionSet(host, "_usesDeviceCornerProfile", true);
             var update = hostType.GetMethod("UpdateWindowRegion", InteractionMembers)!
                 .CreateDelegate<Action>(host);
             for (var index = 0; index < 16; ++index) update();
-            InteractionAssert(InteractionGetWindowRgn(child, region) == 3,
-                "Device preview must retain its curved region");
+            InteractionAssert(InteractionGetWindowRgn(child, region) == 0,
+                "The device outline must not be clipped by a native window region.");
             var start = GC.GetAllocatedBytesForCurrentThread();
             var timer = Stopwatch.StartNew();
             for (var index = 0; index < 500; ++index) update();
             var allocations = GC.GetAllocatedBytesForCurrentThread() - start;
             InteractionAssert(allocations < 8192,
-                $"Position-only updates rebuilt the polygon: {allocations} bytes");
+                $"Position-only region updates allocated {allocations} bytes");
             Console.WriteLine($"500 unchanged preview-region updates: {allocations} allocated bytes, {timer.Elapsed.TotalMilliseconds:F2} ms.");
 
             InteractionSetWindowPos(child, 0, 15, 20, 300, 210, 0x0014);
             update();
-            InteractionGetWindowRgn(child, region);
-            InteractionGetRgnBox(region, out var bounds);
-            InteractionAssert(bounds.Right == 300 && bounds.Bottom == 210,
-                "Resizing must update the region dimensions");
-            hostType.GetProperty("IsFullScreenPresentation", InteractionMembers)!.SetValue(host, true);
             InteractionAssert(InteractionGetWindowRgn(child, region) == 0,
-                "Fullscreen must remove the rounded region");
-            hostType.GetProperty("IsFullScreenPresentation", InteractionMembers)!.SetValue(host, false);
-            InteractionAssert(InteractionGetWindowRgn(child, region) == 3,
-                "Leaving fullscreen must restore the rounded region");
+                "Resizing must not introduce a hard corner clip.");
 
             var release = hostType.GetMethod("ReleasePointerCapture", InteractionMembers)!;
             InteractionSetCapture(parent.Handle);

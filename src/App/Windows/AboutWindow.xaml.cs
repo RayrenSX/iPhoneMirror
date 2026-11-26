@@ -94,28 +94,42 @@ public partial class AboutWindow : IPhoneMirror.UI.Controls.RoundedWindow, INoti
     public bool CheckOnStartup
     {
         get => _app.UpdateSettings.CheckOnStartup;
-        set => _app.UpdateSettings.CheckOnStartup = value;
+        set => SaveUpdateOption(settings => settings.CheckOnStartup, (settings, enabled) => settings.CheckOnStartup = enabled, value);
     }
     public bool AutoDownload
     {
         get => _app.UpdateSettings.AutoDownload;
-        set => _app.UpdateSettings.AutoDownload = value;
+        set => SaveUpdateOption(settings => settings.AutoDownload, (settings, enabled) => settings.AutoDownload = enabled, value);
     }
     public bool AllowMirrorFallback
     {
         get => _app.UpdateSettings.AllowMirrorFallback;
-        set => _app.UpdateSettings.AllowMirrorFallback = value;
+        set => SaveUpdateOption(settings => settings.AllowMirrorFallback, (settings, enabled) => settings.AllowMirrorFallback = enabled, value);
     }
     public bool NotifyStableReleases
     {
         get => _app.UpdateSettings.NotifyStableReleases;
-        set => _app.UpdateSettings.NotifyStableReleases = value;
+        set => SaveUpdateOption(settings => settings.NotifyStableReleases, (settings, enabled) => settings.NotifyStableReleases = enabled, value);
     }
     public bool NotifyPrereleaseReleases
     {
         get => _app.UpdateSettings.NotifyPrereleaseReleases;
-        set => _app.UpdateSettings.NotifyPrereleaseReleases = value;
+        set => SaveUpdateOption(settings => settings.NotifyPrereleaseReleases, (settings, enabled) => settings.NotifyPrereleaseReleases = enabled, value);
     }
+
+    private void SaveUpdateOption(Func<UpdateSettings, bool> read, Action<UpdateSettings, bool> write,
+        bool value, [System.Runtime.CompilerServices.CallerMemberName] string? property = null)
+    {
+        if (_app.TrySetUpdatePreference(read, write, value))
+        {
+            if (UpdateStatus == LocalizationService.Get("SetupSaveFailed"))
+                UpdateStatus = LocalizationService.Get("UpdateStatusReady");
+            return;
+        }
+        UpdateStatus = LocalizationService.Get("SetupSaveFailed");
+        OnPropertyChanged(property);
+    }
+
     internal AboutWindow(App app, MainViewModel mainViewModel)
     {
         _app = app;
@@ -216,7 +230,6 @@ public partial class AboutWindow : IPhoneMirror.UI.Controls.RoundedWindow, INoti
         _closed = true;
         _updateCheckCancellation?.Cancel();
         _logTimer.Stop();
-        _app.SaveUpdateSettings();
     }
 
     private void OnClosed(object? sender, EventArgs e)

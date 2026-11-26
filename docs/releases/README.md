@@ -1,12 +1,13 @@
 # 发布说明索引
 
-返回[文档索引](../README.md)。当前开发变更见 [Changelog 的 Unreleased](../../CHANGELOG.md#unreleased)，
-繁體中文見[變更記錄](../../CHANGELOG.zh-TW.md#unreleased)。
+返回[文档索引](../README.md)。版本变更见 [Changelog](../../CHANGELOG.md)及[繁體中文變更記錄](../../CHANGELOG.zh-TW.md)。
 此目录保存版本说明与阶段总结；存在同名文档不表示安装包已公开发布。
 实际可下载版本、资产与校验值以 [GitHub Releases](https://github.com/RayrenSX/iPhoneMirror/releases) 为准。
 
 ## 版本记录
 
+- [v1.8.5-pre7](v1.8.5-pre7.md)（本地预览，1.8.5 正式发布前最后一版）。操作步骤见[使用指南](../USER_GUIDE.md)，源码构建见[开发指南](../DEVELOPMENT.md)。
+- [v1.8.5-pre6](v1.8.5-pre6.md)
 - [v1.8.5-pre5](v1.8.5-pre5.md)
 - [v1.8.5-pre4](v1.8.5-pre4.md)
 - [v1.8.5-pre3](v1.8.5-pre3.md)
@@ -46,10 +47,6 @@
 - [v0.6.0-preview.1](v0.6.0-preview.1.md)
 - [v0.3.0-preview.1](v0.3.0-preview.1.md)
 
-## 阶段汇总与配套资料
+## 阶段补充
 
-- [iPhoneMirror：1.8.5-pre3 → 1.8.5-pre4 完整 Changelog](changelog-v1.8.5-pre3-to-pre4.zh-CN.md)
-- [iPhoneMirror 1.8.5-pre → 1.8.5-pre2 完整更新日志](v1.8.5-pre-to-pre2.zh-CN.md)
-- [iPhone Mirror 1.8.5-pre 完整更新说明](v1.8.5-pre-complete.zh-CN.md)
-- [iPhoneMirror v1.8.3 至当前：详细 Changelog](changelog-v1.8.3-to-current.zh-CN.md)
-- [pre3 到 pre4 海报数据](changelog-v1.8.5-pre3-to-pre4.poster.json)
+- [v1.8.5-pre → pre2 更新说明](v1.8.5-pre-to-pre2.zh-CN.md)

@@ -47,7 +47,7 @@ internal static class FirstRunDriverHost
             {
                 var inventory = await Task.Run(() => catalog.GetAppleDevices(false).Where(d => d.IsPresent)
                     .Select(d => new { d.Serial, Name = string.IsNullOrWhiteSpace(d.DeviceName) ? d.DisplayName : d.DeviceName,
-                        Healthy = d.IsHealthy, FilterInstalled = d.HasLibUsb0Filter }).ToArray());
+                        Healthy = d.IsHealthy, FilterInstalled = d.IsCaptureParent && d.HasLibUsb0Filter }).ToArray());
                 var apple = await Task.Run(() => catalog.InspectAppleSupport());
                 var usb = await Task.Run(catalog.InspectLibUsbStack);
                 cancel.Token.ThrowIfCancellationRequested();
@@ -74,8 +74,7 @@ internal static class FirstRunDriverHost
             cancel.Token.ThrowIfCancellationRequested();
             if (args[2] == "inspect")
             {
-                Report("Result", support.Ready && device.IsHealthy && device.HasLibUsb0Filter &&
-                    stack.FilesMatch && stack.ServiceRunning);
+                Report("Result", support.Ready && DriverOperationSafety.IsFilterReady(device, stack));
                 return 0;
             }
             if (!support.Ready)
@@ -94,13 +93,18 @@ internal static class FirstRunDriverHost
             if (device is null) { Report("Disconnected"); return 1; }
             stack = await Task.Run(catalog.InspectLibUsbStack);
             cancel.Token.ThrowIfCancellationRequested();
-            if (!device.HasLibUsb0Filter || !device.IsHealthy || !stack.FilesMatch || !stack.ServiceRunning)
+            if (!DriverOperationSafety.IsFilterReady(device, stack))
             {
+                var kind = device.HasLibUsb0Filter ? DriverOperationKind.Repair : DriverOperationKind.Install;
+                if (!DriverOperationSafety.CanApplyCaptureFilter(device, kind))
+                {
+                    Report("DriverFailed", detail: DriverLocalization.Get("SetupParentRepairRequired"));
+                    return 1;
+                }
                 Report("Usb");
                 var operation = new DriverOperationClient();
                 operation.StatusChanged += message => Report("Usb", detail: message);
-                var result = await operation.RunAsync(device.HasLibUsb0Filter ? DriverOperationKind.Repair :
-                    DriverOperationKind.Install, device, cancellationToken: cancel.Token);
+                var result = await operation.RunAsync(kind, device, cancellationToken: cancel.Token);
                 if (!result.Success || result.RequiresRestart)
                 { Report(result.RequiresRestart ? "Restart" : "DriverFailed", detail: result.Message); return 1; }
                 if (result.RequiresReplug) { Report("Replug", detail: result.Message); return 0; }

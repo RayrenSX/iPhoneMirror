@@ -7,7 +7,7 @@ namespace IPhoneMirror.App.Windows;
 
 public partial class BluetoothConnectionWindow : IPhoneMirror.UI.Controls.RoundedWindow
 {
-    private bool _nextRunning;
+    private bool _searching;
     private bool _closed;
     private readonly string _targetName;
     private readonly bool _previewOnly;
@@ -22,18 +22,24 @@ public partial class BluetoothConnectionWindow : IPhoneMirror.UI.Controls.Rounde
     internal static void ShowDeveloperPreview(Window owner) =>
         new BluetoothConnectionWindow(owner, "iPhone",
             () => Task.FromResult<IReadOnlyList<BluetoothClientInfo>>([]), _ => false, previewOnly: true).Show();
-    private async void NextClick(object sender, RoutedEventArgs e)
+    private async void FindDevicesClick(object sender, RoutedEventArgs e)
     {
         if (_previewOnly) { BluetoothClientBindingWindow.ShowDeveloperPreview(this); return; }
-        if (_nextRunning) return;
-        _nextRunning = true;
-        NextButton.IsEnabled = false;
-        FeedbackText.SetResourceReference(TextBlock.TextProperty, "UiRefreshing");
+        if (_searching || _closed) return;
+        _searching = true;
+        FindDevicesButton.IsEnabled = false;
+        FeedbackText.SetResourceReference(TextBlock.TextProperty, "DeviceBindingBluetoothSearching");
         try
         {
             var clients = await _refresh();
             if (_closed) return;
-            FeedbackText.Text = string.Empty;
+            if (clients.Count == 0)
+            {
+                FeedbackText.SetResourceReference(TextBlock.TextProperty, "DeviceBindingBluetoothNoneFound");
+                return;
+            }
+
+            FeedbackText.SetResourceReference(TextBlock.TextProperty, "DeviceBindingBluetoothWaitingStatus");
             var selected = BluetoothClientBindingWindow.Show(this, _targetName, clients, null, _refresh, _unbind);
             if (_closed || string.IsNullOrWhiteSpace(selected)) return;
             Tag = selected;
@@ -42,12 +48,12 @@ public partial class BluetoothConnectionWindow : IPhoneMirror.UI.Controls.Rounde
         catch (Exception error)
         {
             DiagnosticLogger.Exception("bluetooth", "binding_connection_refresh_failed", error);
-            if (!_closed) FeedbackText.SetResourceReference(TextBlock.TextProperty, "UiBluetoothRefreshFailed");
+            if (!_closed) FeedbackText.SetResourceReference(TextBlock.TextProperty, "DeviceBindingBluetoothSearchFailed");
         }
         finally
         {
-            _nextRunning = false;
-            if (!_closed) NextButton.IsEnabled = true;
+            _searching = false;
+            if (!_closed) FindDevicesButton.IsEnabled = true;
         }
     }
     private void CancelClick(object sender, RoutedEventArgs e)

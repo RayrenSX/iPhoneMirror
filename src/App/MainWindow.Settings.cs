@@ -33,7 +33,7 @@ public partial class MainWindow
         if (_refreshingFrameColor || ProjectionFrameColorComboBox.SelectedValue is not string color) return;
         var success = _secondaryMirrors.SetSelectedFrameColor(color);
         RefreshProjectionPhoneFrame();
-        ProjectionPhoneFrameFeedback.Visibility = success ? Visibility.Collapsed : Visibility.Visible;
+        ProjectionFrameColorFeedback.Visibility = success ? Visibility.Collapsed : Visibility.Visible;
     }
 
     private void RefreshProjectionPhoneFrame()
@@ -98,6 +98,7 @@ public partial class MainWindow
 
     private void OnOpenProjectionSettingsClick(object sender, RoutedEventArgs e)
     {
+        if (!_viewModel.HasMirroringVideo) return;
         RestoreSettingsCategory("projection");
         SetSettingsPanelVisible(true);
     }

@@ -43,25 +43,26 @@
     <system:String x:Key="Recheck">再確認</system:String>
     <system:String x:Key="CannotOpenLogs">ログを開けませんでした</system:String>
     <system:String x:Key="QuickInstallTitle">すべてのドライバーをインストール</system:String>
-    <system:String x:Key="QuickInstallBody">Apple USBサポート、共有キャプチャドライバー、選択したiPhoneを確認し、不足しているコンポーネントをインストールします。親ドライバーの修復が必要な場合は、現在の割り当てと変更後のドライバーが表示され、その変更を別途確認します。</system:String>
+    <system:String x:Key="QuickInstallBody">不足しているミラーリング用ドライバーをインストールします。Appleの親ドライバーを変更する前には別途確認します。</system:String>
     <system:String x:Key="StartInstall">インストールを開始</system:String>
     <system:String x:Key="ConnectPhoneTitle">iPhoneを接続</system:String>
     <system:String x:Key="ConnectPhoneBody">Apple USBサポートの準備ができました。iPhoneを接続してロックを解除し、確認が表示されたら「信頼」をタップしてください。デバイスを検出すると、自動で続行します。</system:String>
     <system:String x:Key="StartDetection">検出を開始</system:String>
     <system:String x:Key="FailureTitle">ドライバー操作に失敗しました</system:String>
     <system:String x:Key="FailureHeading">ドライバー操作を完了できませんでした</system:String>
-    <system:String x:Key="FailureMethods">次のいずれかの方法を選んでください</system:String>
-    <system:String x:Key="HelpTitle">コミュニティでヘルプを受ける</system:String>
-    <system:String x:Key="HelpBody">QQグループ1050045279に参加し、操作ログを提示してください。</system:String>
+    <system:String x:Key="FailureOpenLog">ログフォルダーを開く</system:String>
+    <system:String x:Key="HelpTitle">サポートを受ける</system:String>
+    <system:String x:Key="HelpBody">QQグループに参加し、操作ログを共有してください。</system:String>
     <system:String x:Key="CopyGroup">グループ番号をコピー</system:String>
-    <system:String x:Key="AisiTitle">Aisi Screen Mirroringでドライバーを準備</system:String>
-    <system:String x:Key="AisiBody">公式サイトからAisi Screen Mirroringをダウンロードし、有線で通常のミラーリングを一度行ってから、ここに戻って再確認してください。</system:String>
+    <system:String x:Key="AisiTitle">Aisiでミラーリング</system:String>
+    <system:String x:Key="AisiBody">Aisiで一度USBミラーリングし、ここで再確認してください。</system:String>
     <system:String x:Key="OpenWebsite">Webサイトを開く</system:String>
     <system:String x:Key="DriverCleanupTitle">デバイスドライバーを整理</system:String>
-    <system:String x:Key="DriverCleanupBody">別のウィンドウでデバイスを選ぶと、そのデバイスに関連するデバイスノードと、安全に削除できるドライバーパッケージ（Appleのドライバーを含む場合があります）を削除します。ほかのデバイスが使っているパッケージは残します。パッケージの使用状況を確認できない場合は、デバイスノードだけを削除します。システムを変更する前に確認が必要です。</system:String>
+    <system:String x:Key="DriverCleanupBody">対象デバイスを選んで整理を確認します。Appleドライバーが削除される場合があります。</system:String>
     <system:String x:Key="RunDriverCleanup">デバイスドライバーを整理</system:String>
     <system:String x:Key="DriverCleanupScriptMissing">ドライバー整理スクリプトが見つかりません: {0}</system:String>
-    <system:String x:Key="DriverCleanupScriptStartFailed">ドライバー整理スクリプトを開始できませんでした: {0}</system:String>
+    <system:String x:Key="DriverCleanupUnavailableTitle">ドライバーの整理を開始できません</system:String>
+    <system:String x:Key="DriverCleanupScriptStartFailed">再試行するか、管理者としてドライバーマネージャーを開いてください。</system:String>
     <system:String x:Key="Close">閉じる</system:String>
     <system:String x:Key="Minimize">最小化</system:String>
     <system:String x:Key="Maximize">最大化または元に戻す</system:String>
@@ -82,17 +83,17 @@
     <system:String x:Key="LogSuffix">ログ: {0}</system:String>
     <system:String x:Key="NoSelection">デバイスが選択されていません</system:String>
     <system:String x:Key="WaitDeviceTimeout">Appleデバイスの待機がタイムアウトしました。ログ: {0}</system:String>
-    <system:String x:Key="SelectedDeviceDisconnected">選択したデバイスが切断されました。もう一度選択して再試行してください。ログ: {0}</system:String>
+    <system:String x:Key="SelectedDeviceDisconnected">選択したデバイスが切断されました。もう一度選択して再試行してください。</system:String>
     <system:String x:Key="RepairingParent">{0}の親ドライバーを修復しています…</system:String>
-    <system:String x:Key="ParentRepairFailed">修復後も親ドライバーがusbccgpになりませんでした。自動インストールを中止しました。ログ: {0}</system:String>
+    <system:String x:Key="ParentRepairFailed">再割り当て後にキャプチャに必要な USB コンポジットドライバーを確認できなかったため、自動インストールを中止しました。</system:String>
     <system:String x:Key="DeviceReady">{0}のミラーリング用ドライバーがすべて整いました。</system:String>
     <system:String x:Key="InstallingDriver">{0}のキャプチャドライバーをインストールしています…</system:String>
     <system:String x:Key="RepairingDriver">{0}のキャプチャドライバーを修復しています…</system:String>
-    <system:String x:Key="ReconnectTimeout">デバイスの再接続待ちがタイムアウトしました。ログ: {0}</system:String>
+    <system:String x:Key="ReconnectTimeout">デバイスの再接続待ちがタイムアウトしました。</system:String>
     <system:String x:Key="QuickInstallComplete">インストールが完了しました。{0}のミラーリング用ドライバーの準備ができました。</system:String>
     <system:String x:Key="WaitingForDevice">Appleデバイスを待っています…</system:String>
     <system:String x:Key="ConfirmOperation">{0}の確認</system:String>
-    <system:String x:Key="ConfirmOperationBody" xml:space="preserve">次のデバイスで{0}を実行します。&#xA;&#xA;{1}&#xA;{2}&#xA;&#xA;変更するのは、このデバイスのlibusb0フィルターだけです。Apple公式のドライバーは置き換えません。Windowsから管理者の承認を求められる場合があります。</system:String>
+    <system:String x:Key="ConfirmOperationBody" xml:space="preserve">デバイス: {0}&#xA;このデバイスのミラーリング用フィルターだけを変更します。</system:String>
     <system:String x:Key="Operating">実行中: {0} — {1}…</system:String>
     <system:String x:Key="ReplugTimeout">デバイスの切断または再接続の待機がタイムアウトしました。操作はロールバックされたか、完了しています。ログを確認して再試行してください。</system:String>
     <system:String x:Key="DriverUninstalled">現在のデバイスからキャプチャフィルターを削除しました。</system:String>
@@ -109,7 +110,7 @@
     <system:String x:Key="DevicesMissing">検出したデバイス: {0}台。ボタンを押すと、不足しているドライバーをインストールします。</system:String>
     <system:String x:Key="GroupCopiedTitle">グループ番号をコピーしました</system:String>
     <system:String x:Key="GroupCopiedBody">QQグループ1050045279をコピーしました。QQで検索して参加を申請してください。</system:String>
-    <system:String x:Key="CannotOpenQq">QQを開けませんでした</system:String>
+    <system:String x:Key="CannotCopyGroup">QQグループ番号をコピーできませんでした</system:String>
     <system:String x:Key="Connected">接続済み</system:String>
     <system:String x:Key="HistoricalDevice">以前に接続したデバイス</system:String>
     <system:String x:Key="CaptureInstalled">キャプチャドライバーはインストール済み</system:String>
@@ -145,7 +146,7 @@
     <system:String x:Key="AppleDownloadUnavailable">Apple公式インストーラーを自動で取得できませんでした。Microsoft StoreでApple Devicesのページを開きました。</system:String>
     <system:String x:Key="AppleCompatibilityDownloadUnavailable">不足しているApple Mobile Device Serviceの互換コンポーネントをダウンロードできませんでした。ネットワークを確認して再試行してください。詳細はログに書き込みました。</system:String>
     <system:String x:Key="AppleSignatureInvalid">AppleのインストーラーがWindowsの署名検証に通らなかったため、実行しませんでした。</system:String>
-    <system:String x:Key="AppleInstallerFailed" xml:space="preserve">Apple Mobile Device Supportコンポーネントが終了コード{0}で失敗しました。&#xA;{1}&#xA;ログ: {2}</system:String>
+    <system:String x:Key="AppleInstallerFailed" xml:space="preserve">Apple USBサポートをインストールできませんでした（コード {0}）。</system:String>
     <system:String x:Key="AppleRestartRequired" xml:space="preserve">Apple Mobile Device Supportをインストールしましたが、ドライバーとサービスの登録を完了するにはWindowsの再起動が必要です。PCを再起動してから、もう一度確認してください。&#xA;ログ: {0}</system:String>
     <system:String x:Key="AppleServiceNotReady" xml:space="preserve">Apple USBサポートが不完全です。サービスまたはApple USBドライバーパッケージの準備ができていません。iPhoneを接続してロックを解除し、もう一度確認してください。&#xA;ログ: {0}</system:String>
     <system:String x:Key="Appearance">外観</system:String>
@@ -174,15 +175,23 @@
     <system:String x:Key="ParentNoInf" xml:space="preserve">ドライバーパッケージなし</system:String>
     <system:String x:Key="ParentHealthy" xml:space="preserve">開始済みで正常</system:String>
     <system:String x:Key="ParentNeedsAttention" xml:space="preserve">未開始、または要確認</system:String>
-    <system:String x:Key="ParentManagerHelp" xml:space="preserve">Apple、サードパーティ、未割り当てのドライバーを含め、現在の親ドライバーの割り当てはどれでも変更できます。有線ミラーリングには、通常USB Composite Device（usbccgp）が必要です。変更後のドライバーを選び、内容を確認してから変更を確定してください。</system:String>
-    <system:String x:Key="ParentDriverSelection" xml:space="preserve">変更後のドライバー（システムのコンポジットドライバーと、このデバイスで使えるドライバー）</system:String>
+    <system:String x:Key="ParentManagerHelp" xml:space="preserve">このデバイスに対応するドライバーを選ぶか、現在のドライバーを再インストールできます。有線ミラーリングには正常に起動する USB コンポジットドライバー（usbccgp）が必要です。変更内容は次の画面で確認できます。</system:String>
+    <system:String x:Key="ParentDriverSelection">互換ドライバーを選択</system:String>
+    <system:String x:Key="ParentCurrentDriver">現在のドライバー · {0} · {1}</system:String>
+    <system:String x:Key="ParentDriverRecommended">投影に推奨</system:String>
+    <system:String x:Key="ParentDriverListLimited">一部のドライバーを読み込めませんでした。</system:String>
+    <system:String x:Key="ParentNoChoices">互換ドライバーが見つかりません。</system:String>
+    <system:String x:Key="ParentShowDetails">技術情報を表示</system:String>
+    <system:String x:Key="ParentHideDetails">技術情報を非表示</system:String>
     <system:String x:Key="ParentResetHelp" xml:space="preserve">「デバイスを再構築」は、選択した親デバイスとその子インターフェイスを削除します。実行後はスマートフォンを再接続してください。ドライバーパッケージは残るため、Windowsが同じドライバーをもう一度選ぶ場合があります。割り当てを変えるには、上でドライバーを選んでください。</system:String>
     <system:String x:Key="ParentReset" xml:space="preserve">デバイスを再構築</system:String>
     <system:String x:Key="ParentBind" xml:space="preserve">選択したドライバーを割り当て</system:String>
     <system:String x:Key="ParentConfirmTitle" xml:space="preserve">Appleの親ドライバーの変更を確認</system:String>
     <system:String x:Key="ParentConfirmApply" xml:space="preserve">変更を確定</system:String>
-    <system:String x:Key="ParentConfirmBody" xml:space="preserve">デバイス: {0}&#xA;{1}&#xA;&#xA;現在の状態:&#xA;{2}&#xA;&#xA;操作 / 変更後のドライバー:&#xA;{3}&#xA;&#xA;この操作は、このスマートフォンの親ドライバーを変更し、Appleまたはサードパーティの割り当てを置き換えることがあります。USB接続、ミラーリング、リモート操作、Appleのソフトウェアとの接続が中断される場合があります。子インターフェイスが再列挙されることもあります。Windowsから、管理者の承認、再接続、再起動を求められる場合があります。&#xA;&#xA;変更の前に、ドライバーの割り当てとフィルターの状態を保存します。割り当てに失敗した場合は元の割り当てへの復元を試みますが、復旧は保証されません。続行しますか？</system:String>
-    <system:String x:Key="ParentCompositeUnavailable" xml:space="preserve">Windows標準のUSBコンポジットドライバーを利用できません。ほかの選択肢は、親ドライバーの管理で確認してください。</system:String>
+    <system:String x:Key="ParentConfirmBody" xml:space="preserve">デバイス: {0}&#xA;変更先ドライバー: {1}&#xA;&#xA;変更すると一時的に切断されます。設定はバックアップされますが、復元できない場合があります。</system:String>
+    <system:String x:Key="SetupParentRepairRequired">ドライバーマネージャーで一括インストールまたは親ドライバーの管理を開き、選択したデバイスの USB コンポジットドライバーを修復してから再検出してください。</system:String>
+    <system:String x:Key="DriverOperationRejected">システムを変更する前にドライバー操作を停止しました。</system:String>
+    <system:String x:Key="ParentCompositeUnavailable" xml:space="preserve">このデバイスに対応する USB コンポジットドライバーが Windows で見つかりませんでした。親ドライバーの管理で、利用可能なドライバーの確認やデバイスの再列挙ができます。</system:String>
     <system:String x:Key="ParentDeviceUnavailable" xml:space="preserve">選択したスマートフォンが切断されています。続行する前に再接続してください。</system:String>
     <system:String x:Key="ParentListUnavailable" xml:space="preserve">ドライバー一覧を読み取れませんでした。デバイスを再構築して再試行してください。詳細はログを確認してください。</system:String>
     <system:String x:Key="ParentBackupFormat" xml:space="preserve">状態のスナップショット: {0}</system:String>
@@ -191,13 +200,15 @@
     <system:String x:Key="ParentResetRestartRequired" xml:space="preserve">親デバイスの削除を完了するには、PCの再起動が必要です。その後、スマートフォンを再接続して更新してください。</system:String>
     <system:String x:Key="ParentResetComplete" xml:space="preserve">親デバイスの削除を要求しました。Windowsが再列挙できるように、スマートフォンを取り外して再接続してから、親ドライバーの状態を確認してください。</system:String>
     <system:String x:Key="ParentChangeRejected" xml:space="preserve">変更は行われませんでした。デバイスの状態、確認内容、変更後のドライバーのいずれかが変わったか、準備に失敗しました。更新してもう一度確認してください。詳細はログを確認してください。</system:String>
-    <system:String x:Key="ParentChangeRolledBack" xml:space="preserve">親ドライバーの割り当てに失敗しました。元の割り当てを復元しましたが、元の問題が残っている場合があります。詳細はログを確認してください。</system:String>
+    <system:String x:Key="ParentChangeRolledBack" xml:space="preserve">親ドライバーを変更できなかったため、元のドライバーを復元しました。</system:String>
     <system:String x:Key="ParentRollbackRestartRequired" xml:space="preserve">親ドライバーの割り当てに失敗しました。Windowsは元の割り当ての復元を受け付けましたが、PCの再起動が必要です。再起動後に更新して、復旧を確認してください。</system:String>
     <system:String x:Key="ParentChangeRecoveryNeeded" xml:space="preserve">親ドライバーの操作が完了せず、復旧も確認できませんでした。スマートフォンを再接続して更新し、必要なら親ドライバーの管理またはデバイスマネージャーで割り当て直してください。操作の詳細は、状態のスナップショットとログにあります。</system:String>
     <system:String x:Key="DriverWaitingSafeStop" xml:space="preserve">操作に想定より時間がかかっています。キャンセルを要求したので、現在の手順と復旧が終わるのを待っています。このウィンドウは閉じないでください。ログ: {0}</system:String>
     <system:String x:Key="ParentListPartial" xml:space="preserve">一部のドライバー一覧を読み取れませんでした。利用できる選択肢は表示しています。詳細:</system:String>
-    <system:String x:Key="ReconnectVerificationFailed" xml:space="preserve">再接続後の検証に失敗しました。接続、デバイスの問題コード、親ドライバーの割り当て、キャプチャフィルターの状態を確認してください。</system:String>
+    <system:String x:Key="ReconnectVerificationFailed" xml:space="preserve">再接続後にデバイスを確認できませんでした。iPhoneのロックを解除し、USBケーブルをつなぎ直して再確認してください。</system:String>
     <system:String x:Key="DriverRefreshFailed" xml:space="preserve">状態を更新できませんでした。上の操作結果はそのまま残しています。理由: {0}。ログ: {1}</system:String>
     <system:String x:Key="HelpBrowserFailedTitle" xml:space="preserve">ヘルプのWebサイトを開けません</system:String>
-    <system:String x:Key="HelpBrowserFailed" xml:space="preserve">次のアドレスを手動で開いてください: {0}。理由: {1}</system:String>
+    <system:String x:Key="HelpBrowserFailed" xml:space="preserve">ブラウザーで {0} を開いてください。</system:String>
+    <system:String x:Key="ParentReenumerateConfirmBody" xml:space="preserve">デバイス: {0}&#xA;リセット後にiPhoneをつなぎ直し、Windowsに再認識させてください。</system:String>
+    <system:String x:Key="OpenLogFailedBody">ドライバーマネージャーを開き直してから再試行してください。</system:String>
 </ResourceDictionary>

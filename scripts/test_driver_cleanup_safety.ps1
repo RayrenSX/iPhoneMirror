@@ -12,12 +12,23 @@ $functions = $ast.FindAll({ param($node)
 }, $true)
 foreach ($name in @('Test-IsBthle', 'Get-NormalizedUsbIdentity', 'Test-DriverExclusiveToDevice',
     'Get-DriversForPhysicalDevice', 'Remove-DriverPackage', 'Remove-DeviceNode',
-    'Stop-iPhoneMirrorProcesses', 'Test-PnpDriverInventorySupport')) {
+    'Stop-iPhoneMirrorProcesses', 'Test-PnpDriverInventorySupport', 'Get-CleanupLogRoot')) {
     $definition = $functions | Where-Object Name -EQ $name | Select-Object -First 1
     if ($null -eq $definition) { throw "Missing function: $name" }
     . ([scriptblock]::Create($definition.Extent.Text))
 }
 function Assert($condition, $message) { if (-not $condition) { throw $message } }
+$commonAppData = (Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders').'Common AppData'
+$expectedLogRoot = Join-Path $commonAppData 'iPhoneMirror.Driver\DeviceCleanup'
+$savedProgramData = $env:ProgramData
+try {
+    $env:ProgramData = $null
+    Assert ((Get-CleanupLogRoot) -eq $expectedLogRoot) 'Cleanup cannot start in the isolated environment without ProgramData.'
+    $env:ProgramData = [IO.Path]::GetTempPath()
+    Assert ((Get-CleanupLogRoot) -eq $expectedLogRoot) 'Cleanup followed the caller-controlled ProgramData variable.'
+}
+finally { $env:ProgramData = $savedProgramData }
+
 function Write-Log { param($Message) }
 function Write-OK { param($Message) }
 function Write-Warn { param($Message) }

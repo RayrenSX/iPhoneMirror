@@ -6,6 +6,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Threading;
 using IPhoneMirror.App.Localization;
 using IPhoneMirror.App.Services;
 
@@ -27,6 +28,7 @@ internal sealed partial class KeyboardMappingOverlayWindow : Window
     private DeviceFrameHitTest? _frameHitTest;
     internal MappingPreviewSurface Surface { get; private set; }
     internal bool IsPicking => _pick is not null;
+    internal bool IsClosed => _closed;
 
     internal KeyboardMappingOverlayWindow(MappingPreviewSurface surface)
     {
@@ -54,7 +56,7 @@ internal sealed partial class KeyboardMappingOverlayWindow : Window
             ApplyInputMode();
         };
         Closed += (_, _) => { _closed = true; _source?.RemoveHook(Hook); _source = null; _pickingToolbar?.Close(); Complete(null); _frameHitTest = null; };
-        Deactivated += (_, _) => { if (IsPicking) Complete(null); };
+        Deactivated += OnPickingDeactivated;
         KeyDown += (_, e) =>
         {
             if (e.Key == Key.Escape && IsPicking) { e.Handled = true; Complete(null); }
@@ -127,11 +129,33 @@ internal sealed partial class KeyboardMappingOverlayWindow : Window
 
     internal void BeginPick(MappingPositionPick pick)
     {
+        if (_closed) { pick.Completed(null); return; }
         _pick = pick; _start = _cursor = null;
         Cursor = Cursors.Cross;
         ApplyInputMode();
-        Show(); Activate(); Focus();
+        Show();
+        if (!ReferenceEquals(_pick, pick)) return;
+        Activate();
+        if (!ReferenceEquals(_pick, pick)) return;
+        Focus();
         RefreshDrawing();
+    }
+
+    private void OnPickingDeactivated(object? sender, EventArgs e)
+    {
+        if (_pick is not { } pick) return;
+        // Owned HWND creation and preview focus restoration can deactivate the
+        // overlay during the same dispatcher turn. Only cancel when focus has
+        // settled outside this preview, and never cancel a later pick.
+        Dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
+        {
+            if (!ReferenceEquals(_pick, pick) || IsActive) return;
+            var foreground = GetForegroundWindow();
+            var previewRootOwner = GetAncestor(Surface.Owner, 3); // GA_ROOTOWNER
+            if (foreground == Surface.Owner || foreground == Surface.Window ||
+                (previewRootOwner != 0 && GetAncestor(foreground, 3) == previewRootOwner)) return;
+            Complete(null);
+        });
     }
 
     internal void CancelPick() => Complete(null);
@@ -213,12 +237,12 @@ internal sealed partial class KeyboardMappingOverlayWindow : Window
 
     private void RefreshDrawing()
     {
-        if (_pick is { } pick)
-        {
-            UpdatePickingToolbar();
-        }
+        if (_pick is not null) UpdatePickingToolbar();
         _visual.InvalidateVisual();
     }
+
+    [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern nint GetAncestor(nint window, uint flags);
 
     private sealed class MappingVisual(KeyboardMappingOverlayWindow overlay) : FrameworkElement
     {

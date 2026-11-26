@@ -23,8 +23,7 @@ public partial class StartupErrorWindow : IPhoneMirror.UI.Controls.RoundedWindow
                 themeError);
         }
 
-        LogPathTextBox.Text = logPath;
-        DetailsTextBox.Text = error.ToString();
+        DetailsTextBox.Text = $"{error.GetType().Name}: {error.Message}";
         RefreshLanguage();
         LocalizationService.RefreshWhenLanguageChanges(this, RefreshLanguage);
     }
@@ -35,11 +34,15 @@ public partial class StartupErrorWindow : IPhoneMirror.UI.Controls.RoundedWindow
         // This window also handles dictionary-load failures. Its captions must
         // remain readable when none of the localization resources are available.
         HeadingText.Text = StartupDiagnostics.Label("StartupErrorHeading", language);
+        var close = StartupDiagnostics.Label("StartupErrorClose", language);
+        HeaderClose.ToolTip = close;
+        System.Windows.Automation.AutomationProperties.SetName(HeaderClose,
+            close);
         SummaryText.Text = StartupDiagnostics.UserMessage(_error, language);
-        LogLabelText.Text = StartupDiagnostics.Label("StartupErrorLogLabel", language);
-        DetailsExpander.Header = StartupDiagnostics.Label("StartupErrorDetails", language);
+        System.Windows.Automation.AutomationProperties.SetName(DetailsTextBox,
+            StartupDiagnostics.Label("StartupErrorDetails", language));
         OpenLogButton.Content = StartupDiagnostics.Label("StartupErrorOpenLog", language);
-        CloseButton.Content = StartupDiagnostics.Label("StartupErrorClose", language);
+        CloseButton.Content = close;
     }
 
     private void OnOpenLogClick(object sender, RoutedEventArgs e)

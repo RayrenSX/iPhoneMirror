@@ -25,6 +25,7 @@ public partial class MediaOutputSettingsWindow : IPhoneMirror.UI.Controls.Rounde
     internal MediaOutputSettingsWindow(MainViewModel viewModel, bool previewOnly = false)
     {
         InitializeComponent();
+        UpdateStreamingFields();
         _viewModel = viewModel;
         _previewOnly = previewOnly;
         MicrophoneBox.ItemsSource = new[] { new MicrophoneDevice(LocalizationService.Get("MicrophoneOff"), "") };
@@ -92,12 +93,20 @@ public partial class MediaOutputSettingsWindow : IPhoneMirror.UI.Controls.Rounde
             nameof(MainViewModel.CanRecordMediaOutput) or
             nameof(MainViewModel.CanStartRecording) or
             nameof(MainViewModel.CanStartStreaming) or
+            nameof(MainViewModel.CurrentSessionHandle) or
+            nameof(MainViewModel.IsMediaCasting) or
+            nameof(MainViewModel.IsMediaCastSelected) or
+            nameof(MainViewModel.IsAudioOnlyAirPlay) or
+            nameof(MainViewModel.MediaOutputTone) or
+            nameof(MainViewModel.MediaOutputCapabilitiesText) or
             nameof(MainViewModel.CanStreamRtmp) or
             nameof(MainViewModel.CanStreamSrt) or
             nameof(MainViewModel.CanStreamWhip) or
             nameof(MainViewModel.CanUseVirtualCamera) or
             nameof(MainViewModel.CanInstallVirtualCamera) or
             nameof(MainViewModel.CanUninstallVirtualCamera) or
+            nameof(MainViewModel.VirtualCameraStartVisibility) or
+            nameof(MainViewModel.VirtualCameraInstallVisibility) or
             nameof(MainViewModel.CanStopMediaOutput) or
             nameof(MainViewModel.IsRecordingMediaOutput) or
             nameof(MainViewModel.IsStreamingMediaOutput) or
@@ -175,8 +184,54 @@ public partial class MediaOutputSettingsWindow : IPhoneMirror.UI.Controls.Rounde
                 VirtualCameraCurrentResolutionItem;
     }
 
-    private void OnStreamProtocolChanged(object sender, SelectionChangedEventArgs e) =>
+    private void OnStreamProtocolChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (WhipAuthorizationFields is null) return;
+        UpdateStreamingFields();
         UpdateStartButtons();
+    }
+
+    private void UpdateStreamingFields()
+    {
+        var address = StreamProtocolBox.SelectedIndex switch
+        {
+            1 => "StreamSrtAddress",
+            2 => "StreamWhipAddress",
+            _ => "StreamRtmpAddress",
+        };
+        StreamAddressLabel.SetResourceReference(TextBlock.TextProperty, address);
+        StreamAddressHint.Text = StreamProtocolBox.SelectedIndex switch
+        {
+            1 => "srt://…",
+            2 => "https://…",
+            _ => "rtmp://…",
+        };
+        StreamDestinationBox.SetResourceReference(System.Windows.Automation.AutomationProperties.NameProperty, address);
+        WhipAuthorizationFields.Visibility = StreamProtocolBox.SelectedIndex == 2
+            ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void OnOutputTabChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (ReferenceEquals(e.Source, OutputTabs)) UpdateStartButtons();
+    }
+
+    private void OnFooterSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (e.WidthChanged) UpdateFooterLayout();
+    }
+
+    private void UpdateFooterLayout()
+    {
+        if (OutputFooter is null || OutputActions is null || OutputFeedback is null) return;
+        var fontSize = (double)FindResource("BodyFontSize");
+        var stack = OutputFooter.ActualWidth < Math.Max(460, fontSize * 24);
+        Grid.SetRow(OutputActions, stack ? 1 : 0);
+        Grid.SetColumn(OutputActions, stack ? 0 : 1);
+        Grid.SetColumnSpan(OutputActions, stack ? 2 : 1);
+        Grid.SetColumnSpan(OutputFeedback, stack ? 2 : 1);
+        OutputActions.Margin = stack ? new Thickness(0, 6, 0, 0) : new Thickness(12, 0, 0, 0);
+    }
 
     private void SelectFirstSupportedProtocol()
     {
@@ -206,7 +261,33 @@ public partial class MediaOutputSettingsWindow : IPhoneMirror.UI.Controls.Rounde
         StartVirtualCameraButton.IsEnabled = !_previewOnly && (_viewModel.IsVirtualCameraOutputRunning
             ? _viewModel.CanStopVirtualCamera : _viewModel.CanUseVirtualCamera);
         StopAllOutputsButton.IsEnabled = !_previewOnly && _viewModel.CanStopMediaOutput;
-        DiscardRecordingButton.Visibility = pendingRecording ? Visibility.Visible : Visibility.Collapsed;
+        DiscardRecordingButton.Visibility = RecordingTab.IsSelected && pendingRecording ? Visibility.Visible : Visibility.Collapsed;
+        InstallVirtualCameraButton.Visibility = CameraTab.IsSelected
+            ? _viewModel.VirtualCameraInstallVisibility : Visibility.Collapsed;
+        StartVirtualCameraButton.Visibility = CameraTab.IsSelected
+            ? _viewModel.VirtualCameraStartVisibility : Visibility.Collapsed;
+        var cameraNeedsSetup = CameraTab.IsSelected && StartVirtualCameraButton.Visibility != Visibility.Visible;
+        var hasSource = _viewModel.CurrentSessionHandle != 0 ||
+            (_viewModel.IsMediaCasting && _viewModel.IsMediaCastSelected);
+        var needsSource = !cameraNeedsSetup && !_viewModel.IsMediaOutputRunning &&
+            !(RecordingTab.IsSelected && pendingRecording) &&
+            (!hasSource || _viewModel.IsAudioOnlyAirPlay);
+        var needsCapability = !needsSource && !_viewModel.IsMediaOutputRunning &&
+            (OutputTabs.SelectedIndex == 1 ? !SelectedProtocolSupported() :
+             OutputTabs.SelectedIndex == 0 && !_viewModel.CanRecordMediaOutput);
+        OutputSourceHint.Text = needsSource
+            ? LocalizationService.Get(_viewModel.IsAudioOnlyAirPlay ? "MediaOutputRequiresVideo" : "MediaOutputNoSession")
+            : "";
+        OutputSourceHint.Visibility = needsSource ? Visibility.Visible : Visibility.Collapsed;
+        var startHint = needsSource ? OutputSourceHint.Text : needsCapability ? _viewModel.MediaOutputCapabilitiesText : null;
+        StartRecordingButton.ToolTip = StartRecordingButton.IsEnabled ? null : startHint;
+        StartStreamingButton.ToolTip = StartStreamingButton.IsEnabled ? null : startHint;
+        StartVirtualCameraButton.ToolTip = StartVirtualCameraButton.IsEnabled ? null : startHint;
+        OutputCapabilityHint.Visibility = needsCapability ? Visibility.Visible : Visibility.Collapsed;
+        var showStatus = _viewModel.IsMediaOutputRunning || _viewModel.IsMediaOutputTransitioning ||
+            _viewModel.MediaOutputTone == "Failed";
+        OutputStatusText.Visibility = showStatus ? Visibility.Visible : Visibility.Collapsed;
+        UpdateFooterLayout();
     }
 
     private bool SelectedProtocolSupported() => StreamProtocolBox.SelectedIndex switch
@@ -257,7 +338,7 @@ public partial class MediaOutputSettingsWindow : IPhoneMirror.UI.Controls.Rounde
             _ => MediaOutputKind.Rtmp,
         };
         var result = await _viewModel.StartStreamingAsync(kind,
-            StreamDestinationBox.Text.Trim(), StreamAuthorizationBox.Text.Trim(),
+            StreamDestinationBox.Text.Trim(), kind == MediaOutputKind.Whip ? StreamAuthorizationBox.Text.Trim() : "",
             width, height, fps, bitrate, MicrophoneBox.SelectedValue as string);
         SetFeedback(result.Message, result.Success ? StatusTone.Success : StatusTone.Error);
     }

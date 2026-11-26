@@ -6,14 +6,17 @@ namespace IPhoneMirror.App.Services;
 [JsonConverter(typeof(PreviewToolbarSettingsConverter))]
 internal sealed class PreviewToolbarSettings
 {
-    internal static readonly string[] DefaultItems = ["WirelessControlButton", "UsbControlButton", "BluetoothControlButton",
-        "QuickMediaOutputButton", "QuickImageSettingsButton", "QuickPreviewWindowButton", "QuickScreenshotButton", "QuickFullScreenButton"];
+    internal static readonly string[] DefaultItems = ["UsbControlButton", "WirelessControlButton", "BluetoothControlButton",
+        "QuickPreviewWindowButton", "QuickScreenshotButton", "QuickFullScreenButton"];
+    internal static readonly string[] AvailableItems = ["WirelessControlButton", "UsbControlButton", "BluetoothControlButton",
+        "QuickMediaOutputButton", "QuickImageSettingsButton", "QuickPreviewWindowButton", "QuickScreenshotButton",
+        "QuickCopyScreenTextButton", "QuickSendPreviewFilesButton", "QuickFullScreenButton"];
     public List<string> Items { get; set; } = DefaultItems.ToList();
     public bool IconsOnly { get; set; }
     public PreviewToolbarSettings Clone() => new() { Items = Items.ToList(), IconsOnly = IconsOnly };
     internal PreviewToolbarSettings Normalize()
     {
-        var valid = (Items ?? DefaultItems.ToList()).Where(id => DefaultItems.Contains(id, StringComparer.Ordinal))
+        var valid = (Items ?? DefaultItems.ToList()).Where(id => AvailableItems.Contains(id, StringComparer.Ordinal))
             .Distinct(StringComparer.Ordinal).ToList();
         if (Items is { Count: > 0 } && valid.Count == 0) valid = DefaultItems.ToList();
         return new() { Items = valid, IconsOnly = IconsOnly };
@@ -34,7 +37,7 @@ internal sealed class PreviewToolbarSettingsConverter : JsonConverter<PreviewToo
         {
             var ids = new List<string>();
             // Read the earlier experimental format once, flattening containers in
-            // place. New saves contain only the eight original action IDs.
+            // place. New saves contain only action IDs.
             foreach (var item in items.EnumerateArray())
             {
                 if (item.ValueKind != JsonValueKind.String) continue;
@@ -44,6 +47,8 @@ internal sealed class PreviewToolbarSettingsConverter : JsonConverter<PreviewToo
                     ids.AddRange(children.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.String).Select(x => x.GetString()!));
                 else ids.Add(id);
             }
+            // Saved layouts are explicit user choices. Only new/reset layouts
+            // use DefaultItems; preserve extra actions, custom order and empty layouts.
             if (items.GetArrayLength() == 0 || ids.Count > 0) value.Items = ids;
         }
         return value.Normalize();

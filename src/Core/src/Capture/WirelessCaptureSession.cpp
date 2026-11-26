@@ -1,4 +1,5 @@
 #include "Capture/WirelessCaptureSession.h"
+#include "Capture/UsbOrientationMonitor.h"
 
 #include <stdexcept>
 
@@ -21,7 +22,9 @@ bool WirelessCaptureSession::publish_external(std::uint32_t kind,
     if (!external_ || !stream_) return false;
     wireless::MessageHeader header{};
     header.payload_size = static_cast<std::uint32_t>(payload.size());
-    if (kind == 1) {
+    // 1 is ordinary I420; 5–8 carry SpringBoard interface orientation 1–4
+    // with the same I420 payload. Raw replay frames still use kind 1.
+    if (kind == 1 || (kind >= 5 && kind <= 8)) {
         const auto chroma_size = ((width + 1ULL) / 2) * ((height + 1ULL) / 2);
         if (width < 2 || height < 2 || width > 8192 || height > 8192 ||
             payload.size() != width * static_cast<std::uint64_t>(height) + 2 * chroma_size) return false;
@@ -29,8 +32,9 @@ bool WirelessCaptureSession::publish_external(std::uint32_t kind,
         header.stride[0] = width; header.stride[1] = header.stride[2] = (width + 1) / 2;
         header.plane_size[0] = width * height;
         header.plane_size[1] = header.plane_size[2] = static_cast<std::uint32_t>(chroma_size);
-        stream_->publish_video(header, payload);
-        external_state(true);
+        if (!external_active_.load()) external_state(true);
+        stream_->publish_video(header, payload, true, kind == 1 ?
+            std::nullopt : detail::springboard_rotation_turns(kind - 4));
     } else if (kind == 2) {
         header.sample_rate = width;
         if (height < 1 || height > 2 || width != 48000 || payload.empty() ||
@@ -98,6 +102,10 @@ void WirelessCaptureSession::set_audio_enabled(bool enabled) noexcept {
 void WirelessCaptureSession::set_audio_volume(float volume) noexcept {
     preferences_.audio_volume = volume;
     if (stream_) stream_->set_audio_volume(volume);
+}
+
+void WirelessCaptureSession::set_audio_playback_preferences(std::uint32_t buffer, bool sync) {
+    if (stream_) stream_->set_audio_playback_preferences(buffer, sync);
 }
 
 void WirelessCaptureSession::set_target_fps(std::uint32_t target_fps) noexcept {

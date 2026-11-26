@@ -131,9 +131,11 @@ public partial class KeyboardMappingWindow : IPhoneMirror.UI.Controls.RoundedWin
         var editor = _editor;
         editor?.Hide();
         Hide();
+        var restored = false;
         void Restore(KeyboardMappingEntry? result)
         {
-            if (editor is null || editor.IsEditorClosed || !ReferenceEquals(_editor, editor)) return;
+            if (restored || editor is null || editor.IsEditorClosed || !ReferenceEquals(_editor, editor)) return;
+            restored = true;
             Show(); editor.Show(); editor.Activate();
             completed(result);
         }

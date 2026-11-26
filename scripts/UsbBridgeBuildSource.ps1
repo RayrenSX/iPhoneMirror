@@ -75,8 +75,16 @@ function New-UsbBridgeBuildSource {
     Copy-Item -LiteralPath $pasteboardText -Destination $stageSource
     Copy-Item -LiteralPath $pasteboardRecovery -Destination $stageSource
     Copy-Item -LiteralPath $screenOrientation -Destination $stageSource
-    foreach ($module in @('coredevice_media.py', 'device_hub.py', 'device_management.py', 'document_file_service.py', 'device_hub_contract.json')) {
+    foreach ($module in @('coredevice_media.py', 'paired_device_discovery.py', 'device_hub.py', 'device_management.py', 'document_file_service.py', 'explorer_file_roots.py', 'explorer_name_view.py', 'explorer_system_files.py', 'explorer_symbols.py', 'device_hub_contract.json', 'ipa_signing.py')) {
         Copy-Item -LiteralPath (Join-Path $SourceRoot $module) -Destination $stageSource
+    }
+    $signerSource = Join-Path $SourceRoot 'ipaside_engine'
+    foreach ($signerFile in Get-ChildItem -LiteralPath $signerSource -Recurse -File |
+            Where-Object { $_.Extension -in @('.py', '.pem', '.json') -or $_.Name -eq 'LICENSE' }) {
+        $signerRelative = $signerFile.FullName.Substring($signerSource.Length).TrimStart('\', '/')
+        $signerTarget = Join-Path (Join-Path $stageSource 'ipaside_engine') $signerRelative
+        New-Item -ItemType Directory -Path (Split-Path -Parent $signerTarget) -Force | Out-Null
+        Copy-Item -LiteralPath $signerFile.FullName -Destination $signerTarget
     }
     # Copy source only: stale bytecode from either checkout must not ship.
     Get-ChildItem -LiteralPath $package -Recurse -File -Filter '*.py' | ForEach-Object {

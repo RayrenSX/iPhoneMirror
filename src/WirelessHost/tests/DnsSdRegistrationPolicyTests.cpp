@@ -65,6 +65,32 @@ int main() {
     }
     SetEnvironmentVariableW(diagnostic_flag, nullptr);
     SetEnvironmentVariableW(mode_variable, nullptr);
+    constexpr auto no_audio_flag = L"IPHONE_MIRROR_DIAGNOSTIC_MIRROR_NO_AUDIO";
+    SetEnvironmentVariableW(no_audio_flag, L"1");
+    for (const auto* mode : {L"mirror", L"combined", L"media"}) {
+        SetEnvironmentVariableW(mode_variable, mode);
+        const auto media = std::wstring_view(mode) == L"media";
+        for (const auto service : {"_airplay._tcp", "_raop._tcp"}) {
+            iPhoneMirror::wireless::DnsSdProperties properties;
+            iPhoneMirror::wireless::apply_dns_sd_advertisement_policy(
+                service, media, L"00:11:22:33:44:55", L"", properties);
+            const auto key = std::string_view(service) == "_airplay._tcp" ? L"features" : L"ft";
+            const auto expected = media ? L"0x5A7FFE73,0x0" : L"0x5A7FFCE6,0x400";
+            if (!has_property(properties, key, expected)) {
+                std::cerr << "No-audio diagnostic must clear only the mirror audio bit\n";
+                return 1;
+            }
+        }
+    }
+    constexpr auto video_only_flag = L"IPHONE_MIRROR_DIAGNOSTIC_VIDEO_ONLY_CAPABILITIES";
+    SetEnvironmentVariableW(video_only_flag, L"1");
+    SetEnvironmentVariableW(mode_variable, L"mirror");
+    if (iPhoneMirror::wireless::mirroring_features() != L"0x5A7FFCE6,0x400") return 1;
+    SetEnvironmentVariableW(mode_variable, L"media");
+    if (iphone_mirror_diagnostic_video_only_capabilities()) return 1;
+    SetEnvironmentVariableW(video_only_flag, nullptr);
+    SetEnvironmentVariableW(no_audio_flag, nullptr);
+    SetEnvironmentVariableW(mode_variable, nullptr);
     for (const auto service : {"_airplay._tcp", "_raop._tcp"}) {
         iPhoneMirror::wireless::DnsSdProperties combined;
         iPhoneMirror::wireless::apply_dns_sd_advertisement_policy(

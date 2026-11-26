@@ -14,6 +14,7 @@ public partial class MainWindow
     internal Func<string, DeviceAction, CancellationToken, Task> ExecuteDeviceAction { get; set; } = DeviceActionService.ExecuteAsync;
     internal Func<DeviceViewModel, DeviceAction, bool>? ConfirmDeviceAction { get; set; }
     internal Action<string> CopyDeviceInfoText { get; set; } = Clipboard.SetText;
+    internal Action<DeviceViewModel, Window> CreateDeviceShortcut { get; set; } = CreateCompactShortcut;
 
     private static DeviceViewModel? DeviceMenuTarget(ContextMenu menu) =>
         (menu.PlacementTarget as FrameworkElement)?.DataContext as DeviceViewModel;
@@ -22,12 +23,13 @@ public partial class MainWindow
     {
         if (sender is not ContextMenu menu) return;
         var device = DeviceMenuTarget(menu);
+        var powerSource = device is null ? null : _viewModel.GetDevicePowerActionSource(device);
         foreach (var item in menu.Items.OfType<MenuItem>())
         {
-            var localAction = item.Tag as string == "CopyInfo";
+            var localAction = item.Tag is "CopyInfo" or "CreateShortcut";
             item.IsEnabled = device is not null && !device.IsMediaCast &&
-                (localAction || DeviceActionService.CanExecute(device) && !_deviceActionsInProgress.Contains(device.Udid));
-            item.ToolTip = !localAction && device is not null && !DeviceActionService.CanExecute(device)
+                (localAction || powerSource is not null && !_deviceActionsInProgress.Contains(powerSource.Udid));
+            item.ToolTip = !localAction && device is not null && powerSource is null
                 ? LocalizationService.Get("DeviceActionUsbRequired") : null;
             ToolTipService.SetShowOnDisabled(item, true);
         }
@@ -47,12 +49,19 @@ public partial class MainWindow
             catch (Exception error) { AppPromptWindow.Inform(LocalizationService.Get("DeviceActionCopyInfo"), error.Message, this); }
             return;
         }
+        if (item.Tag is "CreateShortcut")
+        {
+            CreateDeviceShortcut(target, this);
+            return;
+        }
         if (!Enum.TryParse<DeviceAction>(item.Tag as string, out var action)) return;
         await RunDeviceActionAsync(target, action);
     }
 
     internal async Task RunDeviceActionAsync(DeviceViewModel target, DeviceAction action)
     {
+        if (_viewModel.GetDevicePowerActionSource(target) is not { } powerSource) return;
+        target = powerSource;
         if (_deviceActionLifetime.IsCancellationRequested || !Enum.IsDefined(action) ||
             !DeviceActionService.CanExecute(target) || !_deviceActionsInProgress.Add(target.Udid)) return;
         var label = LocalizationService.Get("DeviceAction" + action);

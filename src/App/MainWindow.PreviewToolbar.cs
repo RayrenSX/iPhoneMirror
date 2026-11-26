@@ -99,7 +99,7 @@ public partial class MainWindow
     }
 
     private void OnCustomizePreviewToolbar(object sender, RoutedEventArgs e) => OpenToolbarEditor();
-    private void OpenToolbarEditor()
+    internal void OpenToolbarEditor(Window? owner = null)
     {
         InitializePreviewToolbar();
         var baseline = _previewToolbarSettings.Clone();
@@ -114,8 +114,8 @@ public partial class MainWindow
             app.UpdateSettings.PreviewToolbar = draft.Normalize();
             if (app.SaveUpdateSettings()) return true;
             app.UpdateSettings.PreviewToolbar = previous; return false;
-        }) { Owner = this };
-        dialog.ConfigureToolbarFocus(this, EnvironmentPanel);
+        }) { Owner = owner ?? this };
+        if (owner is null) dialog.ConfigureToolbarFocus(this, EnvironmentPanel);
         if (dialog.ShowDialog() != true) ApplyPreviewToolbar(baseline);
     }
 }

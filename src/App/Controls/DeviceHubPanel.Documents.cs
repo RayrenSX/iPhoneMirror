@@ -55,9 +55,4 @@ internal sealed partial class DeviceHubPanel
         finally { _loadingDocumentScopes = false; }
     }
 
-    private async Task StopDocumentMappingAsync()
-    {
-        if (_device is not null && _viewModel.ExplorerMappingDeviceUdid is not null)
-            await _viewModel.SetExplorerMappingAsync(_device, false);
-    }
 }

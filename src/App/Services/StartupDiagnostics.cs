@@ -11,7 +11,6 @@ internal static class StartupDiagnostics
     private const long MaximumLogBytes = 1024 * 1024;
     private const int RetainedArchives = 2;
     private static readonly object WriteGate = new();
-    private static bool _sessionStarted;
     private static int _initialized;
 
     internal static string LogPath { get; } = Path.Combine(
@@ -48,9 +47,6 @@ internal static class StartupDiagnostics
             {
                 var directory = Path.GetDirectoryName(LogPath)!;
                 Directory.CreateDirectory(directory);
-                if (!DiagnosticLogger.TryRotateIfNeeded(LogPath, MaximumLogBytes,
-                        RetainedArchives, ref _sessionStarted)) return LogPath;
-
                 var assemblyVersion = Assembly.GetExecutingAssembly().GetName().Version;
                 var entry = new StringBuilder()
                     .AppendLine("============================================================")
@@ -73,8 +69,8 @@ internal static class StartupDiagnostics
                         $"version={TryGetFileVersion(path)}");
                 }
                 entry.AppendLine("Exception:").AppendLine(AppLog.Message(error.ToString()));
-                File.AppendAllText(LogPath, entry.ToString(), new UTF8Encoding(false));
-                _sessionStarted = true;
+                DiagnosticLogger.AppendLog(LogPath, entry.ToString(),
+                    MaximumLogBytes, RetainedArchives);
             }
         }
         catch
@@ -124,24 +120,24 @@ internal static class StartupDiagnostics
         if (nativeLoadFailure)
         {
             if (taiwan)
-                return "無法載入應用程式所需的原生元件。請重新安裝最新的完整安裝套件；詳細診斷資訊已寫入下方記錄檔。";
+                return "無法載入必要原生元件。請使用最新的完整安裝套件重新安裝。";
             if (hongKong)
-                return "無法載入應用程式所需的原生元件。請重新安裝最新的完整安裝程式；詳細診斷資料已寫入下方記錄。";
+                return "無法載入必要原生元件。請使用最新的完整安裝程式重新安裝。";
             if (japanese)
-                return "アプリに必要なネイティブコンポーネントを読み込めませんでした。最新の完全版セットアップを入れ直してください。詳しい診断は下のログに書き込みました。";
+                return "必要なコンポーネントを読み込めませんでした。最新の完全版を再インストールしてください。";
             return simplifiedChinese
-                ? "无法加载程序所需的原生组件。请重新安装最新的完整安装包；详细诊断已写入下方日志。"
-                : "A required native component could not be loaded. Reinstall the latest full Setup package; detailed diagnostics were written to the log below.";
+                ? "无法加载原生组件。请用最新的完整安装包重新安装。"
+                : "A native component could not load. Reinstall using the latest full installer.";
         }
         if (taiwan)
-            return "iPhoneMirror 啟動時發生錯誤。詳細診斷資訊已寫入下方記錄檔。";
+            return "請重新開啟 iPhoneMirror。若問題持續，請查看診斷記錄。";
         if (hongKong)
-            return "iPhoneMirror 啟動時發生錯誤。詳細診斷資料已寫入下方記錄。";
+            return "請重新開啟 iPhoneMirror。若問題持續，請查看診斷記錄。";
         if (japanese)
-            return "iPhoneMirrorの起動中にエラーが発生しました。詳しい診断は下のログに書き込みました。";
+            return "iPhoneMirrorを開き直してください。問題が続く場合は診断ログを確認してください。";
         return simplifiedChinese
-            ? "iPhoneMirror 启动时遇到错误。详细诊断已写入下方日志。"
-            : "iPhoneMirror encountered an error during startup. Detailed diagnostics were written to the log below.";
+            ? "请重新打开 iPhoneMirror。如果仍无法启动，请查看诊断日志。"
+            : "Reopen iPhoneMirror. If it still won’t start, check the diagnostic log.";
     }
 
     internal static string Label(string key, string language)

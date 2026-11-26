@@ -4,41 +4,112 @@
         xmlns:animations="clr-namespace:IPhoneMirror.UI.Animations"
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
         Title="{DynamicResource BluetoothClientBindingTitle}"
-        Width="542" Height="470" MinWidth="482" MinHeight="422"
+        Width="500" SizeToContent="Height" MaxHeight="500"
         WindowStartupLocation="CenterOwner" ResizeMode="NoResize"
         Foreground="{DynamicResource TextBrush}"
         xmlns:chrome="clr-namespace:IPhoneMirror.UI.Controls"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent">
+    <chrome:RoundedWindow.Resources>
+        <Style x:Key="BluetoothPairingGuide" TargetType="StackPanel">
+            <Setter Property="Visibility" Value="Collapsed"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding Clients.Count}" Value="0">
+                    <Setter Property="Visibility" Value="Visible"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+    </chrome:RoundedWindow.Resources>
     <Grid Style="{StaticResource SubWindowPageRoot}"
           animations:PageTransition.IsEnabled="True">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="16"/>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="12"/>
-            <RowDefinition Height="*" MinHeight="{StaticResource DialogContentMinHeight}"/>
-            <RowDefinition Height="14"/>
+            <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
         <Grid Style="{StaticResource SubWindowHeader}"
               animations:WindowDragBehavior.IsEnabled="True">
-            <TextBlock TextWrapping="Wrap" Text="{DynamicResource BluetoothClientBindingTitle}"
-                       Style="{StaticResource SubWindowTitle}" Margin="0,0,48,0"/>
+            <StackPanel Margin="0,0,48,0">
+                <TextBlock TextWrapping="Wrap" Text="{DynamicResource BluetoothClientBindingTitle}"
+                           Style="{StaticResource SubWindowTitle}"/>
+                <TextBlock Text="{Binding TargetText}" Style="{StaticResource SubWindowSubtitle}"/>
+            </StackPanel>
             <Button Style="{StaticResource SubWindowCloseButton}" Click="OnCancelClick"
                     ToolTip="{DynamicResource Cancel}">
                 <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Dismiss20" FontSize="18"/>
             </Button>
         </Grid>
-        <StackPanel Grid.Row="2">
-            <TextBlock TextWrapping="Wrap" Text="{Binding TargetText}" FontSize="{DynamicResource FontSize15}" FontWeight="SemiBold"/>
-            <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource BluetoothClientBindingHint}"
-                       Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"
-                       TextWrapping="Wrap" Margin="0,5,0,0"/>
-        </StackPanel>
-        <Grid Grid.Row="4"><ListBox  ItemsSource="{Binding Clients}"
+        <Border Grid.Row="1" Margin="0,16,0,0">
+            <Border.Style>
+                <Style TargetType="Border" BasedOn="{StaticResource SettingsSection}">
+                    <Setter Property="Background" Value="Transparent"/>
+                    <Setter Property="BorderThickness" Value="0"/>
+                    <Setter Property="Padding" Value="0"/>
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding Clients.Count}" Value="0">
+                            <Setter Property="Background" Value="{DynamicResource CardBrush}"/>
+                            <Setter Property="BorderThickness" Value="1"/>
+                            <Setter Property="Padding" Value="16"/>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Border.Style>
+            <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <StackPanel Style="{StaticResource BluetoothPairingGuide}" Margin="0,0,12,0">
+                    <Border Background="{DynamicResource ControlFillBrush}" Width="36" Height="36" CornerRadius="10">
+                        <ui:SymbolIcon Symbol="Bluetooth20" FontSize="20" Foreground="{DynamicResource AccentBrush}"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                </StackPanel>
+                <StackPanel Grid.Column="1">
+                    <StackPanel x:Name="PairingInstructions" Style="{StaticResource BluetoothPairingGuide}">
+                        <TextBlock Text="{DynamicResource BluetoothClientBindingEmptyTitle}" Style="{StaticResource BodyText}" FontWeight="SemiBold"/>
+                        <TextBlock Text="{DynamicResource BluetoothEmptyState}" Style="{StaticResource SecondaryText}" Margin="0,4,0,12"/>
+                    </StackPanel>
+                    <Button x:Name="RefreshDevicesButton" Content="{DynamicResource BluetoothClientBindingRefresh}"
+                            Click="OnRefreshClick" IsEnabled="{Binding CanRefresh}">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource SecondaryButton}">
+                                <Setter Property="HorizontalAlignment" Value="Right"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Clients.Count}" Value="0">
+                                        <Setter Property="HorizontalAlignment" Value="Left"/>
+                                        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/>
+                                        <Setter Property="FontWeight" Value="SemiBold"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
+                    <TextBlock x:Name="FeedbackText" TextWrapping="Wrap" Foreground="{DynamicResource WarningBrush}"
+                               AutomationProperties.LiveSetting="Polite">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock" BasedOn="{StaticResource SecondaryText}">
+                                <Setter Property="Margin" Value="0,8,0,0"/>
+                                <Style.Triggers>
+                                    <Trigger Property="Text" Value=""><Setter Property="Visibility" Value="Collapsed"/></Trigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </StackPanel>
+            </Grid>
+        </Border>
+        <ListBox Grid.Row="2" ItemsSource="{Binding Clients}" MaxHeight="216" Margin="0,10,0,0"
                  SelectedItem="{Binding SelectedClient, Mode=TwoWay}"
                  BorderThickness="0" Background="Transparent"
-                 ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                 ScrollViewer.VerticalScrollBarVisibility="Auto">
+            <ListBox.Style>
+                <Style TargetType="ListBox" BasedOn="{StaticResource {x:Type ListBox}}">
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding Clients.Count}" Value="0">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </ListBox.Style>
             <ListBox.ItemContainerStyle>
                 <Style TargetType="ListBoxItem">
                     <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
@@ -75,10 +146,7 @@
             </ListBox.ItemContainerStyle>
             <ListBox.ItemTemplate>
                 <DataTemplate>
-                    <Border Background="{DynamicResource ControlFillBrush}"
-                            BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
-                            CornerRadius="8" Padding="12,10">
-                        <Grid>
+                        <Grid Margin="12,10">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
@@ -120,43 +188,23 @@
                                 </Button.Style>
                             </Button>
                         </Grid>
-                    </Border>
                 </DataTemplate>
             </ListBox.ItemTemplate>
         </ListBox>
-            <TextBlock TextWrapping="Wrap" Text="{DynamicResource BluetoothEmptyState}">
-                <TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource EmptyStateText}">
-                    <Setter Property="Visibility" Value="Collapsed"/>
-                    <Style.Triggers><DataTrigger Binding="{Binding Clients.Count}" Value="0">
-                        <Setter Property="Visibility" Value="Visible"/>
-                    </DataTrigger></Style.Triggers>
-                </Style></TextBlock.Style>
-            </TextBlock>
-        </Grid>
-        <StackPanel Grid.Row="6">
-        <TextBlock x:Name="FeedbackText" TextWrapping="Wrap" Margin="0,0,0,8"
-                   Foreground="{DynamicResource WarningBrush}" AutomationProperties.LiveSetting="Polite"/>
-        <Grid>
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="8"/>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="8"/>
-                <ColumnDefinition Width="Auto"/>
-            </Grid.ColumnDefinitions>
-            <Button Grid.Column="1" Style="{StaticResource IconButton}"
-                    Click="OnRefreshClick" IsEnabled="{Binding CanRefresh}"
-                    ToolTip="{DynamicResource BluetoothClientBindingRefresh}"
-                    AutomationProperties.Name="{DynamicResource BluetoothClientBindingRefresh}">
-                <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}"
-                               Symbol="ArrowClockwise20" FontSize="18"/>
+        <WrapPanel Grid.Row="3" Style="{StaticResource DialogActions}" Margin="0,14,0,0">
+            <Button Content="{DynamicResource Cancel}" Click="OnCancelClick" MinWidth="88" Margin="{StaticResource DialogActionMargin}"/>
+            <Button Content="{DynamicResource BluetoothClientBindingConfirm}" IsDefault="True"
+                    Click="OnConfirmClick" IsEnabled="{Binding CanConfirm}" MinWidth="132" Margin="{StaticResource DialogActionMargin}">
+                <Button.Style>
+                    <Style TargetType="Button" BasedOn="{StaticResource PrimaryButton}">
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding Clients.Count}" Value="0">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Button.Style>
             </Button>
-            <Button Grid.Column="3" Content="{DynamicResource Cancel}" Click="OnCancelClick" MinWidth="88"/>
-            <Button Grid.Column="5" Content="{DynamicResource BluetoothClientBindingConfirm}" IsDefault="True"
-                    Click="OnConfirmClick" Style="{StaticResource PrimaryButton}"
-                    IsEnabled="{Binding CanConfirm}" MinWidth="132"/>
-        </Grid>
-        </StackPanel>
+        </WrapPanel>
     </Grid>
 </chrome:RoundedWindow>

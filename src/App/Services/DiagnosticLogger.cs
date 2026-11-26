@@ -29,7 +29,28 @@ internal static class DiagnosticLogger
     private static bool _sessionStarted;
     private static int _initialized;
     private static Timer? _maintenanceTimer;
+    private static readonly Dictionary<string, int> MainLogFamilies = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["application.log"] = RetainedArchives,
+        ["reverse-control.log"] = RetainedArchives,
+        ["capture.log"] = 1,
+        ["startup.log"] = 2,
+    };
+    private static readonly Dictionary<string, int> TemporaryLogFamilies = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["iPhoneMirror-capture.log"] = 1,
+        ["iPhoneMirror-fallback.log"] = 1,
+    };
+    private static readonly Dictionary<string, int> DriverLogFamilies = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["driver-ui.log"] = 3,
+        ["apple-support-install.log"] = 0,
+        ["bonjour-install.log"] = 0,
+    };
 
+    internal static string DefaultDirectoryPath { get; } = System.IO.Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "iPhoneMirror", "Logs");
     internal static string DirectoryPath { get; } = ResolveDirectoryPath();
     internal static string Path { get; } = System.IO.Path.Combine(
         DirectoryPath, "application.log");
@@ -41,18 +62,23 @@ internal static class DiagnosticLogger
         DirectoryPath, "reverse-control.log");
     internal static string FallbackPath { get; } = System.IO.Path.Combine(
         System.IO.Path.GetTempPath(), "iPhoneMirror-fallback.log");
+    private static string NativeFallbackPath { get; } = System.IO.Path.Combine(
+        System.IO.Path.GetTempPath(), "iPhoneMirror-capture.log");
 
     internal static void Initialize()
     {
         if (Interlocked.Exchange(ref _initialized, 1) != 0) return;
         try
         {
+            _maintenanceTimer = StartDirectoryMaintenance(DirectoryPath,
+                TimeSpan.FromMinutes(1), includeAuxiliaryLogs: true);
+            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("IPHONE_MIRROR_LOG_FILE")))
+                Environment.SetEnvironmentVariable("IPHONE_MIRROR_LOG_FILE",
+                    NativeFallbackPath, EnvironmentVariableTarget.Process);
             Directory.CreateDirectory(DirectoryPath);
             Environment.SetEnvironmentVariable("IPHONE_MIRROR_LOG_FILE",
                 NativeLogPath, EnvironmentVariableTarget.Process);
             var cleanup = Cleanup(includeActiveLogs: false);
-            _maintenanceTimer = StartDirectoryMaintenance(DirectoryPath,
-                TimeSpan.FromMinutes(1));
             Write("INFO", "lifecycle", "session_start",
                 ("version", Assembly.GetEntryAssembly()?
                     .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
@@ -128,17 +154,20 @@ internal static class DiagnosticLogger
             var now = DateTimeOffset.UtcNow;
             var result = CleanupDirectory(DirectoryPath, now,
                 includeActiveLogs);
+            if (!string.Equals(DirectoryPath, DefaultDirectoryPath, StringComparison.OrdinalIgnoreCase))
+                result = Add(result, CleanupDirectory(DefaultDirectoryPath, now, includeActiveLogs));
             var driverDirectory = System.IO.Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "iPhoneMirror.Driver", "Logs");
-            result = Add(result, CleanupDirectory(driverDirectory, now,
-                includeActiveLogs));
+            result = Add(result, CleanupFiles(driverDirectory, now,
+                includeActiveLogs, DriverLogFamilies));
             var driverPackagesDirectory = System.IO.Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "iPhoneMirror.Driver", "Packages");
-            result = Add(result, CleanupDirectory(driverPackagesDirectory, now,
-                includeActiveLogs));
-            result = Add(result, CleanupLegacyNativeLogs(now, includeActiveLogs));
+            result = Add(result, CleanupFiles(driverPackagesDirectory, now,
+                includeActiveLogs, DriverLogFamilies));
+            result = Add(result, CleanupFiles(System.IO.Path.GetTempPath(), now,
+                includeActiveLogs, TemporaryLogFamilies));
             if (includeActiveLogs) _sessionStarted = false;
             return result;
         }
@@ -153,48 +182,50 @@ internal static class DiagnosticLogger
     // Native logging can remain active while the managed UI is idle. Keep the
     // directory budget and age policy running independently of managed writes.
     internal static Timer StartDirectoryMaintenance(string directory,
-        TimeSpan interval) => new(_ =>
+        TimeSpan interval, bool includeAuxiliaryLogs = false)
+    {
+        var running = 0;
+        return new Timer(_ =>
         {
+            if (Interlocked.Exchange(ref running, 1) != 0) return;
             try
             {
-                lock (Gate)
-                    CleanupDirectory(directory, DateTimeOffset.UtcNow,
-                        includeActiveLogs: false);
+                if (includeAuxiliaryLogs) Cleanup();
+                else
+                    lock (Gate)
+                        CleanupDirectory(directory, DateTimeOffset.UtcNow,
+                            includeActiveLogs: false);
             }
             catch
             {
-                // A cleanup failure must not terminate a ThreadPool thread or
-                // recursively create more logs. Retry at the next interval.
+                // Retry at the next interval without creating more logs.
+            }
+            finally
+            {
+                Volatile.Write(ref running, 0);
             }
         }, null, interval, interval);
+    }
 
     private static void Write(string level, string category, string eventName,
         params (string Key, object? Value)[] fields)
     {
+        string? entry = null;
         try
         {
+            entry = FormatEntry(level, category, eventName, fields);
             lock (Gate)
             {
                 Directory.CreateDirectory(DirectoryPath);
-                if (!TryRotateIfNeeded(Path, MaximumLogBytes,
-                        RetainedArchives, ref _sessionStarted,
-                        maintainDirectory: true))
-                {
-                    TryWriteFallback(FormatEntry(level, category, eventName, fields) +
-                        FormatEntry("ERROR", "logging", "rotation_failed",
-                            ("file", System.IO.Path.GetFileName(Path))));
-                    return;
-                }
-                EnsureSessionHeader();
-                File.AppendAllText(Path,
-                    FormatEntry(level, category, eventName, fields),
-                    new UTF8Encoding(false));
+                AppendLogLocked(Path, entry, MaximumLogBytes, RetainedArchives,
+                    "logger", startSession: !_sessionStarted, maintainDirectory: true);
+                _sessionStarted = true;
             }
         }
         catch (Exception error)
         {
             // Never throw from an error-reporting path.
-            TryWriteFallback(FormatEntry(level, category, eventName, fields) +
+            TryWriteFallback(entry +
                 FormatEntry("ERROR", "logging", "primary_write_failed",
                     ("exception", error.GetType().FullName),
                     ("message", error.Message)));
@@ -204,55 +235,25 @@ internal static class DiagnosticLogger
     private static void WriteReverseControl(string level, string mode,
         string eventName, params (string Key, object? Value)[] fields)
     {
+        string? entry = null;
         try
         {
+            var all = new (string Key, object? Value)[fields.Length + 1];
+            all[0] = ("mode", mode);
+            fields.CopyTo(all, 1);
+            entry = FormatEntry(level, "reverse_control", eventName, all);
             lock (Gate)
             {
                 Directory.CreateDirectory(DirectoryPath);
-                var sessionStarted = false;
-                if (!TryRotateIfNeeded(ReverseControlLogPath, MaximumLogBytes,
-                        RetainedArchives, ref sessionStarted,
-                        maintainDirectory: true))
-                {
-                    TryWriteFallback(FormatEntry(level, "reverse_control", eventName,
-                        fields) + FormatEntry("ERROR", "logging", "rotation_failed",
-                        ("file", System.IO.Path.GetFileName(ReverseControlLogPath))));
-                    return;
-                }
-                if (!File.Exists(ReverseControlLogPath) ||
-                    new FileInfo(ReverseControlLogPath).Length == 0)
-                {
-                    File.AppendAllText(ReverseControlLogPath,
-                        FormatEntry("INFO", "reverse_control", "log_opened",
-                            ("pid", Environment.ProcessId),
-                            ("path", System.IO.Path.GetFileName(ReverseControlLogPath))),
-                        new UTF8Encoding(false));
-                }
-                var all = new (string Key, object? Value)[fields.Length + 1];
-                all[0] = ("mode", mode);
-                fields.CopyTo(all, 1);
-                File.AppendAllText(ReverseControlLogPath,
-                    FormatEntry(level, "reverse_control", eventName, all),
-                    new UTF8Encoding(false));
+                AppendLogLocked(ReverseControlLogPath, entry, MaximumLogBytes, RetainedArchives,
+                    "reverse_control", startSession: false, maintainDirectory: true);
             }
         }
         catch (Exception error)
         {
-            TryWriteFallback(FormatEntry(level, "reverse_control", eventName,
-                fields) + FormatEntry("ERROR", "logging", "reverse_control_write_failed",
+            TryWriteFallback(entry + FormatEntry("ERROR", "logging", "reverse_control_write_failed",
                 ("exception", error.GetType().FullName), ("message", error.Message)));
         }
-    }
-
-    private static void EnsureSessionHeader()
-    {
-        if (_sessionStarted) return;
-        File.AppendAllText(Path,
-            FormatEntry("INFO", "logger", "log_opened",
-                ("pid", Environment.ProcessId),
-                ("path", System.IO.Path.GetFileName(Path))),
-            new UTF8Encoding(false));
-        _sessionStarted = true;
     }
 
     internal static string FormatEntry(string level, string category,
@@ -287,74 +288,133 @@ internal static class DiagnosticLogger
         return builder.ToString();
     }
 
-    internal static bool TryRotateIfNeeded(string path, long maximumBytes,
-        int retainedArchives, ref bool sessionStarted,
+    internal static void AppendLog(string path, string entry, long maximumBytes,
+        int retainedArchives, string? headerCategory = null, bool startSession = false,
         bool maintainDirectory = false)
     {
-        try
+        lock (Gate)
+            AppendLogLocked(path, entry, maximumBytes, retainedArchives, headerCategory,
+                startSession, maintainDirectory);
+    }
+
+    private static void AppendLogLocked(string path, string entry, long maximumBytes,
+        int retainedArchives, string? headerCategory, bool startSession, bool maintainDirectory)
+    {
+        string CreateHeader() => headerCategory is null ? string.Empty :
+            FormatEntry("INFO", headerCategory, "log_opened",
+                ("pid", Environment.ProcessId),
+                ("path", System.IO.Path.GetFileName(path)));
+
+        var file = new FileInfo(path);
+        var now = DateTimeOffset.Now;
+        var length = file.Exists ? file.Length : 0;
+        var header = length == 0 || startSession ? CreateHeader() : string.Empty;
+        var entryBytes = Encoding.UTF8.GetByteCount(entry);
+        var rotate = length > 0 &&
+            (file.LastWriteTime.Date != now.Date ||
+             entryBytes + Encoding.UTF8.GetByteCount(header) > maximumBytes - length);
+        if (rotate && header.Length == 0) header = CreateHeader();
+        if (entryBytes + Encoding.UTF8.GetByteCount(header) > maximumBytes)
+            throw new IOException("Diagnostic entry exceeds the log file size limit.");
+        if (rotate)
         {
-            if (!File.Exists(path) || new FileInfo(path).Length < maximumBytes)
-                return true;
-            sessionStarted = false;
-            for (var index = retainedArchives; index >= 1; --index)
+            EnsureArchiveCapacity(file, retainedArchives + 1);
+            File.Move(path, FormattableString.Invariant(
+                $"{path}.{file.LastWriteTime:yyyyMMdd'T'HHmmssfff}-{Guid.NewGuid():N}"));
+        }
+        File.AppendAllText(path, header + entry);
+        if (!rotate) return;
+
+        var directory = file.DirectoryName!;
+        if (maintainDirectory) CleanupDirectory(directory, now, includeActiveLogs: false);
+        else CleanupFiles(directory, now, includeActiveLogs: false,
+            new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase) { [file.Name] = retainedArchives });
+    }
+
+    private static void EnsureArchiveCapacity(FileInfo active, int limit)
+    {
+        var prefix = active.Name + ".";
+        var archives = active.Directory!.EnumerateFiles()
+            .Where(file => file.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
+                           IsArchiveSuffix(file.Name.AsSpan(prefix.Length)))
+            .OrderBy(file => file.LastWriteTimeUtc).ToArray();
+        var count = archives.Length;
+        foreach (var archive in archives)
+        {
+            if (count < limit) return;
+            try
             {
-                var source = index == 1 ? path : $"{path}.{index - 1}";
-                var destination = $"{path}.{index}";
-                if (File.Exists(destination)) File.Delete(destination);
-                if (File.Exists(source)) File.Move(source, destination);
+                archive.Delete();
+                --count;
             }
-            if (maintainDirectory)
-                CleanupDirectory(System.IO.Path.GetDirectoryName(path)!,
-                    DateTimeOffset.UtcNow, includeActiveLogs: false);
-            return true;
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            {
+                // One locked archive can temporarily use the extra slot.
+            }
         }
-        catch
-        {
-            return false;
-        }
+        if (count >= limit) throw new IOException("All available diagnostic archive slots are occupied.");
     }
 
     internal static LogCleanupResult CleanupDirectory(string directory,
-        DateTimeOffset now, bool includeActiveLogs)
+        DateTimeOffset now, bool includeActiveLogs) =>
+        CleanupFiles(directory, now, includeActiveLogs, MainLogFamilies, includeInstallerLogs: true);
+
+    private static LogCleanupResult CleanupFiles(string directory, DateTimeOffset now,
+        bool includeActiveLogs, Dictionary<string, int> families, bool includeInstallerLogs = false)
     {
         if (!Directory.Exists(directory)) return default;
-        var activeNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            System.IO.Path.GetFileName(Path),
-            System.IO.Path.GetFileName(NativeLogPath),
-            System.IO.Path.GetFileName(ReverseControlLogPath),
-            "startup.log",
-        };
-        FileInfo[] files;
+        var cutoff = now.UtcDateTime.AddDays(-RetentionDays);
+        var files = new List<(FileInfo File, string? Family, bool Active)>();
         try
         {
-            files = Directory.EnumerateFiles(directory, "*", SearchOption.TopDirectoryOnly)
-                .Select(path => new FileInfo(path))
-                .Where(file => file.Extension.Equals(".log", StringComparison.OrdinalIgnoreCase) ||
-                               file.Name.Contains(".log.", StringComparison.OrdinalIgnoreCase))
-                .OrderBy(file => file.LastWriteTimeUtc)
-                .ToArray();
+            foreach (var file in new DirectoryInfo(directory).EnumerateFiles())
+            {
+                var family = LogFamily(file.Name, families);
+                if (family is not null)
+                    files.Add((file, family, families.ContainsKey(file.Name)));
+                else if (includeInstallerLogs && IsInstallerLog(file.Name))
+                    files.Add((file, null, false));
+            }
+            // With equal timestamps, prefer timestamped archives and then the
+            // smaller legacy index (the most recent in the old file scheme).
+            files.Sort((left, right) =>
+            {
+                var order = right.File.LastWriteTimeUtc.CompareTo(left.File.LastWriteTimeUtc);
+                if (order != 0) return order;
+                var leftLegacy = int.TryParse(left.File.Extension.AsSpan(1), out var leftIndex);
+                var rightLegacy = int.TryParse(right.File.Extension.AsSpan(1), out var rightIndex);
+                if (leftLegacy && rightLegacy) return leftIndex.CompareTo(rightIndex);
+                if (leftLegacy != rightLegacy) return leftLegacy ? 1 : -1;
+                return StringComparer.OrdinalIgnoreCase.Compare(right.File.Name, left.File.Name);
+            });
         }
         catch (Exception error) when (error is IOException or
                                       UnauthorizedAccessException)
         {
             return new LogCleanupResult(0, 0, 1);
         }
-        var totalBytes = files.Sum(file => SafeLength(file));
-        var cutoff = now.UtcDateTime.AddDays(-RetentionDays);
+        var totalBytes = files.Sum(entry => SafeLength(entry.File));
+        var excessArchives = files.Where(entry => !entry.Active && entry.Family is not null)
+            .GroupBy(entry => entry.Family!, StringComparer.OrdinalIgnoreCase)
+            .SelectMany(group => group.Skip(families[group.Key]))
+            .Select(entry => entry.File.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var deletedFiles = 0;
         long deletedBytes = 0;
         var skippedFiles = 0;
-        foreach (var file in files)
+        for (var index = files.Count - 1; index >= 0; --index)
         {
-            var isActive = activeNames.Contains(file.Name);
-            var shouldDelete = (includeActiveLogs || !isActive) &&
-                (includeActiveLogs || file.LastWriteTimeUtc < cutoff ||
-                 totalBytes > MaximumDirectoryBytes);
+            var (file, _, active) = files[index];
+            var shouldDelete = includeActiveLogs || file.LastWriteTimeUtc < cutoff ||
+                (!active && (totalBytes > MaximumDirectoryBytes || excessArchives.Contains(file.Name)));
             if (!shouldDelete) continue;
-            var length = SafeLength(file);
             try
             {
+                if (active && !includeActiveLogs)
+                {
+                    file.Refresh();
+                    if (!file.Exists || file.LastWriteTimeUtc >= cutoff) continue;
+                }
+                var length = SafeLength(file);
                 file.Delete();
                 ++deletedFiles;
                 deletedBytes += length;
@@ -369,40 +429,32 @@ internal static class DiagnosticLogger
         return new LogCleanupResult(deletedFiles, deletedBytes, skippedFiles);
     }
 
-    private static LogCleanupResult CleanupLegacyNativeLogs(DateTimeOffset now,
-        bool includeActiveLogs)
+    private static string? LogFamily(string name, Dictionary<string, int> families)
     {
-        var deleted = 0;
-        long bytes = 0;
-        var skipped = 0;
-        foreach (var path in new[]
-                 {
-                     System.IO.Path.Combine(System.IO.Path.GetTempPath(),
-                         "iPhoneMirror-capture.log"),
-                     System.IO.Path.Combine(System.IO.Path.GetTempPath(),
-                         "iPhoneMirror-capture.log.1"),
-                     FallbackPath,
-                 })
-        {
-            if (!File.Exists(path)) continue;
-            var file = new FileInfo(path);
-            if (!includeActiveLogs && file.LastWriteTimeUtc >=
-                    now.UtcDateTime.AddDays(-RetentionDays)) continue;
-            var length = SafeLength(file);
-            try
-            {
-                file.Delete();
-                ++deleted;
-                bytes += length;
-            }
-            catch (Exception error) when (error is IOException or
-                                          UnauthorizedAccessException)
-            {
-                ++skipped;
-            }
-        }
-        return new LogCleanupResult(deleted, bytes, skipped);
+        if (families.ContainsKey(name)) return name;
+        var extension = name.IndexOf(".log.", StringComparison.OrdinalIgnoreCase);
+        if (extension < 0) return null;
+        var family = name[..(extension + 4)];
+        if (!families.ContainsKey(family)) return null;
+        return IsArchiveSuffix(name.AsSpan(extension + 5)) ? family : null;
     }
+
+    private static bool IsArchiveSuffix(ReadOnlySpan<char> suffix)
+    {
+        var legacy = int.TryParse(suffix, NumberStyles.None, CultureInfo.InvariantCulture,
+            out var index) && index > 0;
+        var dated = suffix.Length == 51 && suffix[18] == '-' &&
+            DateTime.TryParseExact(suffix[..18], "yyyyMMdd'T'HHmmssfff", CultureInfo.InvariantCulture,
+                DateTimeStyles.None, out _) &&
+            Guid.TryParseExact(suffix[19..], "N", out _);
+        return legacy || dated;
+    }
+
+    private static bool IsInstallerLog(string name) =>
+        name.StartsWith("installer-update-", StringComparison.OrdinalIgnoreCase) &&
+        name.EndsWith(".log", StringComparison.OrdinalIgnoreCase) &&
+        DateTime.TryParseExact(name.AsSpan(17, name.Length - 21), "yyyyMMdd-HHmmss",
+            CultureInfo.InvariantCulture, DateTimeStyles.None, out _);
 
     private static LogCleanupResult Add(LogCleanupResult left,
         LogCleanupResult right) => new(
@@ -444,20 +496,21 @@ internal static class DiagnosticLogger
             "IPHONE_MIRROR_APP_LOG_DIRECTORY");
         if (!string.IsNullOrWhiteSpace(configured) &&
             System.IO.Path.IsPathFullyQualified(configured))
-            return System.IO.Path.GetFullPath(configured);
-        return System.IO.Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "iPhoneMirror", "Logs");
+        {
+            try { return System.IO.Path.GetFullPath(configured); }
+            catch (Exception error) when (error is ArgumentException or IOException or NotSupportedException)
+            {
+                // Ignore malformed environment overrides so diagnostics can still initialize.
+            }
+        }
+        return DefaultDirectoryPath;
     }
 
     private static void TryWriteFallback(string entry)
     {
         try
         {
-            if (File.Exists(FallbackPath) &&
-                new FileInfo(FallbackPath).Length >= MaximumLogBytes)
-                File.WriteAllText(FallbackPath, string.Empty, new UTF8Encoding(false));
-            File.AppendAllText(FallbackPath, entry, new UTF8Encoding(false));
+            AppendLog(FallbackPath, entry, MaximumLogBytes, retainedArchives: 1);
         }
         catch
         {

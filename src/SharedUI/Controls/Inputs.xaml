@@ -122,76 +122,53 @@
                 <Setter.Value>
                     <ControlTemplate TargetType="CheckBox">
                         <Border Background="Transparent" Padding="{TemplateBinding Padding}">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <Border x:Name="CheckRoot"
-                                    Width="18" Height="18"
-                                    Margin="0,0,8,0"
-                                    VerticalAlignment="Center"
-                                    Background="{DynamicResource ComboBackgroundBrush}"
-                                    BorderBrush="{DynamicResource ComboBorderHoverBrush}"
-                                    BorderThickness="1"
-                                    CornerRadius="5">
-                                <Grid>
-                                <Path x:Name="CheckMark"
-                                      Width="10" Height="8"
-                                      Data="M 1,4 L 4,7 L 9,1"
-                                      Stroke="{DynamicResource OnAccentBrush}"
-                                      StrokeThickness="2"
-                                      StrokeStartLineCap="Round"
-                                      StrokeEndLineCap="Round"
-                                      Visibility="Collapsed"/>
-                                <Path x:Name="IndeterminateMark" Width="8" Height="2"
-                                      Data="M 0,1 L 8,1" Stroke="{DynamicResource OnAccentBrush}"
-                                      StrokeThickness="2" Visibility="Collapsed"/>
-                                </Grid>
-                            </Border>
-                            <ContentPresenter Grid.Column="1"
-                                              VerticalAlignment="Center"
-                                              RecognizesAccessKey="True"
-                                              TextElement.Foreground="{TemplateBinding Foreground}"
-                                          TextElement.FontFamily="{TemplateBinding FontFamily}"
-                                          TextElement.FontSize="{TemplateBinding FontSize}"
-                                          TextElement.FontWeight="{TemplateBinding FontWeight}"
-                                          TextElement.FontStyle="{TemplateBinding FontStyle}"
-                                          TextElement.FontStretch="{TemplateBinding FontStretch}">
-                            <ContentPresenter.Resources>
-                                <DataTemplate DataType="{x:Type sys:String}">
-                                    <AccessText Text="{Binding}" TextWrapping="Wrap" Style="{StaticResource ControlAccessText}"/>
-                                </DataTemplate>
-                            </ContentPresenter.Resources>
-                        </ContentPresenter>
-                        </Grid>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <ContentPresenter x:Name="SwitchLabel" Margin="0,0,12,0"
+                                                      VerticalAlignment="Center"
+                                                      RecognizesAccessKey="True"
+                                                      TextElement.Foreground="{TemplateBinding Foreground}"
+                                                      TextElement.FontFamily="{TemplateBinding FontFamily}"
+                                                      TextElement.FontSize="{TemplateBinding FontSize}"
+                                                      TextElement.FontWeight="{TemplateBinding FontWeight}"
+                                                      TextElement.FontStyle="{TemplateBinding FontStyle}"
+                                                      TextElement.FontStretch="{TemplateBinding FontStretch}">
+                                    <ContentPresenter.Resources>
+                                        <DataTemplate DataType="{x:Type sys:String}">
+                                            <AccessText Text="{Binding}" TextWrapping="Wrap" Style="{StaticResource ControlAccessText}"/>
+                                        </DataTemplate>
+                                    </ContentPresenter.Resources>
+                                </ContentPresenter>
+                                <Border x:Name="Track" Grid.Column="1" Width="42" Height="23" CornerRadius="11.5"
+                                        VerticalAlignment="Center" BorderThickness="1"
+                                        BorderBrush="{DynamicResource ComboBorderHoverBrush}"
+                                        Background="{DynamicResource ComboBackgroundBrush}">
+                                    <Ellipse x:Name="Thumb" Width="15" Height="15" Margin="3,0"
+                                             HorizontalAlignment="Left" Fill="{DynamicResource MutedTextBrush}"/>
+                                </Border>
+                            </Grid>
                         </Border>
                         <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="CheckRoot" Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}"/>
+                            <Trigger Property="HasContent" Value="False">
+                                <Setter TargetName="SwitchLabel" Property="Visibility" Value="Collapsed"/>
                             </Trigger>
                             <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="CheckRoot" Property="Background" Value="{DynamicResource AccentBrush}"/>
-                                <Setter TargetName="CheckRoot" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
-                                <Setter TargetName="CheckMark" Property="Visibility" Value="Visible"/>
+                                <Setter TargetName="Track" Property="Background" Value="{DynamicResource AccentBrush}"/>
+                                <Setter TargetName="Track" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                                <Setter TargetName="Thumb" Property="HorizontalAlignment" Value="Right"/>
+                                <Setter TargetName="Thumb" Property="Fill" Value="{DynamicResource OnAccentBrush}"/>
                             </Trigger>
                             <Trigger Property="IsChecked" Value="{x:Null}">
-                                <Setter TargetName="CheckRoot" Property="Background" Value="{DynamicResource AccentBrush}"/>
-                                <Setter TargetName="CheckRoot" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
-                                <Setter TargetName="IndeterminateMark" Property="Visibility" Value="Visible"/>
-                            </Trigger>
-                            <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="CheckRoot" Property="BorderBrush" Value="{DynamicResource FocusStrokeBrush}"/>
-                            </Trigger>
-                            <Trigger Property="IsKeyboardFocused" Value="True">
-                                <Setter TargetName="CheckRoot" Property="BorderBrush" Value="{DynamicResource FocusStrokeBrush}"/>
+                                <Setter TargetName="Track" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                                <Setter TargetName="Thumb" Property="HorizontalAlignment" Value="Center"/>
+                                <Setter TargetName="Thumb" Property="Fill" Value="{DynamicResource AccentBrush}"/>
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter Property="Foreground" Value="{DynamicResource DisabledTextBrush}"/>
-                                <Setter TargetName="CheckRoot" Property="Background" Value="{DynamicResource PrimaryActionDisabledBrush}"/>
-                                <Setter TargetName="CheckRoot" Property="BorderBrush" Value="{DynamicResource BorderSoftBrush}"/>
-                                <Setter TargetName="CheckMark" Property="Stroke" Value="{DynamicResource DisabledTextBrush}"/>
-                                <Setter TargetName="IndeterminateMark" Property="Stroke" Value="{DynamicResource DisabledTextBrush}"/>
+                                <Setter TargetName="Track" Property="Opacity" Value="0.5"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>

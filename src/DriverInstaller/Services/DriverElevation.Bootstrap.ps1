@@ -41,6 +41,8 @@ function New-IsolatedDriverStartInfo([string]$Executable, [string]$Directory,
     $start.EnvironmentVariables['SystemRoot'] = $windows
     $start.EnvironmentVariables['WINDIR'] = $windows
     $start.EnvironmentVariables['PATH'] = [Environment]::SystemDirectory
+    # Windows PowerShell needs PATHEXT to recognize pnputil.exe in a pipeline.
+    $start.EnvironmentVariables['PATHEXT'] = '.EXE'
     $start.EnvironmentVariables['PSModulePath'] = [IO.Path]::Combine(
         [Environment]::SystemDirectory, 'WindowsPowerShell\v1.0\Modules')
     $start.EnvironmentVariables['TEMP'] = $Directory

@@ -1,5 +1,6 @@
 using IPhoneMirror.App.Models;
 using IPhoneMirror.App.Services;
+using IPhoneMirror.App.Updater;
 
 namespace IPhoneMirror.App.ViewModels;
 
@@ -8,13 +9,10 @@ internal sealed partial class MainViewModel
     private bool PersistDeviceVideoPreferences(DeviceCaptureState state)
     {
         if (System.Windows.Application.Current is not App app) return false;
-        app.UpdateSettings.DeviceVideoPreferences ??= new(StringComparer.OrdinalIgnoreCase);
-        var hadPrevious = app.UpdateSettings.DeviceVideoPreferences.TryGetValue(state.Udid, out var previous);
-        app.UpdateSettings.DeviceVideoPreferences[state.Udid] = DeviceVideoPreferences.From(state);
-        if (!app.SaveUpdateSettings())
+        var updated = UpdateSettings.CopyDeviceSettings(app.UpdateSettings.DeviceVideoPreferences);
+        updated[state.Udid] = DeviceVideoPreferences.From(state);
+        if (!SaveDeviceVideoPreferences(app, updated))
         {
-            if (hadPrevious) app.UpdateSettings.DeviceVideoPreferences[state.Udid] = previous!;
-            else app.UpdateSettings.DeviceVideoPreferences.Remove(state.Udid);
             SetSettingsStatus("SetupSaveFailed");
             return false;
         }
@@ -23,18 +21,20 @@ internal sealed partial class MainViewModel
     internal bool SetupSaveVideoPreferences(IEnumerable<string> deviceIds)
     {
         if (System.Windows.Application.Current is not App app) return false;
-        app.UpdateSettings.DeviceVideoPreferences ??= new(StringComparer.OrdinalIgnoreCase);
-        var previous = new Dictionary<string, DeviceVideoPreferences>(app.UpdateSettings.DeviceVideoPreferences, StringComparer.OrdinalIgnoreCase);
+        var updated = UpdateSettings.CopyDeviceSettings(app.UpdateSettings.DeviceVideoPreferences);
         foreach (var id in deviceIds)
         {
             if (!_sessions.TryGet(id, out var state) && Devices.FirstOrDefault(d => DeviceViewModel.UdidEquals(d.Udid, id)) is { } device)
                 state = GetOrCreateDeviceState(device);
-            if (state is not null) app.UpdateSettings.DeviceVideoPreferences[id] = DeviceVideoPreferences.From(state);
+            if (state is not null) updated[id] = DeviceVideoPreferences.From(state);
         }
-        if (app.SaveUpdateSettings()) return true;
-        app.UpdateSettings.DeviceVideoPreferences = previous;
-        return false;
+        return SaveDeviceVideoPreferences(app, updated);
     }
+
+    private static bool SaveDeviceVideoPreferences(App app, Dictionary<string, DeviceVideoPreferences> updated) =>
+        app.TrySetUpdatePreference(settings => settings.DeviceVideoPreferences,
+            (settings, value) => settings.DeviceVideoPreferences = value, updated);
+
     internal bool SetupActive { get; set; }
     internal bool SetupSaveWirelessPreferences() => PersistWirelessReceiverSettings(SelectedWirelessReceiverBackend.Backend,
         SelectedWirelessDisplayProfile, WirelessReceiverName);

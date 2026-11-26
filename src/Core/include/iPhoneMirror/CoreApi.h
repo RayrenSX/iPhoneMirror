@@ -214,7 +214,9 @@ struct AudioPacketInfo {
 // Versioned capture preferences used by im_start_capture_with_options.
 // requested_width/requested_height are local preview-render limits. The first
 // Reserved words 0/1 are the optional advanced USB HPD1 size. Reserved word 2
-// selects USB projection mode (0=demo, 1=AirPlay, 2=Aisi-compatible), word 3
+// selects USB protocol (0=compatible/demo, 1=recommended/native AirPlay).
+// Retired value 2 maps to recommended/native for older callers. UI A/B labels
+// are independent of these stable protocol values. Word 3
 // selects decoder policy (0=auto, 1=hardware preferred, 2=software compatible),
 // and word 4 selects color output (0=auto, 1=SDR tone-map, 2=prefer HDR).
 struct CaptureOptions {
@@ -271,7 +273,8 @@ struct MediaCastRequest {
 } // namespace iPhoneMirror
 
 IM_API std::int32_t IM_CALL im_initialize();
-// Additive API 18 extension. kind: 1=tightly packed I420, 2=48 kHz S16 PCM.
+// Additive API 18 extension. Kinds 1 and 5–8 carry tightly packed I420.
+// Kinds 5–8 add SpringBoard interface orientation 1–4; kind 2 is 48 kHz S16 PCM.
 IM_API std::int32_t IM_CALL im_external_session_create(const wchar_t* device_id,
     const iPhoneMirror::CaptureOptions* options, iPhoneMirror::SessionHandle* handle);
 IM_API std::int32_t IM_CALL im_external_session_push(iPhoneMirror::SessionHandle handle,
@@ -458,6 +461,11 @@ IM_API std::int32_t IM_CALL im_session_set_audio_enabled(
     iPhoneMirror::SessionHandle handle, std::int32_t enabled);
 IM_API std::int32_t IM_CALL im_session_set_audio_volume(
     iPhoneMirror::SessionHandle handle, float volume);
+// buffer: 0 = transport default, 1 = low, 2 = normal, 3 = high.
+// device_output sends USB audio back to iOS instead of requesting its PCM.
+IM_API std::int32_t IM_CALL im_session_set_audio_playback_preferences(
+    iPhoneMirror::SessionHandle handle, std::uint32_t buffer, std::int32_t sync,
+    std::int32_t device_output);
 IM_API std::int32_t IM_CALL im_session_set_corner_profile(
     iPhoneMirror::SessionHandle handle, float normalized_radius,
     float curve_exponent);

@@ -18,6 +18,7 @@ internal static partial class Program
 {
     private static int RunControlBindingTests(string output)
     {
+        System.Windows.Media.RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly;
         SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext());
         Directory.CreateDirectory(output);
         var app = new App { ShutdownMode = ShutdownMode.OnExplicitShutdown, IsUiPreviewMode = true };
@@ -41,6 +42,8 @@ internal static partial class Program
         var wired = buttons.Single(b => AutomationProperties.GetAutomationId(b) == "UsbControlButton");
         var wireless = buttons.Single(b => AutomationProperties.GetAutomationId(b) == "WirelessControlButton");
         var controls = (Dictionary<string, DeviceControlSession>)KeyboardField(vm, "_deviceControls");
+        var sessions = (DeviceSessionManager)KeyboardField(vm, "_sessions");
+        using var previewHandle = new NativeSessionHandle(815, ownsHandle: false);
 
         DeviceViewModel Device(string id) => DeviceViewModel.FromNative(new NativeDeviceInfo
         { Udid = id, Name = "Binding test iPhone", State = ConnectionState.Ready });
@@ -55,6 +58,7 @@ internal static partial class Program
         {
             foreach (var window in app.Windows.OfType<ReverseControlStatusWindow>().ToArray()) window.Close();
             controls.Clear();
+            foreach (var device in vm.Devices) sessions.Remove(device.Udid);
             vm.Devices.Clear();
             Select(null);
             SetKeyboardField(vm, "_wiredControlPrerequisiteAcknowledged", false);
@@ -88,6 +92,14 @@ internal static partial class Program
                 var partialProfile = airplay ? bindings.CreateProfileFromIdentity("AirPlay only",
                     DeviceIdentityType.AirPlay, device.Udid, null).Profile : null;
                 vm.Devices.Add(device);
+                Select(device);
+                BindingAssert(!wired.IsEnabled && !wireless.IsEnabled && !vm.ToggleUsbControlCommand.CanExecute(null),
+                    "A connected device without mirroring enabled a control entry.");
+                KeyboardCall(main, "HandleConfiguredShortcut", BluetoothShortcutAction.WiredControl);
+                KeyboardCall(main, "HandleConfiguredShortcut", BluetoothShortcutAction.WirelessControl);
+                BindingAssert(!controls.ContainsKey(device.Udid) && !app.Windows.OfType<ReverseControlStatusWindow>().Any(),
+                    "A control shortcut opened setup before mirroring.");
+                sessions.Set(new DeviceCaptureState { Udid = device.Udid, Handle = previewHandle, HasMirroringVideo = true });
                 Select(device);
                 BindingAssert(wired.IsEnabled && wireless.IsEnabled && vm.CanStartUsbControl && vm.CanStartWirelessControl &&
                     vm.ToggleUsbControlCommand.CanExecute(null), "Binding disabled a control entry.");
@@ -238,6 +250,7 @@ internal static partial class Program
             var cleanupProfile = bindings.CreateProfileFromIdentity("Cleanup phone", DeviceIdentityType.Wired,
                 cleanupDevice.Udid, null).Profile!;
             vm.Devices.Add(cleanupDevice);
+            sessions.Set(new DeviceCaptureState { Udid = cleanupDevice.Udid, Handle = previewHandle, HasMirroringVideo = true });
             Select(cleanupDevice);
             var cleanupControl = (DeviceControlSession)KeyboardCall(vm, "GetOrCreateControl", cleanupDevice.Udid)!;
             cleanupControl.Binding = resolver.ResolveControlBinding(cleanupDevice, ReverseControlMode.Usb);
@@ -418,7 +431,6 @@ internal static partial class Program
             var btDevice = Device("bluetooth-unbound");
             vm.Devices.Add(btDevice);
             Select(btDevice);
-            var sessions = (DeviceSessionManager)KeyboardField(vm, "_sessions");
             using var handle = new NativeSessionHandle(123, ownsHandle: false);
             sessions.Set(new DeviceCaptureState { Udid = btDevice.Udid, Handle = handle });
             AwaitBinding(vm.StartBluetoothControlAsync());

@@ -13,5 +13,8 @@ internal sealed record IndependentWindowLayout(int? X = null, int? Y = null,
         Width is null or (>= 96 and <= 32767) && Height is null or (>= 96 and <= 32767);
 }
 
+internal enum IndependentWindowLayoutMode { Automatic, Last, Preset, Custom }
+
 internal sealed record IndependentWindowLayoutHistory(bool UseLastLayout = false,
-    IndependentWindowLayout? LastLayout = null);
+    IndependentWindowLayout? LastLayout = null, IndependentWindowLayoutMode? Mode = null,
+    IndependentWindowLayout? CustomLayout = null, bool? AutoFix = null);

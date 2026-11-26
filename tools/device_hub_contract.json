@@ -1,6 +1,16 @@
 {
   "version": 1,
   "actions": {
+    "mirror_start": {
+      "readOnly": false,
+      "public": false,
+      "timeout": 45
+    },
+    "mirror_stop": {
+      "readOnly": false,
+      "public": false,
+      "timeout": 12
+    },
     "capabilities": {
       "readOnly": true,
       "public": true,
@@ -29,6 +39,11 @@
     "launch": {
       "readOnly": false,
       "public": true,
+      "timeout": 35
+    },
+    "close_app": {
+      "readOnly": false,
+      "public": false,
       "timeout": 35
     },
     "restart_with_metal_hud": {
@@ -180,6 +195,11 @@
       "readOnly": true,
       "public": false,
       "timeout": 35
+    },
+    "explorer_roots": {
+      "readOnly": true,
+      "public": false,
+      "timeout": 60
     }
   }
 }

@@ -101,14 +101,11 @@ internal static partial class Program
 
     private static void TestTraySettingsPersistence(string output)
     {
-        var type = typeof(App).Assembly.GetType("IPhoneMirror.App.Updater.UpdateSettingsStore")!;
-        var store = Activator.CreateInstance(type, KeyboardTestMembers, null,
-            [Path.GetFullPath(Path.Combine(output, "settings-roundtrip.json"))], null)!;
-        var settings = KeyboardCall(store, "Load")!;
-        var property = settings.GetType().GetProperty("ApplicationDisplayMode")!;
-        property.SetValue(settings, ApplicationDisplayMode.Tray);
-        KeyboardCall(store, "Save", settings);
-        InteractionAssert((ApplicationDisplayMode)property.GetValue(KeyboardCall(store, "Load"))! == ApplicationDisplayMode.Tray,
+        var store = new UpdateSettingsStore(Path.GetFullPath(Path.Combine(output, "settings-roundtrip.json")));
+        var settings = store.Load();
+        settings.ApplicationDisplayMode = ApplicationDisplayMode.Tray;
+        store.Save(settings);
+        InteractionAssert(store.Load().ApplicationDisplayMode == ApplicationDisplayMode.Tray,
             "Tray mode did not survive settings reload.");
     }
 
@@ -140,10 +137,32 @@ internal static partial class Program
                 panel.UpdateLayout();
                 AssertSelfDrawnWindowCorners(panel);
                 AssertVisibleButtonsFit(panel);
+                var viewport = Visuals(panel).OfType<IPhoneMirror.UI.Controls.DialogViewport>().Single();
+                InteractionAssert(viewport.ScrollableHeight <= 1 &&
+                    new[] { "StartButton", "StopButton", "ModeSelector", "SettingsButton", "ExitButton" }
+                        .All(name => panel.FindName(name) is FrameworkElement { IsVisible: true } action &&
+                            action.TranslatePoint(new Point(0, action.ActualHeight), panel).Y <= panel.ActualHeight + 1),
+                    "Tray actions must all fit on the visible page.");
                 SaveWindowRender(panel, Path.Combine(output, $"{culture}-{theme}-tray.png"));
                 ExerciseWorkAreaSizes(panel, $"tray/{culture}/{theme}", layoutFindings);
             }
             InteractionAssert(layoutFindings.Count == 0, string.Join(Environment.NewLine, layoutFindings));
+            var mode = (ComboBox)panel.FindName("ModeSelector");
+            var selectedMode = mode.SelectedValue;
+            var wheel = new MouseWheelEventArgs(Mouse.PrimaryDevice, Environment.TickCount, -120)
+                { RoutedEvent = Mouse.PreviewMouseWheelEvent };
+            mode.RaiseEvent(wheel);
+            InteractionAssert(wheel.Handled && Equals(mode.SelectedValue, selectedMode),
+                "A wheel gesture must not change the tray's application mode.");
+            var extraDevices = Enumerable.Range(0, 8)
+                .Select(index => TrayTestDevice($"tray-extra-{index}", $"iPhone {index + 1}")).ToArray();
+            foreach (var device in extraDevices) TrayDevices(vm).Add(device);
+            panel.UpdateLayout();
+            var deviceList = (ListBox)panel.FindName("DeviceList");
+            InteractionAssert(Visuals(deviceList).OfType<ScrollViewer>().Any(viewer => viewer.ScrollableHeight > 0) &&
+                Visuals(panel).OfType<IPhoneMirror.UI.Controls.DialogViewport>().Single().ScrollableHeight <= 1,
+                "Additional devices must scroll inside their list while the tray actions stay in view.");
+            foreach (var device in extraDevices) TrayDevices(vm).Remove(device);
             var start = (Button)panel.FindName("StartButton");
             start.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             start.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));

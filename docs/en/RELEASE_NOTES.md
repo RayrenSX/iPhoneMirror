@@ -1,0 +1,26 @@
+# iPhoneMirror v1.8.5-pre7 release notes
+
+[Documentation](README.md) · [简体中文发布说明](../zh-CN/RELEASE_NOTES.md)
+
+### Notes
+
+**v1.8.5-pre7 is the final preview before the iPhoneMirror 1.8.5 stable release.** It targets Windows x64 and includes the following changes since v1.8.5-pre6.
+
+### Added
+
+- Discover paired wireless devices and show wired and wireless availability on one device card. Experimental CoreDevice mirroring provides video on eligible iOS and iPadOS 27 or later devices with pairing, Developer Mode, and a matching developer image.
+- Copy on-screen text, send files from the preview, and transfer or install a dropped IPA. Installation requires a valid signature and device authorization.
+- Expand Explorer mappings to include accessible media, crash logs, and app directories while honoring the device's file permissions.
+- Keep audio on the phone during eligible USB mirroring sessions. Windows recording and streaming cannot capture that source audio while this option is selected. Game microphone compatibility still needs device testing (#100).
+- Remember the last independent-window layout per device, save a preset, and set a custom position. Configure window actions and Windows hotkey rules in shortcut settings (#91, #92, #93).
+
+### Changed
+
+- Offer native AirPlay and compatibility Demo modes for USB mirroring. A saved fixed-size C mode selection migrates to native AirPlay.
+- Save resolution, frame rate, and decoder settings automatically. Color and wireless receiver settings keep their explicit save and apply actions.
+- Add a free-software notice and a skippable author-support page to the full setup wizard.
+- Update the user guide for the new workflows and set the application and Driver Manager product versions to `1.8.5-pre7`.
+
+### Fixed
+
+- Keep rounded dialog corners and transparent overlays clear of the owner window's background.

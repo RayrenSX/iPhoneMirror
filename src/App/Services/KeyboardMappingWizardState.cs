@@ -56,7 +56,6 @@ internal sealed class KeyboardMappingWizardState : INotifyPropertyChanged
     public string Title => L("WizardTitle" + (Current == MappingWizardStep.Position && IsSwipe ? "Gesture" : Current.ToString()));
     public string Subtitle => L("WizardHint" + (Current == MappingWizardStep.Position && IsSwipe ? "Gesture" : Current.ToString()));
     public int Index => Steps.ToList().IndexOf(Current);
-    public string StepNumber => (Index + 1).ToString(CultureInfo.CurrentCulture);
     public string ProgressText => LocalizationService.Format("WizardProgress", Index + 1, Steps.Count);
     public string NextText => L(Current == MappingWizardStep.Confirmation ? "WizardFinish" : "WizardNext");
     public bool CanPrevious => Index > 0;

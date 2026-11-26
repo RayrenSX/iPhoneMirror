@@ -6,7 +6,6 @@ internal enum UsbProjectionMode : uint
 {
     Demo = 0,
     AirPlay = 1,
-    Aisi = 2,
 }
 
 internal enum DecoderPreference : uint
@@ -15,6 +14,8 @@ internal enum DecoderPreference : uint
     HardwarePreferred = 1,
     SoftwareCompatible = 2,
 }
+
+internal enum ProjectionAudioBuffer : uint { Default, Low, Normal, High }
 
 internal sealed class DeviceCaptureState
 {
@@ -25,14 +26,19 @@ internal sealed class DeviceCaptureState
     internal bool IsStopping { get; set; }
     internal bool AutoControlAttempted { get; set; }
     internal bool AutoControlStreaming { get; set; }
+    internal bool HasMirroringVideo { get; set; }
+    internal bool IsMirroring { get; set; }
     internal uint RenderWidth { get; set; }
     internal uint RenderHeight { get; set; }
     internal int FrameRate { get; set; } = 60;
     internal bool PlayAudio { get; set; } = true;
+    internal bool AudioOnDevice { get; set; }
+    internal bool SyncAudioPreview { get; set; }
+    internal ProjectionAudioBuffer AudioBuffer { get; set; }
     internal double Volume { get; set; } = 100;
     internal uint AdvancedUsbWidth { get; set; }
     internal uint AdvancedUsbHeight { get; set; }
-    internal UsbProjectionMode UsbProjectionMode { get; set; } = UsbProjectionMode.Demo;
+    internal UsbProjectionMode UsbProjectionMode { get; set; } = UsbProjectionMode.AirPlay;
     internal DecoderPreference DecoderPreference { get; set; } = DecoderPreference.Auto;
     internal double Brightness { get; set; }
     internal double Contrast { get; set; } = 100;
@@ -50,6 +56,7 @@ internal sealed class DeviceCaptureState
     internal bool HasAppliedVideoSettings { get; private set; }
     internal bool HasSession => Handle is not null && !Handle.IsClosed && !Handle.IsInvalid;
     internal bool ErrorShown { get; set; }
+    internal (uint Width, uint Height) SourceGeometry { get; set; }
     internal bool VideoProtected { get; private set; }
     internal bool ProtectedAudioActive { get; private set; }
     internal uint ProtectedAudioSampleRate { get; private set; }
@@ -76,6 +83,9 @@ internal sealed class DeviceCaptureState
     {
         AutoControlAttempted = false;
         AutoControlStreaming = false;
+        HasMirroringVideo = false;
+        IsMirroring = false;
+        SourceGeometry = default;
         VideoProtected = false;
         ProtectedAudioActive = false;
         ProtectedAudioSampleRate = 0;

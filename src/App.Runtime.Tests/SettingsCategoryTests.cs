@@ -58,6 +58,7 @@ internal static partial class Program
                 .Single(check => System.Windows.Automation.AutomationProperties.GetAutomationId(check) ==
                     "BluetoothWindowMouseCheckBox");
             InteractionAssert(absoluteMouse.IsVisible &&
+                absoluteMouse.Template.FindName("Track", absoluteMouse) is Border &&
                 System.Windows.Data.BindingOperations.GetBinding(absoluteMouse,
                     System.Windows.Controls.Primitives.ToggleButton.IsCheckedProperty)?.Path.Path ==
                     "BluetoothWindowMouseEnabled",
@@ -71,17 +72,50 @@ internal static partial class Program
             Console.WriteLine("Reopened settings.");
             InteractionAssert(Find<RadioButton>("ControlSettingsTab").IsChecked == true,
                 "Reopening settings discarded the selected category.");
-            KeyboardCall(window, "OnOpenProjectionSettingsClick", window, new RoutedEventArgs());
-            Console.WriteLine("Picture shortcut verified.");
+            Select("Projection");
             InteractionAssert(Find<RadioButton>("ProjectionSettingsTab").IsChecked == true,
-                "The picture shortcut did not open projection settings.");
+                "The projection settings tab did not select its page.");
 
             var phoneFrameToggle = Find<CheckBox>("ProjectionPhoneFrameCheckBox");
             InteractionAssert(FindVisualDescendants<CheckBox>(Find<ScrollViewer>("ProjectionSettingsScrollViewer"))
-                .Contains(phoneFrameToggle), "Phone frame switch must exist in the main projection settings category.");
-            phoneFrameToggle.BringIntoView();
+                .All(toggle => toggle != phoneFrameToggle), "Projection must not duplicate the independent frame preference.");
+            Select("Application");
+            var applicationPage = Find<ScrollViewer>("ApplicationSettingsScrollViewer");
+            var mainColorPicker = Find<ComboBox>("ProjectionFrameColorComboBox");
+            InteractionAssert(FindVisualDescendants<CheckBox>(applicationPage).Contains(phoneFrameToggle) &&
+                FindVisualDescendants<ComboBox>(applicationPage).Contains(mainColorPicker),
+                "The independent frame switch and body color must be in the Application category.");
+            var previewAppearance = Find<ContentControl>("MainPreviewAppearanceSection");
+            var previewSwitches = FindVisualDescendants<CheckBox>(previewAppearance).ToArray();
+            InteractionAssert(previewSwitches.Length == 2 && previewSwitches.All(toggle =>
+                toggle.Template.FindName("Track", toggle) is Border),
+                "The application preview options must show the two switch rows.");
+            var mainCorners = previewSwitches[0];
+            var mainFrame = previewSwitches[1];
+            app.IsUiPreviewMode = false;
+            try
+            {
+                mainFrame.IsChecked = true;
+                AdvanceDispatcher(TimeSpan.FromMilliseconds(40));
+                InteractionAssert(store.Load().MainPreviewPhoneFrame && !store.Load().PhoneFrameEnabled &&
+                    phoneFrameToggle.IsChecked == false, "The main preview choice must save before connecting a phone and remain independent.");
+                mainCorners.IsChecked = false;
+                AdvanceDispatcher(TimeSpan.FromMilliseconds(40));
+                InteractionAssert(!mainFrame.IsEnabled && mainFrame.IsChecked == false &&
+                    !store.Load().MainPreviewRoundedCorners && !store.Load().MainPreviewPhoneFrame,
+                    "Turning off corners must save both changes and disable the frame immediately.");
+                ApplyTheme(typeof(App).Assembly, AppTheme.Light);
+                mainColorPicker.BringIntoView();
+                AdvanceDispatcher(TimeSpan.FromMilliseconds(100));
+                SaveWindowRender(window, Path.Combine(output, "main-preview-corners-off.png"));
+                mainCorners.IsChecked = true;
+                AdvanceDispatcher(TimeSpan.FromMilliseconds(40));
+            }
+            finally { app.IsUiPreviewMode = true; }
+            mainColorPicker.BringIntoView();
             AdvanceDispatcher(TimeSpan.FromMilliseconds(100));
-            SaveWindowRender(window, Path.Combine(output, "main-projection-phone-frame.png"));
+            SaveWindowRender(window, Path.Combine(output, "main-application-preview-appearance.png"));
+            Select("Projection");
 
             // Use a synthetic, offline source; no discovery, capture or reverse control starts.
             var vm = (MainViewModel)KeyboardField(window, "_viewModel");
@@ -98,6 +132,7 @@ internal static partial class Program
             Console.WriteLine("Offline fixture ready.");
             var frameManager = (MultiDevicePreviewManager)KeyboardField(window, "_secondaryMirrors");
             TestIndependentWindowSettings(window, app, vm, device, store);
+            Select("Application");
             app.IsUiPreviewMode = false;
             try
             {
@@ -152,7 +187,11 @@ internal static partial class Program
                 () => Task.CompletedTask, () => Task.CompletedTask, () => { });
             frameManager.ConfigurePhoneFrameSettings(frameSettings);
             frameSettings.Show();
+            ((RadioButton)frameSettings.FindName("ApplicationSettingsTab")).IsChecked = true;
+            frameSettings.UpdateLayout();
             var colorPicker = (ComboBox)frameSettings.FindName("FrameColorComboBox");
+            InteractionAssert(colorPicker.IsVisible && ((CheckBox)frameSettings.FindName("PhoneFrameCheckBox")).IsVisible,
+                "The standalone Application page must show the independent frame and color settings.");
             var frameBlockedPath = Path.Combine(Path.GetFullPath(output), "blocked-frame-settings-parent");
             File.WriteAllText(frameBlockedPath, "A file cannot hold settings.");
             app.IsUiPreviewMode = false;
@@ -169,7 +208,7 @@ internal static partial class Program
                 SetKeyboardField(app, "_settingsStore", new UpdateSettingsStore(Path.Combine(frameBlockedPath, "settings.json")));
                 colorPicker.SelectedValue = "blue";
                 InteractionAssert(frameManager.SelectedFrameColor == "white" && (string?)colorPicker.SelectedValue == "white" &&
-                    ((TextBlock)frameSettings.FindName("PhoneFrameFeedback")).Visibility == Visibility.Visible,
+                    ((TextBlock)frameSettings.FindName("FrameColorFeedback")).Visibility == Visibility.Visible,
                     "Failed color save must restore the displayed and active color with visible feedback.");
                 SetKeyboardField(app, "_settingsStore", store);
                 typeof(LocalizationService).GetMethod("ApplyLanguage", BindingFlags.Static | BindingFlags.NonPublic)!
@@ -179,7 +218,7 @@ internal static partial class Program
                     "Open floating settings must refresh color options and the description after a language change.");
                 colorPicker.SelectedValue = "";
                 InteractionAssert(frameManager.SelectedFrameColor == "" && !store.Load().DeviceFrameColors.ContainsKey(device.Udid) &&
-                    !frameManager.HasAnyOpen && ((TextBlock)frameSettings.FindName("PhoneFrameFeedback")).Visibility == Visibility.Collapsed,
+                    !frameManager.HasAnyOpen && ((TextBlock)frameSettings.FindName("FrameColorFeedback")).Visibility == Visibility.Collapsed,
                     "Automatic color must remove the override and clear previous save feedback without opening a preview.");
             }
             finally
@@ -252,6 +291,19 @@ internal static partial class Program
                 "Sensitivity retry did not apply its own settings or clear its error.");
             Console.WriteLine("PASS inline direction/sensitivity actions, independent saves and failed-save rollback/retry.");
             TestSettingsPersistence(window, app, vm, device, store, blockedPath);
+            Select("Projection");
+            InteractionAssert(window.FindName("ApplyVideoSettingsButton") is null &&
+                window.FindName("IndependentLayoutSaveButton") is null,
+                "Picture and startup layout settings must not require redundant Apply/Save buttons.");
+            var pictureViewport = Find<ScrollViewer>("ProjectionSettingsScrollViewer");
+            var pictureTitle = FindVisualDescendants<TextBlock>(pictureViewport).Single(text =>
+                text.Text == LocalizationService.Get("PictureSettingsTitle"));
+            pictureTitle.BringIntoView();
+            AdvanceDispatcher(TimeSpan.FromMilliseconds(100));
+            pictureViewport.ScrollToVerticalOffset(pictureViewport.VerticalOffset +
+                pictureTitle.TranslatePoint(new Point(), pictureViewport).Y - 8);
+            AdvanceDispatcher(TimeSpan.FromMilliseconds(100));
+            SaveWindowRender(window, Path.Combine(output, "picture-automatic-settings.png"));
 
             foreach (var culture in new[] { "zh-CN", "zh-TW", "zh-HK", "en-US", "ja-JP" })
             {
@@ -342,24 +394,47 @@ internal static partial class Program
         try
         {
             KeyboardCall(window, "RefreshIndependentWindowLayoutEditor");
-            InteractionAssert(Find<StackPanel>("IndependentWindowLayoutEditor").IsEnabled,
+            var mode = Find<ComboBox>("IndependentLayoutModeSelector");
+            mode.SelectedItem = mode.Items.OfType<ComboBoxItem>()
+                .Single(item => Equals(item.Tag, IndependentWindowLayoutMode.Custom));
+            var fields = Find<StackPanel>("IndependentLayoutCustomFields");
+            InteractionAssert(fields.IsEnabled && fields.Visibility == Visibility.Visible,
                 "Selecting a phone must enable its startup layout fields.");
             Find<TextBox>("IndependentLayoutX").Text = "-1200";
             Find<TextBox>("IndependentLayoutY").Text = "180";
-            Find<CheckBox>("IndependentLayoutFixed").IsChecked = true;
-            KeyboardCall(window, "OnSaveIndependentWindowLayout", window, new RoutedEventArgs());
-            var expected = new IndependentWindowLayout(-1200, 180, Fixed: true);
-            InteractionAssert(store.Load().IndependentWindowLayouts.GetValueOrDefault(device.Udid.ToUpperInvariant()) == expected &&
-                app.UpdateSettings.Clone().IndependentWindowLayouts.GetValueOrDefault(device.Udid) == expected,
+            var customY = Find<TextBox>("IndependentLayoutY");
+            customY.RaiseEvent(new System.Windows.Input.KeyboardFocusChangedEventArgs(
+                System.Windows.Input.Keyboard.PrimaryDevice, Environment.TickCount, customY, mode)
+                { RoutedEvent = System.Windows.Input.Keyboard.LostKeyboardFocusEvent });
+            var expected = new IndependentWindowLayout(-1200, 180);
+            var saved = store.Load();
+            var clone = app.UpdateSettings.Clone();
+            InteractionAssert(saved.IndependentWindowStartupMode == IndependentWindowLayoutMode.Custom &&
+                clone.IndependentWindowStartupMode == IndependentWindowLayoutMode.Custom &&
+                saved.IndependentWindowLayoutHistoryByDevice.GetValueOrDefault(device.Udid.ToUpperInvariant())
+                    is { AutoFix: null } history && history.CustomLayout == expected &&
+                clone.IndependentWindowLayoutHistoryByDevice.GetValueOrDefault(device.Udid)?.CustomLayout == expected,
                 "Layout values or case-insensitive per-device lookups did not survive save/load/clone.");
+            mode.BringIntoView();
+            AdvanceDispatcher(TimeSpan.FromMilliseconds(100));
+            var layoutViewport = Find<ScrollViewer>("ProjectionSettingsScrollViewer");
+            layoutViewport.ScrollToVerticalOffset(layoutViewport.VerticalOffset +
+                mode.TranslatePoint(new Point(), layoutViewport).Y - 70);
+            AdvanceDispatcher(TimeSpan.FromMilliseconds(100));
+            SaveWindowRender(window, Path.Combine(Path.GetDirectoryName(
+                Path.GetFullPath((string)KeyboardField(store, "_path")))!, "layout-automatic-save.png"));
             Find<TextBox>("IndependentLayoutWidth").Text = "500";
-            KeyboardCall(window, "OnSaveIndependentWindowLayout", window, new RoutedEventArgs());
+            var customWidth = Find<TextBox>("IndependentLayoutWidth");
+            customWidth.RaiseEvent(new System.Windows.Input.KeyboardFocusChangedEventArgs(
+                System.Windows.Input.Keyboard.PrimaryDevice, Environment.TickCount, customWidth, mode)
+                { RoutedEvent = System.Windows.Input.Keyboard.LostKeyboardFocusEvent });
             InteractionAssert(Find<TextBlock>("IndependentLayoutStatus").Text == LocalizationService.Get("IndependentWindowLayoutInvalid") &&
-                store.Load().IndependentWindowLayouts.GetValueOrDefault(device.Udid) == expected,
+                store.Load().IndependentWindowLayoutHistoryByDevice.GetValueOrDefault(device.Udid)?.CustomLayout == expected,
                 "An incomplete width/height pair changed the saved layout.");
             SetKeyboardField(vm, "_selectedDevice", DeviceViewModel.CreateMediaCast());
             KeyboardCall(window, "RefreshIndependentWindowLayoutEditor");
-            InteractionAssert(!Find<StackPanel>("IndependentWindowLayoutEditor").IsEnabled &&
+            InteractionAssert(mode.IsEnabled && Equals(mode.SelectedValue, IndependentWindowLayoutMode.Custom) &&
+                !Find<StackPanel>("IndependentLayoutCustomFields").IsEnabled &&
                 Find<TextBox>("IndependentLayoutX").Text.Length == 0, "The device layout leaked to another source.");
             SetKeyboardField(vm, "_selectedDevice", device);
             KeyboardCall(window, "RefreshIndependentWindowLayoutEditor");

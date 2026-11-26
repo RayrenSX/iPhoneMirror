@@ -5,11 +5,13 @@
 首次启动由 `App.ShowInitialWindow` 自动打开，复用主窗口的 `MainViewModel`。
 首次显示时保存进入记录；即使未完成设置，下次启动也不自动弹出，已有进度通过手动入口继续。
 手动入口同时保留在主界面应用偏好、投屏设置的应用模式区域、开发者选项。
-向导期间暂停主窗口自动刷新，关闭后恢复现有完整、精简或托盘流程。
+向导期间暂停主窗口自动刷新，关闭后恢复现有完整、轻量或托盘流程。
 
-首次设置的应用模式默认选中“完整模式”，与新应用配置的默认值一致。用户可主动改选精简或托盘模式；
+首次设置的应用模式默认选中“完整模式”，与新应用配置的默认值一致。用户可主动改选轻量或托盘模式；
 返回、关闭后继续及重新配置保留已有选择，跳过不会改写当前模式。
-已有投屏或控制会话需要先停止；重新运行时复用设备档案。
+已有投屏或控制会话需要先停止。重新运行时复用设备档案。
+
+v1.8.5-pre7 的完整向导在基础偏好后显示免费开源说明，显示满 3 秒后可继续。随后的「支持作者」可跳过，跳过不会留下待配置项。日常流程见[使用指南](USER_GUIDE.md#首次启动与设置向导)。
 
 ## 每次进入时的状态检查
 
@@ -21,8 +23,7 @@
 
 状态来自磁盘设置、设备档案及当前系统检测，而不是保存页码。
 基础偏好读取 `settings.json` 并验证值；用途保留在检查点中。
-控制介绍页可以明确关闭 USB 控制、无线投屏/控制、蓝牙控制；关闭的能力为 NotRequired。
-历史检查点没有这些选择时，先引导选择，再进行相关硬件检查。
+当前控制介绍页只展示 USB、无线、蓝牙说明，不提供逐项功能勾选。所需检查按使用用途、连接方式、已有档案和状态模型判断；历史检查点中的能力意图仍参与迁移，不能据此认为当前页面还有开关。
 「跳过此项」只在本次暂后处理，下次重新检查，不会写成 Completed。
 
 - 驱动助手增加只读 `diagnose` IPC，分别返回 Apple 服务、驱动包、libusb 文件与服务、逐设备健康状态。
@@ -158,7 +159,7 @@ dotnet build src/App.Runtime.Tests/IPhoneMirror.App.Runtime.Tests.csproj --no-re
 & 'src/App.Runtime.Tests/bin/Debug/net10.0-windows10.0.19041.0/win-x64/IPhoneMirror.App.Runtime.Tests.exe' --first-run-setup outputs/first-run-setup-review-v3
 & 'src/App.Runtime.Tests/bin/Debug/net10.0-windows10.0.19041.0/win-x64/IPhoneMirror.App.Runtime.Tests.exe' --first-run-driver-probe 'src/DriverInstaller/bin/Debug/net10.0-windows/win-x64/iPhoneMirror.Driver.exe'
 
-# 状态检查模型、实际 WPF 入口/退出与多语言双主题；历史验证范围见下文
+# 状态检查模型、实际 WPF 入口/退出与多语言双主题
 & 'src/App.Runtime.Tests/bin/Debug/net10.0-windows10.0.19041.0/win-x64/IPhoneMirror.App.Runtime.Tests.exe' --setup-assessment outputs/setup-assessment-final
 
 # 独立检查页交互预览，使用隔离的设置检查点及检测结果
@@ -168,25 +169,6 @@ dotnet build src/App.Runtime.Tests/IPhoneMirror.App.Runtime.Tests.csproj --no-re
 & 'src/App.Runtime.Tests/bin/Debug/net10.0-windows10.0.19041.0/win-x64/IPhoneMirror.App.Runtime.Tests.exe' --setup-runtime-probe 'src/DriverInstaller/bin/Debug/net10.0-windows/win-x64/iPhoneMirror.Driver.exe'
 ```
 
-以下为早期专项验证记录，语言数和场景数保留当时范围；当前界面已支持五种语言，新增语言的专项记录见[台湾本地化](LOCALIZATION-TAIWAN.md)。本次文档整理未重跑 UI 矩阵。
+静态与运行时回归覆盖状态模型、分支、跳过和恢复、绑定复用、保存失败回滚、取消后迟到结果及关闭清理。本地化维护见[说明](LOCALIZATION.md)。
 
-向导测试覆盖两级用途选择、三种分支、设备顺序、全步骤跳过、依赖步骤跳过、回退、恢复及损坏检查点。
-布局覆盖 23 个活动页面 × 4 种语言 × 2 个主题 × 2 个尺寸，共 368 组，检查默认尺寸
-无滚动、卡片文字边界、九设备分页、逐设备参数导航及关闭清理，并生成高 DPI 预览。
-生产动画路径检查文字不缩放、欢迎页居中淡入、语言切换保持控件实例与位置。
-
-连续扫描及组件下载测试注入替代委托，覆盖设备数变化、取消扫描、真实数值进度映射、
-已有组件复用、下载失败和取消后的导航恢复。另覆盖最后一轮扫描发现拔线、恢复时旧设备列表不能直接前进、
-运行中取消和排队跳过、无线设置写入失败回滚，以及全部跳过后无设备结束向导。
-此类测试不会安装驱动或执行真实网络下载。
-驱动探测单独执行真实 PnP 枚举和只读检查，不安装驱动。
-驱动安装器回归测试另在环境变量清空及 ProgramData 被覆盖的子进程中校验结果、日志、备份路径一致。
-`--first-run-driver-cancel <驱动助手路径>` 使用真实只读助手，覆盖启动后 0/50/300/900/1400 ms 取消，
-立即重新扫描、锁等待取消和无残留进程检查；不会安装或修复驱动。
-
-实际驱动安装、UAC、多台实机插拔、AirPlay 网络连接、蓝牙配对和真实组件网络下载仍需
-在对应环境验收，UI 与替代委托测试不代表这些硬件场景已通过。
-
-`FirstRunSetupUsabilityTests` 另覆盖点击下一步才下载、绑定复用和档案删除、
-当前设备提示、只读重检与安装按钮、取消后迟到结果、延后保存失败回滚及关闭扫描清理。
-
+实际驱动安装、UAC、多设备插拔、AirPlay、蓝牙配对和组件下载仍需对应环境验收；只读探针、UI 与替代委托测试不能代替这些场景。

@@ -99,13 +99,11 @@
    </StackPanel>
   </ScrollViewer>
   <Grid x:Name="SetupFooter" Grid.Row="2" Width="{Binding ActualWidth, ElementName=Page}" MaxWidth="680" HorizontalAlignment="Center" Margin="0,16,0,0">
-   <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+   <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
    <Button x:Name="Previous" ContentTemplate="{StaticResource SetupFooterText}" HorizontalContentAlignment="Center" VerticalAlignment="Center" Content="{DynamicResource WizardPrevious}" Click="PreviousClick"/>
-   <StackPanel Grid.Column="2" VerticalAlignment="Center">
-    <Button x:Name="CancelOperation" ContentTemplate="{StaticResource SetupFooterText}" Content="{DynamicResource SetupCancelOperation}" Click="CancelOperationClick" Style="{StaticResource GhostButton}" Visibility="Collapsed"/>
-    <Button x:Name="Skip" ContentTemplate="{StaticResource SetupFooterText}" Content="{DynamicResource SetupSkip}" Click="SkipClick" Style="{StaticResource GhostButton}"/>
-   </StackPanel>
-   <Button x:Name="Next" ContentTemplate="{StaticResource SetupFooterText}" Grid.Column="4" Content="{DynamicResource WizardNext}" Click="NextClick" Style="{StaticResource PrimaryButton}" VerticalAlignment="Center" MinWidth="112"/>
+   <Button x:Name="CancelOperation" Grid.Column="2" ContentTemplate="{StaticResource SetupFooterText}" Content="{DynamicResource SetupCancelOperation}" Click="CancelOperationClick" Style="{StaticResource GhostButton}" Visibility="Collapsed"/>
+   <Button x:Name="Skip" Grid.Column="4" ContentTemplate="{StaticResource SetupFooterText}" Content="{DynamicResource SetupSkip}" Click="SkipClick" Style="{StaticResource GhostButton}"/>
+   <Button x:Name="Next" ContentTemplate="{StaticResource SetupFooterText}" Grid.Column="6" Content="{DynamicResource WizardNext}" Click="NextClick" Style="{StaticResource PrimaryButton}" VerticalAlignment="Center" MinWidth="112"/>
   </Grid>
   <Border x:Name="ExitPanel" Grid.RowSpan="3" Background="{DynamicResource WindowBackgroundBrush}" Visibility="Collapsed" CornerRadius="16" Padding="32">
    <StackPanel VerticalAlignment="Center">

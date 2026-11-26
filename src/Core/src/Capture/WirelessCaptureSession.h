@@ -30,6 +30,7 @@ public:
         std::uint64_t after_sequence) const override;
     void set_audio_enabled(bool enabled) noexcept override;
     void set_audio_volume(float volume) noexcept override;
+    void set_audio_playback_preferences(std::uint32_t buffer, bool sync) override;
     void set_target_fps(std::uint32_t target_fps) noexcept override;
     [[nodiscard]] std::uint32_t target_fps() const noexcept override;
     void set_decoder_preference(media::DecoderPreference preference) noexcept override;

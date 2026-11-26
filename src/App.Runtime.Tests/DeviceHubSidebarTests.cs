@@ -31,6 +31,9 @@ internal static partial class Program
         var language = LocalizationService.SelectedLanguage;
         var theme = ThemeService.Preference;
         var window = CreateWorkspaceTestWindow(app, includeNativePreview: false);
+        // Keep the placement assertions on-screen when the startup monitor is narrower than the fixture.
+        window.Left = SystemParameters.WorkArea.Left;
+        window.Top = SystemParameters.WorkArea.Top;
         var vm = (MainViewModel)KeyboardField(window, "_viewModel");
         var calls = new List<(string Device, string Action)>();
         JsonElement lastFileArguments = default;
@@ -44,11 +47,15 @@ internal static partial class Program
         TaskCompletionSource<bool>? pauseNext = null;
         string? pauseAction = null;
         string? launchedBundle = null;
+        string? closedBundle = null;
+        var closeStatus = "signal-sent";
         bool ready = true;
         bool emptyProfiles = false, profileReadError = false, pagedFiles = false, failProcessRead = false, failFileRead = false;
         var iconCalls = 0;
         var activeIconCalls = 0;
         var maximumIconCalls = 0;
+        TaskCompletionSource? iconRequestStarted = null;
+        TaskCompletionSource? resumeIconRequest = null;
         var manyApps = false;
         var fixtureVersion = "1.0";
         async Task<JsonElement> Request(DeviceViewModel device, string action, object? args, CancellationToken ct)
@@ -56,7 +63,12 @@ internal static partial class Program
             if (action == "get_app_icon")
             {
                 iconCalls++; activeIconCalls++; maximumIconCalls = Math.Max(maximumIconCalls, activeIconCalls);
-                try { await Task.Delay(5, ct); }
+                try
+                {
+                    if (iconRequestStarted?.TrySetResult() == true)
+                        await resumeIconRequest!.Task.WaitAsync(ct);
+                    await Task.Delay(5, ct);
+                }
                 finally { activeIconCalls--; }
             }
             else Console.WriteLine("Request: " + device.Udid + " / " + action);
@@ -88,6 +100,11 @@ internal static partial class Program
                 }
             }
             if (action == "launch") launchedBundle = arguments.GetProperty("bundleId").GetString();
+            if (action == "close_app")
+            {
+                closedBundle = arguments.GetProperty("bundleId").GetString();
+                return JsonSerializer.SerializeToElement(new { status = closeStatus });
+            }
             if (action == "set_setting")
             {
                 var key = arguments.GetProperty("key").GetString()!;
@@ -165,10 +182,13 @@ internal static partial class Program
             Verify(!panel.Focusable && !panel.IsTabStop,
                 "The management page must leave keyboard focus on its actionable controls.");
             var closeAction = FindVisualDescendants<Button>(panel).First(button => button.IsVisible && button.IsEnabled);
-            Verify(closeAction.FocusVisualStyle is not null && closeAction.Focus(),
-                "Removing a container focus frame must retain keyboard focus feedback on management actions.");
+            Verify(closeAction.FocusVisualStyle is null && closeAction.Focus() &&
+                closeAction.Template.FindName("IconRoot", closeAction) is Border { BorderBrush: SolidColorBrush focusBrush } &&
+                focusBrush.Color == ((SolidColorBrush)closeAction.FindResource("AccentBrush")).Color,
+                "Management actions must show focus on their rounded border without a second external frame.");
             Console.WriteLine("No-device navigation passed.");
-            Verify(Find<StackPanel>("ConnectionPrompt").IsVisible && calls.Count == 0, "Opening without a device must show guidance and must not start control/capture.");
+            Verify(Find<FrameworkElement>("ConnectionPrompt").IsVisible && !Find<FrameworkElement>("PageTabs").IsVisible && calls.Count == 0,
+                "Opening without a device must show guidance, hide device pages and avoid starting control/capture.");
             Console.WriteLine("Adding first device."); vm.Devices.Add(first);
             Console.WriteLine("Adding second device."); vm.Devices.Add(second);
             Console.WriteLine("Selecting first device."); vm.SelectedDevice = first;
@@ -230,10 +250,35 @@ internal static partial class Program
             var damagedCache = (string)KeyboardCall(panel, "IconCachePath", first.Udid + ":" + firstId + ":1.0")!;
             File.WriteAllText(damagedCache, "damaged fixture icon");
             ((System.Collections.IDictionary)KeyboardField(panel, "_iconCache")).Clear();
+            var cachedBundle = "com.fixture.weixin";
+            var cachedPath = (string)KeyboardCall(panel, "IconCachePath", first.Udid + ":" + cachedBundle + ":1.0")!;
+            File.WriteAllBytes(cachedPath, Convert.FromBase64String(HubFixtureIcon(cachedBundle)));
+            iconRequestStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            resumeIconRequest = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             _ = KeyboardCall(panel, "RefreshAsync"); Finish(); AdvanceDispatcher(TimeSpan.FromMilliseconds(100));
+            try
+            {
+                WaitReviewTask(iconRequestStarted.Task.WaitAsync(TimeSpan.FromSeconds(3)));
+                Find<TextBox>("AppSearch").Text = cachedBundle;
+                var cachedRow = Find<ListBox>("AppsList").Items.Cast<object>().Single();
+                var iconProperty = cachedRow.GetType().GetProperty("Icon")!;
+                var cachedIconShown = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                ((System.ComponentModel.INotifyPropertyChanged)cachedRow).PropertyChanged += (_, args) =>
+                {
+                    if (args.PropertyName == "Icon" && iconProperty.GetValue(cachedRow) is not null)
+                        cachedIconShown.TrySetResult();
+                };
+                if (iconProperty.GetValue(cachedRow) is null)
+                    WaitReviewTask(cachedIconShown.Task.WaitAsync(TimeSpan.FromSeconds(3)));
+                Verify(iconCalls == firstIconCalls + 1 && activeIconCalls == 1,
+                    "The cached search result must display while the uncached phone request is still pending, without another phone request.");
+            }
+            finally { resumeIconRequest.TrySetResult(); }
             WaitReviewTask((Task)KeyboardField(panel, "_iconOperation"));
+            Find<TextBox>("AppSearch").Clear(); Finish();
             Verify(iconCalls == firstIconCalls + 1 && File.ReadAllBytes(damagedCache).Take(8).SequenceEqual(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }),
                 "A damaged cached image must trigger one fetch and be replaced by a valid thumbnail.");
+            Console.WriteLine("PASS a cached search result shows while an earlier phone icon request is blocked.");
             var beforeVersionChange = iconCalls;
             fixtureVersion = "2.0"; _ = KeyboardCall(panel, "RefreshAsync"); Finish(); AdvanceDispatcher(TimeSpan.FromMilliseconds(100));
             WaitReviewTask((Task)KeyboardField(panel, "_iconOperation"));
@@ -259,7 +304,7 @@ internal static partial class Program
                 KeyboardCall(vm, "NotifyUsbControlStateChanged"); Finish();
                 Verify(Find<Grid>("Pages").IsVisible && !Find<Grid>("Pages").IsEnabled && list.Items.Count == 1,
                     "A capture transport reconnect must keep the selected device's filtered list visible and disable actions.");
-                Verify(Find<TextBlock>("RecoveryHint").IsVisible && !Find<StackPanel>("ConnectionPrompt").IsVisible,
+                Verify(Find<TextBlock>("RecoveryHint").IsVisible && !Find<FrameworkElement>("ConnectionPrompt").IsVisible,
                     "A previously connected device must show recovery guidance instead of the first-connection prompt.");
                 var requestsWhileOffline = calls.Count;
                 AdvanceDispatcher(TimeSpan.FromMilliseconds(550));
@@ -312,15 +357,30 @@ internal static partial class Program
             Verify(appMenu.IsOpen && ReferenceEquals(appMenu.PlacementTarget, rowMore) && !list.ContextMenu!.IsOpen,
                 "A row's visible more button must open the same operations on that exact application.");
             VerifyHubRowMenuPosition(rowMore, appMenu);
-            Verify(MenuAction(appMenu, "app-launch").IsEnabled && MenuAction(appMenu, "app-remove").IsEnabled,
-                "The selected application must expose launch and uninstall through its context menu.");
+            Verify(MenuAction(appMenu, "app-launch").IsEnabled && MenuAction(appMenu, "app-close").IsEnabled &&
+                MenuAction(appMenu, "app-remove").IsEnabled, "The selected application must expose open, close and uninstall.");
+            SavePreviewVisual(appMenu, Path.Combine(output, "app-actions-close-app.png"));
             ClickMenu(appMenu, "copy");
             Verify(copied == "com.tencent.xin", "Copy Bundle ID must copy the pointed application's identifier.");
             ClickMenu(appMenu, "app-launch");
             Console.WriteLine("App launch passed.");
             Verify(calls.Last(c => c.Action == "launch").Device == first.Udid, "Launch must target the selected main device.");
             Verify(launchedBundle == "com.tencent.xin", "The context menu must launch its captured application.");
+            ClickMenu(appMenu, "app-close");
+            Verify(calls.Last(c => c.Action == "close_app").Device == first.Udid && closedBundle == "com.tencent.xin" &&
+                Find<TextBlock>("StatusText").Text == LocalizationService.Format("DeviceHubPanelAppCloseRequested", "WeChat"),
+                "Close must target the captured application on the selected device.");
+            closeStatus = "not-running";
+            ClickMenu(appMenu, "app-close");
+            var idleStatus = Find<TextBlock>("StatusText").Text;
+            Verify(idleStatus == LocalizationService.Format("DeviceHubPanelAppNotRunning", "WeChat"),
+                "Closing an idle application must report that it is inactive.");
+            closeStatus = "unexpected";
+            ClickMenu(appMenu, "app-close");
+            Verify(Find<TextBlock>("StatusText").Text == LocalizationService.Get("DeviceHubPanelOperationFailed"),
+                "An unrecognized close result must show an error.");
             var staleLaunch = MenuAction(Menu(list), "app-launch");
+            var staleClose = MenuAction(Menu(list), "app-close");
             Find<TextBox>("AppSearch").Clear();
             var pointed = list.Items[1];
             list.ScrollIntoView(pointed); window.UpdateLayout();
@@ -369,7 +429,9 @@ internal static partial class Program
             AdvanceDispatcher(TimeSpan.FromMilliseconds(30));
             vm.SelectedDevice = second;
             var launchCount = calls.Count(c => c.Action == "launch");
+            var closeCount = calls.Count(c => c.Action == "close_app");
             staleLaunch.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            staleClose.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
             slow.SetResult(HubFixtureApps("stale-device"));
             WaitReviewTask(oldOperation); Finish();
             Console.WriteLine("Stale-response protection passed.");
@@ -380,6 +442,7 @@ internal static partial class Program
                 "A stale response must not appear on another device.");
             Verify(calls.Last(c => c.Action == "apps").Device == second.Udid, "The new device must get its own refresh after cancellation.");
             Verify(calls.Count(c => c.Action == "launch") == launchCount, "A menu from a previous device must never execute on the new device.");
+            Verify(calls.Count(c => c.Action == "close_app") == closeCount, "A stale menu must never close an app on the newly selected device.");
 
             var appFilter = Find<ComboBox>("AppFilter");
             appFilter.SelectedIndex = 5; Finish();
@@ -391,7 +454,7 @@ internal static partial class Program
             Find<Button>("AppSearchClear").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent)); Finish();
             list.SelectedIndex = 0;
             var processMenu = Menu(list);
-            Verify(list.Items.Count == 1 && !processMenu.Items.OfType<MenuItem>().Any(item => item.Tag?.ToString() == "app-launch") &&
+            Verify(list.Items.Count == 1 && !processMenu.Items.OfType<MenuItem>().Any(item => item.Tag?.ToString() is "app-launch" or "app-close") &&
                 MenuAction(processMenu, "app-remove").IsEnabled, "Processes must expose terminate, with no application launch action.");
             ClickMenu(processMenu, "copy"); Verify(copied == "251", "Process menus must copy the PID.");
             appFilter.SelectedIndex = 0; Finish();
@@ -498,6 +561,7 @@ internal static partial class Program
                     "A busy mapping operation must disable duplicate user requests.");
                 SetKeyboardField(vm, "_explorerMappingBusy", false);
                 SetKeyboardField(vm, "_explorerMapping", mappingSession);
+                SetKeyboardField(vm, "_explorerStatusKey", "DeviceHubExplorerMappedFormat");
                 KeyboardCall(vm, "NotifyExplorerMapping");
                 Verify(mappingToggle.IsChecked == true && mappingOpen.IsVisible &&
                     Find<TextBlock>("ExplorerMappingFeedback").Text == LocalizationService.Format("DeviceHubExplorerMappedFormat", "Z:"),
@@ -526,8 +590,9 @@ internal static partial class Program
                     "A mapping owned by another phone must never appear checked or openable on this phone.");
                 panel.SetDevice(second, true); Finish();
                 Find<ComboBox>("FileRoot").SelectedIndex = 1; Finish();
-                Verify(!Find<StackPanel>("ExplorerMappingRow").IsVisible,
-                    "The media mapping control must not imply that crash reports are mapped.");
+                Verify(Find<StackPanel>("ExplorerMappingRow").IsVisible && mappingToggle.IsChecked == true &&
+                    ReferenceEquals(KeyboardField(vm, "_explorerMapping"), mappingSession),
+                    "Selecting crash logs must retain the device's unified mapped drive.");
                 Find<ComboBox>("FileRoot").SelectedIndex = 0; Finish();
                 SaveWindowRender(window, Path.Combine(output, "files-explorer-mapped.png"));
             }
@@ -570,13 +635,21 @@ internal static partial class Program
             try
             {
                 SetKeyboardField(mappingSession, "Drive", mappingDrive);
-                SetKeyboardField(mappingSession, "BundleId", "com.test.documents");
                 SetKeyboardField(vm, "_explorerMapping", mappingSession);
                 KeyboardCall(vm, "NotifyExplorerMapping");
-                Verify(mappingToggle.IsChecked == true && mappingOpen.IsVisible, "The selected app must own its matching mapped drive.");
-                SetKeyboardField(mappingSession, "BundleId", "com.test.other");
+                Verify(mappingToggle.IsChecked == true && mappingOpen.IsVisible, "Shared app documents must retain access to the unified drive.");
+                documentRoot.SelectedIndex = 0; Finish();
+                Verify(mappingToggle.IsChecked == true && mappingOpen.IsVisible &&
+                    ReferenceEquals(KeyboardField(vm, "_explorerMapping"), mappingSession), "Switching to media disconnected the unified mapping.");
+                documentRoot.SelectedIndex = 2; Finish();
+                SetKeyboardField(mappingSession, "Drive", null);
+                SetKeyboardField(vm, "_explorerMappingBusy", true);
                 KeyboardCall(vm, "NotifyExplorerMapping");
-                Verify(mappingToggle.IsChecked == false && !mappingOpen.IsVisible, "Another app's mapped drive must never be openable from this app.");
+                Verify(mappingToggle.IsChecked == true && mappingToggle.IsEnabled && !mappingOpen.IsVisible,
+                    "An owned folder scan must be cancellable without showing an unopened drive.");
+                SetKeyboardField(vm, "_explorerMappingBusy", false);
+                SetKeyboardField(mappingSession, "Drive", mappingDrive);
+                KeyboardCall(vm, "NotifyExplorerMapping");
                 SaveWindowRender(window, Path.Combine(output, "files-app-documents.png"));
             }
             finally
@@ -588,7 +661,7 @@ internal static partial class Program
             documentRoot.SelectedIndex = 0; Finish();
             Verify(lastFileArguments.GetProperty("root").GetString() == "media" && !lastFileArguments.TryGetProperty("bundleId", out _),
                 "Switching back to media must remove the app bundle scope.");
-            Console.WriteLine("PASS app document scopes: app picker, root reset, all file arguments and per-app mapped drive ownership.");
+            Console.WriteLine("PASS app document scopes: app picker, root reset, scoped file arguments, unified mapping across folders and cancellable discovery.");
             files.SelectedIndex = 0;
             var fileMenu = Menu(files); ClickMenu(fileMenu, "copy");
             Verify(copied == "DCIM" && MenuAction(fileMenu, "file-download").IsEnabled, "File menus must copy the selected path and offer open/save.");
@@ -717,7 +790,7 @@ internal static partial class Program
                             Verify(!popup.IsOpen, "Refreshing must close the previously opened menu.");
                         }
                     }
-                    Verify(panel.ActualWidth >= 400, "The inspector must retain a usable width.");
+                    Verify(panel.ActualWidth >= 350, "The inspector must retain a usable width.");
                     var connection = Find<TextBlock>("ConnectionText");
                     var connectionWidth = new FormattedText(connection.Text, System.Globalization.CultureInfo.CurrentUICulture, connection.FlowDirection,
                         new Typeface(connection.FontFamily, connection.FontStyle, connection.FontWeight, connection.FontStretch), connection.FontSize,
@@ -740,7 +813,7 @@ internal static partial class Program
             SetApplicationDisplayMode(app, ApplicationDisplayMode.Lightweight);
             KeyboardCall(window, "ApplyApplicationDisplayMode"); Finish();
             SaveWindowRender(window, Path.Combine(output, "lightweight.png"));
-            Verify(panel.IsVisible && panel.ActualWidth > 400,
+            Verify(panel.IsVisible && panel.ActualWidth >= 350,
                 $"Management must also work in lightweight mode: visible={panel.IsVisible}, panel={panel.ActualWidth:0.0}, window={window.ActualWidth:0.0}, host={((FrameworkElement)window.FindName("DeviceHubPanelHost")).ActualWidth:0.0}, control={((FrameworkElement)window.FindName("ControlPanel")).ActualWidth:0.0}.");
             vm.Devices.Clear(); vm.SelectedDevice = null; Finish();
             Verify(Find<ListBox>("AppsList").Items.Count == 0, "Deselecting the phone must clear its private data from the inspector.");

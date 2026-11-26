@@ -51,6 +51,8 @@ enum class WasapiBufferingMode {
     NetworkJitter,
 };
 
+enum class PlaybackBuffer : std::uint32_t { Default, Low, Normal, High };
+
 struct PlaybackStats {
     bool active{};
     std::uint64_t queued_frames{};
@@ -66,7 +68,8 @@ class WasapiRenderer {
 public:
     explicit WasapiRenderer(const coremedia::AudioStreamBasicDescription& format,
         bool playback_enabled = true, float volume = 1.0F,
-        WasapiBufferingMode buffering_mode = WasapiBufferingMode::LowLatency);
+        WasapiBufferingMode buffering_mode = WasapiBufferingMode::LowLatency,
+        PlaybackBuffer buffer = PlaybackBuffer::Default);
     ~WasapiRenderer();
     WasapiRenderer(const WasapiRenderer&) = delete;
     WasapiRenderer& operator=(const WasapiRenderer&) = delete;
@@ -74,11 +77,14 @@ public:
     void enqueue(std::span<const std::uint8_t> pcm);
     void set_enabled(bool enabled) noexcept;
     void set_volume(float volume) noexcept;
+    void set_buffer(PlaybackBuffer buffer) noexcept;
+    [[nodiscard]] std::uint32_t preview_delay_ms() const noexcept;
     void stop() noexcept;
     [[nodiscard]] PlaybackStats stats() const;
 
 private:
     coremedia::AudioStreamBasicDescription format_;
+    WasapiBufferingMode buffering_mode_;
     std::uint32_t block_align_{};
     std::size_t capacity_frames_{};
     std::vector<std::uint8_t> ring_;
@@ -94,6 +100,8 @@ private:
     std::size_t base_high_water_frames_{};
     std::size_t startup_frames_{};
     std::size_t high_water_frames_{};
+    PlaybackBuffer buffer_{PlaybackBuffer::Default};
+    std::atomic_uint32_t buffer_revision_{};
 
     void* stop_event_{};
     void* data_event_{};
@@ -105,6 +113,7 @@ private:
     std::atomic_uint64_t dropped_frames_{};
     std::atomic_uint64_t underruns_{};
     std::atomic_uint64_t queue_catchups_{};
+    std::atomic_uint32_t preview_delay_ms_{};
     std::atomic_bool playback_enabled_{true};
     // Linear gain encoded as 0..10000 to keep the real-time sample loop free
     // from floating point atomics and platform-specific lock fallbacks.

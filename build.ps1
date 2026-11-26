@@ -5,6 +5,7 @@ param(
     [switch]$SkipTests,
     [switch]$NoPublish,
     [switch]$TestBuild,
+    [string]$OutputRoot,
     [switch]$IncludeMediaOutputRuntime,
     [switch]$OmitMediaOutputRuntime,
     [string]$FfmpegRuntimeManifestPath,
@@ -44,6 +45,9 @@ $BuildUxPlayComponent = -not $OmitUxPlayRuntime
 if ($TestBuild -and $NoPublish) {
     throw '-TestBuild requires publishing.'
 }
+if ($TestBuild -and $OutputRoot) {
+    throw '-TestBuild uses the default output directory.'
+}
 if ($TestBuild -and $PSBoundParameters.ContainsKey('Version')) {
     throw '-TestBuild chooses the next test version automatically; do not pass -Version.'
 }
@@ -57,7 +61,11 @@ if ($PrepareUxPlayComponent -and ($TestBuild -or $OmitUxPlayRuntime -or -not $Ve
 # Downloads resolve the latest public Release at runtime. The embedded descriptor
 # supplies a minimum component version and trusted legacy-cache hashes; its old
 # URL must not gate development/distribution builds.
-$OutputsRoot = Join-Path $Root 'outputs'
+$OutputsRoot = if ($OutputRoot) {
+    $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputRoot)
+} else {
+    Join-Path $Root 'outputs'
+}
 $TestVersionRecord = Join-Path $Root 'work\test-build-version.txt'
 [xml]$appProject = Get-Content -LiteralPath (Join-Path $Root 'src\App\iPhoneMirror.App.csproj') -Raw
 $projectVersion = [string]$appProject.Project.PropertyGroup.Version |
@@ -197,81 +205,7 @@ function Resolve-CMakeTool([string]$Name) {
     throw "$Name.exe was not found. Install Visual Studio C++/CMake tools or add $Name to PATH."
 }
 
-function Invoke-NativeToolWithSanitizedEnvironment(
-    [string]$FilePath,
-    [string[]]$ArgumentList,
-    [switch]$CleanManagedTestEnvironment
-) {
-    $startInfo = [Diagnostics.ProcessStartInfo]::new()
-    $startInfo.FileName = $FilePath
-    $startInfo.WorkingDirectory = $Root
-    $startInfo.UseShellExecute = $false
-
-    # Some Windows hosts expose both Path and PATH in the inherited block.
-    # .NET Framework MSBuild treats those as duplicate Hashtable keys when it
-    # launches CL.exe. Rebuild the child environment case-insensitively so the
-    # compiler always receives exactly one canonical Path entry.
-    $environment = [Environment]::GetEnvironmentVariables()
-    $canonicalPath = @($environment.GetEnumerator() |
-        Where-Object { $_.Key -ceq 'Path' } |
-        Select-Object -First 1).Value
-    if ([string]::IsNullOrWhiteSpace($canonicalPath)) {
-        $canonicalPath = @($environment.GetEnumerator() |
-            Where-Object { $_.Key -ieq 'Path' } |
-            Select-Object -First 1).Value
-    }
-    $startInfo.Environment.Clear()
-    $seenEnvironmentNames = [Collections.Generic.HashSet[string]]::new(
-        [StringComparer]::OrdinalIgnoreCase)
-    foreach ($entry in $environment.GetEnumerator()) {
-        $name = [string]$entry.Key
-        if ($name -ieq 'Path' -or -not $seenEnvironmentNames.Add($name)) {
-            continue
-        }
-        # SDK/CI runtime overrides are not part of the installed application's
-        # environment. Keep them out of test children so elevation tests reach
-        # their intended checks; production rejection remains unchanged.
-        if ($CleanManagedTestEnvironment -and
-            $name -match '^(?i:COMPLUS_|COR_|CORECLR_|DOTNET_|DEVPATH$|APPDOMAIN_MANAGER_ASM$|APPDOMAIN_MANAGER_TYPE$|CLRConfigFile$)') {
-            continue
-        }
-        $startInfo.Environment[$name] = [string]$entry.Value
-    }
-    $startInfo.Environment['Path'] = $canonicalPath
-    # Do not reconnect to long-lived MSBuild worker nodes that may have been
-    # created before the environment was sanitized.
-    $startInfo.Environment['MSBUILDDISABLENODEREUSE'] = '1'
-    # ArgumentList is unavailable on the .NET Framework ProcessStartInfo used by
-    # Windows PowerShell 5.1. Fall back to a Windows-command-line-safe string so
-    # release builds work on both PowerShell hosts.
-    $quotedArguments = foreach ($argument in $ArgumentList) {
-        $value = [string]$argument
-        if ([string]::IsNullOrEmpty($value)) {
-            '""'
-        }
-        elseif ($value -notmatch '[\s"]') {
-            $value
-        }
-        else {
-            $escapedValue = [regex]::Replace($value, '(\\*)"', '$1$1\\"')
-            $escapedValue = [regex]::Replace($escapedValue, '(\\+)$', '$1$1')
-            '"' + $escapedValue + '"'
-        }
-    }
-    $startInfo.Arguments = $quotedArguments -join ' '
-
-    # Construct the process explicitly.  On some PowerShell/.NET hosts the
-    # static Start overload can return $null even though the child was created,
-    # which then turns the following WaitForExit call into a null dereference
-    # and aborts the release package.
-    $process = [Diagnostics.Process]::new()
-    $process.StartInfo = $startInfo
-    if (-not $process.Start()) {
-        throw "Failed to start native tool: $FilePath"
-    }
-    $process.WaitForExit()
-    return $process.ExitCode
-}
+. (Join-Path $Root 'scripts\Invoke-NativeToolWithSanitizedEnvironment.ps1')
 $CMake = Resolve-CMakeTool 'cmake'
 $CTest = Resolve-CMakeTool 'ctest'
 $WirelessRoot = Join-Path $Root 'third_party\airplay-server'
@@ -346,6 +280,8 @@ function Assert-NoReparseChildren([string]$Path) {
         throw "Refusing recursive mutation through a reparse point: $($reparse[0].FullName)"
     }
 }
+
+if ($OutputRoot) { Assert-SafeWorkspaceDirectory $OutputsRoot }
 
 function Clear-TestOutputs {
     Assert-SafeWorkspaceDirectory $OutputsRoot
@@ -545,16 +481,16 @@ try {
                 Assert-NoReparseChildren $AppUxPlay
                 Remove-Item -LiteralPath $AppUxPlay -Recurse -Force
             }
-            $AppUxPlay = Join-Path $Root 'outputs\uxplay-component-runtime'
+            $AppUxPlay = Join-Path $OutputsRoot 'uxplay-component-runtime'
         }
         $AppFfmpeg = Join-Path $AppNative 'tools\ffmpeg'
         Assert-SafeWorkspaceDirectory $AppNative
         Assert-SafeWorkspaceDirectory $AppWireless
-        Assert-SafeWorkspaceDirectory $AppUxPlay
         Assert-SafeWorkspaceDirectory $AppFfmpeg
         New-Item -ItemType Directory -Force -Path $AppNative | Out-Null
         New-Item -ItemType Directory -Force -Path $AppWireless | Out-Null
         if ($BuildUxPlayComponent) {
+            Assert-SafeWorkspaceDirectory $AppUxPlay
             New-Item -ItemType Directory -Force -Path $AppUxPlay | Out-Null
         }
         if ($UseMediaOutputRuntime) {
@@ -718,8 +654,17 @@ try {
     }
 
     if (-not $NoPublish -and (Test-Path 'src/App/iPhoneMirror.App.csproj')) {
+        $decoderSource = Join-Path $Root 'dist\CoreDevice'
+        $decoderFiles = @('iPhoneMirror.MediaDecoder.exe', 'LICENSE.FFmpeg', 'LICENSE.rplayhub')
+        $decoderHashes = @{}
+        if (Test-Path -LiteralPath $decoderSource -PathType Container) {
+            Assert-ExpectedRuntimeDirectory $decoderSource $decoderFiles 'CoreDevice decoder input' @{}
+            foreach ($file in $decoderFiles) {
+                $decoderHashes[$file] = (Get-FileHash -LiteralPath (Join-Path $decoderSource $file)).Hash
+            }
+        }
         $PublishRoot = if ($TestBuild) { $OutputsRoot } else {
-            Join-Path $Root 'outputs\iPhoneMirror'
+            Join-Path $OutputsRoot 'iPhoneMirror'
         }
         Assert-SafeWorkspaceDirectory $PublishRoot
         if (-not $TestBuild -and (Test-Path -LiteralPath $PublishRoot)) {
@@ -826,6 +771,11 @@ try {
                 $MediaOutputRuntimeFiles 'Published media-output FFmpeg runtime' `
                 $MediaOutputRuntimeHashes
         }
+        if ($decoderHashes.Count -ne 0) {
+            Assert-ExpectedRuntimeDirectory (Join-Path $bridgeToolsRoot 'CoreDevice') `
+                $decoderFiles 'Published CoreDevice decoder' $decoderHashes
+            $requiredArtifacts += @($decoderFiles | ForEach-Object { Join-Path 'tools\CoreDevice' $_ })
+        }
         $uxplayFiles = @()
         $uxplayRoot = Join-Path $PublishRoot 'Wireless\UxPlay'
         if (Test-Path -LiteralPath $uxplayRoot -PathType Container) {
@@ -883,13 +833,14 @@ try {
         # The driver manager is shipped beside the main executable, where the
         # application discovers it. Publishing a second identical 69 MB copy
         # under outputs/iPhoneMirror.Driver only wastes disk space.
-        $LegacyDriverPublishRoot = Join-Path $Root 'outputs\iPhoneMirror.Driver'
+        $LegacyDriverPublishRoot = Join-Path $OutputsRoot 'iPhoneMirror.Driver'
         Assert-SafeWorkspaceDirectory $LegacyDriverPublishRoot
         if (Test-Path -LiteralPath $LegacyDriverPublishRoot) {
             Assert-NoReparseChildren $LegacyDriverPublishRoot
             Remove-Item -LiteralPath $LegacyDriverPublishRoot -Recurse -Force
         }
-        $DriverPublishRoot = Join-Path $Root 'work\publish\iPhoneMirror.Driver'
+        $DriverStagingRoot = if ($OutputRoot) { Join-Path $OutputsRoot 'driver-staging' } else { Join-Path $Root 'work\publish' }
+        $DriverPublishRoot = Join-Path $DriverStagingRoot 'iPhoneMirror.Driver'
         Assert-SafeWorkspaceDirectory $DriverPublishRoot
         if (Test-Path -LiteralPath $DriverPublishRoot) {
             Assert-NoReparseChildren $DriverPublishRoot
@@ -947,7 +898,7 @@ try {
         }
 
         $MainPublishRoot = if ($TestBuild) { $OutputsRoot } else {
-            Join-Path $Root 'outputs\iPhoneMirror'
+            Join-Path $OutputsRoot 'iPhoneMirror'
         }
         if (-not (Test-Path -LiteralPath (Join-Path $MainPublishRoot 'iPhoneMirror.exe'))) {
             throw 'Main application output is missing before driver-manager integration.'
@@ -1000,7 +951,7 @@ try {
         # driver stays self-contained so its complete elevation payload can be
         # verified and staged without loading writable sidecars.
         if (-not $TestBuild) {
-        $InstallerPublishRoot = Join-Path $Root 'outputs\iPhoneMirror.Installer'
+        $InstallerPublishRoot = Join-Path $OutputsRoot 'iPhoneMirror.Installer'
         Assert-SafeWorkspaceDirectory $InstallerPublishRoot
         if (Test-Path -LiteralPath $InstallerPublishRoot) {
             Assert-NoReparseChildren $InstallerPublishRoot
@@ -1023,7 +974,7 @@ try {
         # Keep an independently verifiable, self-contained elevation payload.
         # Inner compression prevents Inno's solid stream from deduplicating the
         # shared .NET bytes; disable it only for the installer variant.
-        $InstallerDriverRoot = Join-Path $Root 'work\publish\iPhoneMirror.Driver.Installer'
+        $InstallerDriverRoot = Join-Path $DriverStagingRoot 'iPhoneMirror.Driver.Installer'
         Assert-SafeWorkspaceDirectory $InstallerDriverRoot
         Assert-NoReparseChildren $InstallerDriverRoot
         dotnet publish src/DriverInstaller/iPhoneMirror.DriverInstaller.csproj `
@@ -1042,6 +993,10 @@ try {
         Assert-BundledDdi (Join-Path $installerBridgeToolsRoot 'ddi')
         Assert-UsbTouchBridgeRuntime -Directory $installerBridgeToolsRoot `
             -Label 'Shared-runtime installer USB touch bridge runtime'
+        if ($decoderHashes.Count -ne 0) {
+            Assert-ExpectedRuntimeDirectory (Join-Path $installerBridgeToolsRoot 'CoreDevice') `
+                $decoderFiles 'Installer CoreDevice decoder' $decoderHashes
+        }
         $installerBridgeRuntimeArtifacts = @(Get-UsbTouchBridgeRuntimePayloadFiles `
             -Directory $installerBridgeToolsRoot -TargetDirectory 'tools')
         $installerRequiredArtifacts = @(
@@ -1090,12 +1045,14 @@ try {
             -ForegroundColor Green
     }
     else {
-        . (Join-Path $Root 'scripts\CompactBuildRecord.ps1')
-        Write-CompactBuildRecord $Root $BuildUxPlayComponent $UseMediaOutputRuntime
-        Write-Host "Build complete: $Root\outputs\iPhoneMirror" -ForegroundColor Green
-        Write-Host "Installer payload: $Root\outputs\iPhoneMirror.Installer" `
+        if ($OutputsRoot -eq (Join-Path $Root 'outputs')) {
+            . (Join-Path $Root 'scripts\CompactBuildRecord.ps1')
+            Write-CompactBuildRecord $Root $BuildUxPlayComponent $UseMediaOutputRuntime
+        }
+        Write-Host "Build complete: $OutputsRoot\iPhoneMirror" -ForegroundColor Green
+        Write-Host "Installer payload: $OutputsRoot\iPhoneMirror.Installer" `
             -ForegroundColor Green
-        Write-Host "Driver tool: $Root\outputs\iPhoneMirror\iPhoneMirror.Driver.exe" `
+        Write-Host "Driver tool: $OutputsRoot\iPhoneMirror\iPhoneMirror.Driver.exe" `
             -ForegroundColor Green
     }
 }

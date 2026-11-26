@@ -589,14 +589,6 @@ bool copy_nv12_frame_letterboxed(const DecodedFrame& frame,
 
     const auto output_y_bytes = static_cast<std::size_t>(output_width) *
         output_height;
-    const auto black_y = canonicalize_sdr ||
-        frame.color.range == coremedia::ColorRange::Full
-        ? std::uint8_t{0} : std::uint8_t{16};
-    std::fill_n(output.data(), output_y_bytes, black_y);
-    std::fill(output.begin() + static_cast<std::ptrdiff_t>(output_y_bytes),
-        output.begin() + static_cast<std::ptrdiff_t>(*required),
-        std::uint8_t{128});
-
     const auto scale = std::min(1.0, std::min(
         static_cast<double>(output_width) / frame.width,
         static_cast<double>(output_height) / frame.height));
@@ -612,6 +604,16 @@ bool copy_nv12_frame_letterboxed(const DecodedFrame& frame,
     const auto content_height = even_dimension(
         std::max<std::uint32_t>(1U, static_cast<std::uint32_t>(
             std::lround(frame.height * scale))), output_height);
+    // Every path below writes both planes throughout the content rectangle.
+    // Initialize the background only if letterboxing exposes it.
+    if (content_width != output_width || content_height != output_height) {
+        const auto black_y = canonicalize_sdr ||
+            frame.color.range == coremedia::ColorRange::Full
+            ? std::uint8_t{0} : std::uint8_t{16};
+        std::fill_n(output.data(), output_y_bytes, black_y);
+        std::fill(output.begin() + static_cast<std::ptrdiff_t>(output_y_bytes),
+            output.begin() + static_cast<std::ptrdiff_t>(*required), std::uint8_t{128});
+    }
     const auto left = ((output_width - content_width) / 2U) & ~1U;
     const auto top = ((output_height - content_height) / 2U) & ~1U;
     const auto* source_y = frame.nv12.data();
@@ -630,6 +632,11 @@ bool copy_nv12_frame_letterboxed(const DecodedFrame& frame,
     if (frame.pixel_format == PixelFormat::Nv12 &&
         (!canonicalize_sdr || canonical_color) &&
         content_width == frame.width && content_height == frame.height) {
+        if (content_width == output_width && content_height == output_height &&
+            source_stride == output_width && allocated_height == output_height) {
+            std::memcpy(destination_y, source_y, *required);
+            return true;
+        }
         for (std::uint32_t y = 0; y < content_height; ++y) {
             std::memcpy(destination_y + static_cast<std::size_t>(top + y) *
                 output_width + left, source_y + static_cast<std::size_t>(y) *

@@ -381,7 +381,8 @@
         <Setter Property="FontSize" Value="{DynamicResource FontSize16}"/>
         <Setter Property="FontWeight" Value="Normal"/>
         <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
-        <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocusVisual}"/>
+        <!-- IconRoot draws the rounded focus border inside the button. -->
+        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
@@ -511,6 +512,58 @@
         <Setter Property="VerticalAlignment" Value="Center"/>
     </Style>
 
+    <Style x:Key="NoticeHeaderIcon" TargetType="Border">
+        <Setter Property="Width" Value="36"/>
+        <Setter Property="Height" Value="36"/>
+        <Setter Property="CornerRadius" Value="10"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+    </Style>
+
+    <Style x:Key="NoticeHeaderTitle" TargetType="TextBlock" BasedOn="{StaticResource SubWindowTitle}">
+        <Setter Property="LineHeight" Value="NaN"/>
+        <Setter Property="Margin" Value="12,0,12,0"/>
+    </Style>
+
+    <Style x:Key="NoticeHeaderCloseButton" TargetType="Button" BasedOn="{StaticResource SubWindowCloseButton}">
+        <Setter Property="ui:RoundedWindow.IsChromeCloseButton" Value="False"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+    </Style>
+
+    <Style x:Key="NoticeDetailsSurface" TargetType="Border">
+        <Setter Property="Background" Value="{DynamicResource ControlFillBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderSoftBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="10"/>
+        <Setter Property="Padding" Value="14,12"/>
+    </Style>
+
+    <Style x:Key="NoticeDiagnosticText" TargetType="TextBox">
+        <Setter Property="IsReadOnly" Value="True"/>
+        <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="FontFamily" Value="{StaticResource CodeFontFamily}"/>
+        <Setter Property="FontSize" Value="{DynamicResource CaptionFontSize}"/>
+        <Setter Property="TextWrapping" Value="Wrap"/>
+        <Setter Property="MaxHeight" Value="66"/>
+        <Setter Property="VerticalScrollBarVisibility" Value="Auto"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="TextBox">
+                    <Border Background="{TemplateBinding Background}">
+                        <ScrollViewer x:Name="PART_ContentHost" Focusable="False"
+                                      HorizontalScrollBarVisibility="Disabled"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter Property="Background" Value="{DynamicResource ControlFillBrush}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <Style x:Key="SubWindowSubtitle" TargetType="TextBlock" BasedOn="{StaticResource SecondaryText}">
         <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}"/>
         <Setter Property="FontSize" Value="{DynamicResource FontSize12}"/>
@@ -535,7 +588,7 @@
         <Setter Property="Margin" Value="2"/>
         <Setter Property="FontSize" Value="{DynamicResource FontSize14}"/>
         <Setter Property="FontWeight" Value="Normal"/>
-        <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocusVisual}"/>
+        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="TabItem">
@@ -626,7 +679,7 @@
         <Setter Property="Margin" Value="8,2"/>
         <Setter Property="Padding" Value="12,0"/>
         <Setter Property="Cursor" Value="Hand"/>
-        <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocusVisual}"/>
+        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
         <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
         <Setter Property="Template">
             <Setter.Value>

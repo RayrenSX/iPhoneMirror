@@ -6,6 +6,9 @@ internal static class ParentDriverTests
 {
     private static readonly ParentDriverChoice Composite = new(@"C:\Windows\INF\usb.inf",
         "Composite.Dev", "USB Composite Device", "Microsoft", 0x000A000000010002, 1);
+    private static readonly ParentDriverChoice AppleComposite = new(@"C:\Windows\INF\oem3.inf",
+        "AppleUSB_CCGPDriverInstall", "Apple Mobile Device USB Composite Device", "Apple, Inc.",
+        0x021A000000000000, 2);
     private static readonly ParentDriverChoice Original = new(@"C:\Windows\INF\oem42.inf",
         "VendorParent.NT", "Vendor parent", "Vendor", 0x0001000000000000, 2);
     private static AppleDeviceRecord Device => new(@"USB\VID_05AC&PID_12A8\0000810100044D600A22001E",
@@ -32,6 +35,8 @@ internal static class ParentDriverTests
         var approval = ParentDriverConsent.Create(Device, ParentDriverAction.Bind, Composite);
         Check(!approval.Matches(Device with { Service = "another-service" }));
         Check(!approval.Matches(Device with { DriverInf = "oem43.inf" }));
+        Check(!approval.Matches(Device with { ProblemCode = 10 }));
+        Check(!approval.Matches(Device with { IsStarted = true }));
         Check(!approval.Matches(Device with { UpperFilters = ["unexpected-filter"] }));
         Check(!approval.Matches(Device with { LowerFilters = ["unexpected-filter"] }));
         Check(!approval.Matches(Device with { IsPresent = false }));
@@ -45,6 +50,14 @@ internal static class ParentDriverTests
         Check(ParentDriverChange.BindingMatches(Bound(Composite) with { DriverSection = "Composite.Dev.NT" }, Composite));
         Check(!ParentDriverChange.BindingMatches(Bound(Composite) with { DriverSection = "Composite.Dev.NT.Other" }, Composite));
         Check(!ParentDriverChange.BindingMatches(Bound(Composite) with { Service = "wrong-service" }, Composite));
+        var appleChild = AppleComposite with { Section = "AppleUsbMux_Install" };
+        var unrelated = AppleComposite with { Provider = "Other vendor" };
+        Check(ParentDriverChoice.SelectCaptureDriver([Original, appleChild, unrelated]) is null);
+        Check(ParentDriverChoice.SelectCaptureDriver([Original, AppleComposite, appleChild]) == AppleComposite);
+        Check(ParentDriverChoice.SelectCaptureDriver([AppleComposite, Composite]) == Composite);
+        Check(ParentDriverChange.BindingMatches(
+            Bound(AppleComposite) with { DriverSection = "AppleUSB_CCGPDriverInstall.NT" }, AppleComposite));
+        Check(!ParentDriverChange.BindingMatches(Bound(AppleComposite) with { Service = "libusb0" }, AppleComposite));
 
         var calls = 0;
         var backupSaved = false;
@@ -60,6 +73,16 @@ internal static class ParentDriverTests
             return false;
         });
         Check(success.Success && !success.RequiresRestart && calls == 1);
+
+        state = Device;
+        var appleApproval = ParentDriverConsent.Create(state, ParentDriverAction.Bind, AppleComposite);
+        var appleResult = ParentDriverChange.Apply(appleApproval, Original, () => state, choice =>
+        {
+            state = Bound(choice) with { LowerFilters = ["AppleLowerFilter"] };
+            return false;
+        }, () => { }, _ => { });
+        Check(appleResult.Success && state.IsCaptureParent);
+        Check(DriverOperationSafety.IsReconnectComplete(state, DriverOperationKind.ParentRepair, AppleComposite));
 
         state = Device with { Service = "changed-after-confirmation" };
         calls = 0;
@@ -89,6 +112,21 @@ internal static class ParentDriverTests
             return false;
         });
         Check(unhealthy.Message == "ParentChangeRolledBack" && calls == 2);
+
+        state = Device;
+        calls = 0;
+        var unrestoredFilters = Apply(choice =>
+        {
+            state = ++calls == 1 ? Bound(choice) with { ProblemCode = 31 } :
+                Device with { LowerFilters = ["unexpected-filter"] };
+            return false;
+        });
+        Check(unrestoredFilters.Message == "ParentChangeRecoveryNeeded" && calls == 2);
+
+        var startedOriginal = Device with { ProblemCode = 0, IsStarted = true, UpperFilters = ["OriginalFilter"] };
+        Check(ParentDriverChange.WasRestored(startedOriginal with { UpperFilters = ["originalfilter"] }, startedOriginal, Original));
+        Check(!ParentDriverChange.WasRestored(startedOriginal with { IsStarted = false }, startedOriginal, Original));
+        Check(!ParentDriverChange.WasRestored(startedOriginal with { UpperFilters = [] }, startedOriginal, Original));
 
         state = Device;
         calls = 0;
@@ -128,7 +166,16 @@ internal static class ParentDriverTests
             Console.WriteLine($"Parent enumeration: service={device.Service}, problem={device.ProblemCode}, choices={choices.Count}");
             foreach (var choice in choices)
                 Console.WriteLine($"  {Path.GetFileName(choice.InfPath)} / {choice.Section} / {choice.VersionText}");
-            Check(choices.Any(item => item.IsComposite));
+            using var compatible = new ParentDriverNative(device.InstanceId);
+            var captureDriver = ParentDriverChoice.SelectCaptureDriver(compatible.Choices);
+            Console.WriteLine($"  Automatic capture parent: {captureDriver?.DisplayText ?? "(none)"}");
+            using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
+                @"SYSTEM\CurrentControlSet\Enum\" + device.InstanceId);
+            if (key is not null && device.InstanceId.StartsWith(@"USB\VID_05AC&PID_12A8\",
+                    StringComparison.OrdinalIgnoreCase) &&
+                !DeviceCatalog.ReadMultiString(key, "CompatibleIDs").Contains(@"USB\COMPOSITE",
+                    StringComparer.OrdinalIgnoreCase))
+                Check(!compatible.Choices.Any(choice => choice.IsComposite));
             if (!string.IsNullOrEmpty(device.DriverInf))
                 Check(choices.Any(item => ParentDriverChange.BindingMatches(device, item)));
         }
@@ -136,7 +183,7 @@ internal static class ParentDriverTests
 
     private static AppleDeviceRecord Bound(ParentDriverChoice choice) => Device with
     {
-        Service = choice.IsComposite ? "usbccgp" : "unknown-parent", DriverInf = Path.GetFileName(choice.InfPath),
+        Service = choice.IsCaptureDriver ? "usbccgp" : "unknown-parent", DriverInf = Path.GetFileName(choice.InfPath),
         DriverSection = choice.Section, DriverVersion = choice.VersionText, ProblemCode = 0, IsStarted = true,
     };
 

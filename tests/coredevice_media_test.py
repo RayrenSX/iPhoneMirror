@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import uuid
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -79,6 +80,56 @@ def write_rotation_fixture(path):
 
 
 class MediaTests(unittest.TestCase):
+    def test_direct_decoder_reports_complete_frames_and_preserves_orientation(self):
+        try:
+            from coredevice_media import decoder_path
+            executable = decoder_path()
+        except FileNotFoundError:
+            self.skipTest("CoreDevice decoder is not built")
+
+        packets = []
+        for i, (name, orientation, width, height) in enumerate((
+                ('portrait', 1, 144, 256), ('landscape', 4, 256, 144))):
+            nals = next(units(name))
+            payload = b''.join(b'\x00\x00\x00\x01' + nal for nal in nals)
+            packets.append(PACKET.pack(b'IMPK', len(payload), i, width | orientation << 28, height, 0, 0) + payload)
+        with tempfile.TemporaryFile() as pipe:
+            # Each drain starts with an empty preview mailbox.
+            for packet in packets:
+                result = subprocess.run([str(executable), '--direct-video'], input=packet, stdout=pipe,
+                                        stderr=subprocess.PIPE, check=True, timeout=10)
+                self.assertEqual(result.stderr, b'BV')
+            pipe.seek(0)
+            expected = json.loads((FIXTURES / 'frames.sha256.json').read_text())
+            for i, (name, orientation, width, height) in enumerate((
+                    ('portrait', 1, 144, 256), ('landscape', 4, 256, 144))):
+                length = width * height * 3 // 2
+                self.assertEqual(FRAME.unpack(pipe.read(FRAME.size)),
+                                 (b'IMCD', 4 + orientation, width, height, length, i))
+                self.assertEqual(hashlib.sha256(pipe.read(length)).hexdigest(), expected[name][0])
+            self.assertEqual(pipe.read(1), b'')
+
+    def test_decoder_preserves_the_native_preview_framing_at_every_rvra_tier(self):
+        try:
+            from coredevice_media import decoder_path
+            executable = decoder_path()
+        except FileNotFoundError:
+            self.skipTest("CoreDevice decoder is not built")
+        nals = next(units('portrait'))
+        payload = b''.join(b'\x00\x00\x00\x01' + nal for nal in nals)
+        def decode(active_w, active_h, target_w, target_h):
+            packet = PACKET.pack(b'IMPK', len(payload), 0, active_w, active_h, target_w, target_h)
+            return decoded_frames(subprocess.run([str(executable)], input=packet + payload,
+                capture_output=True, timeout=10, check=True).stdout)[0]
+        smaller_tier = decode(144, 256, (164 << 16) | 72, (272 << 16) | 128)
+        unpadded = decode(144, 256, 72, 128)
+        self.assertEqual(smaller_tier, unpadded, "Neither axis may crop to the preview size")
+        target_w = (140 << 16) | 72
+        target_h = (252 << 16) | 128
+        self.assertEqual(decode(144, 256, target_w, target_h), decode(140, 252, 72, 128))
+        self.assertEqual(decode(72, 128, target_w, target_h), decode(70, 126, 72, 128))
+        self.assertEqual(decode(0, 0, target_w, target_h), decode(140, 252, 72, 128))
+
     def packet(self, payload, seq=1, ts=0, marker=True):
         return RtpPacket(seq, ts, 123, marker, 96, payload)
 
@@ -86,6 +137,7 @@ class MediaTests(unittest.TestCase):
         data = struct.pack('!BBHII', 0xb1, 224, 65535, 456, 123) + b'CSRC' + b'\xbe\xde\x00\x01abcd' + b'\x26\x01data' + b'\x00\x02'
         p = parse_rtp(data)
         self.assertEqual((p.sequence, p.timestamp, p.payload), (65535, 456, b'\x26\x01data'))
+        self.assertEqual(p.extension_profile, 0xBEDE)
         for bad in [b'', data[:11], b'\x90' + data[1:12], data[:-1] + b'\xff', b'\xa0' + data[1:12] + b'\x00']:
             with self.assertRaises(ValueError): parse_rtp(bad)
 
@@ -115,11 +167,80 @@ class MediaTests(unittest.TestCase):
         self.assertEqual(receiver.sequence, 1)
 
     def test_rvra_trailer_is_generic_and_strict(self):
-        for w, h in ((1264, 2752), (720, 1280), (256, 144)):
+        for w, h in ((1264, 2752), (1088, 1920), (256, 144)):
             trailer = struct.pack('!HH', w, h) + bytes.fromhex('0000030000049209e403')
             self.assertEqual(active_size(b'\x26\x01slice' + trailer), (w, h))
             self.assertEqual(active_size(b'\x26\x01' + trailer[:-1] + b'\x04'), (0, 0))
         self.assertEqual(active_size(b'\x26\x01' + struct.pack('!HH', 9999, 2752) + trailer[4:]), (0, 0))
+
+    def test_rvra_trailer_is_removed_only_from_the_slice(self):
+        trailer = struct.pack('!HH', 1208, 2656) + bytes.fromhex('0000030000049209e403')
+        receiver = HevcReceiver()
+        receiver.wait_key = False
+        suffix_sei = b'\x50\x01' + trailer
+        self.assertEqual(active_size(suffix_sei), (0, 0))
+        receiver.push(self.packet(b'\x02\x01slice' + trailer, marker=False))
+        unit = receiver.push(self.packet(suffix_sei, seq=2))
+        self.assertEqual((unit.width, unit.height), (1208, 2656))
+        self.assertIn(b'slice' + trailer, unit.data)
+        self.assertEqual(unit.decoder_data(), b'\x00\x00\x00\x01\x02\x01slice\x00\x00\x00\x01' + suffix_sei)
+
+    def test_missing_delta_size_keeps_previous_rvra_tier_until_keyframe(self):
+        try:
+            from coredevice_media import decoder_path
+            decoder = decoder_path()
+        except FileNotFoundError:
+            self.skipTest("CoreDevice decoder is not built")
+        def decode(repeat):
+            wire = bytearray()
+            for i, nals in enumerate(units('portrait')):
+                data = b''.join(b'\x00\x00\x00\x01' + nal for nal in nals)
+                w, h = (112, 192) if i == 0 or (repeat and i < 3) else (0, 0)
+                wire += PACKET.pack(b'IMPK', len(data), i, w, h, 144, 256) + data
+            return decoded_frames(subprocess.run([decoder], input=wire, capture_output=True,
+                                                 timeout=10, check=True).stdout)
+        repeated = decode(True)
+        self.assertEqual(decode(False), repeated)
+        reference = json.loads((FIXTURES / 'frames.sha256.json').read_text())['portrait']
+        self.assertEqual([f[3] for f in repeated[3:]], reference[3:])
+
+    def test_tier_changes_request_a_bounded_keyframe_refresh(self):
+        pipeline = MediaPipeline('iPhoneMirror.CoreDevice.' + 'a' * 32, live=True)
+        pipeline.receiver.wait_key = False
+        pipeline.last_video = 101.5
+        pipeline._note_video_frame(AccessUnit(b'', 0, True, 1216, 2656), 100)
+        pipeline._note_video_frame(AccessUnit(b'', 1, False, 1088, 1920), 101)
+        pipeline._note_video_frame(AccessUnit(b'', 2, False), 101.5)
+        self.assertEqual((pipeline.size_changes, pipeline.missing_sizes), (1, 1))
+        self.assertFalse(pipeline._should_request_keyframe(101.5))
+        self.assertFalse(pipeline._should_request_keyframe(102))
+        self.assertTrue(pipeline._should_request_keyframe(102.3))
+        pipeline._note_video_frame(AccessUnit(b'', 3, True, 1216, 2656), 102.3)
+        self.assertFalse(pipeline._should_request_keyframe(102.5))
+
+    def test_only_one_keyframe_probe_is_sent_during_an_idle_episode(self):
+        pipeline = MediaPipeline('iPhoneMirror.CoreDevice.' + 'a' * 32, live=True)
+        pipeline.receiver.wait_key = False
+        pipeline.last_video = 20
+        self.assertFalse(pipeline._should_request_keyframe(21))
+        self.assertTrue(pipeline._should_request_keyframe(22.1))
+        pipeline.last_pli = 22.1
+        self.assertFalse(pipeline._should_request_keyframe(25))
+        pipeline.last_video = 26
+        self.assertTrue(pipeline._should_request_keyframe(28.1))
+
+    def test_rvra_doubly_escaped_trailer_survives_a_fragment_boundary(self):
+        receiver = HevcReceiver()
+        receiver.wait_key = False
+        trailer = bytes.fromhex('02d00500000300000300049209e403')
+        self.assertEqual(active_size(b'\x02\x01slice' + trailer), (720, 1280))
+        self.assertEqual(active_size(b'\x02\x01slice' + trailer[:-1]), (0, 0))
+        self.assertEqual(active_size(b'\x02\x01slice' + trailer[:6] + b'\x05' + trailer[7:]), (0, 0))
+        self.assertIsNone(receiver.push(self.packet(b'\x62\x01\x81slice' + trailer[:7], marker=False)))
+        unit = receiver.push(self.packet(b'\x62\x01\x41' + trailer[7:], seq=2))
+        self.assertEqual((unit.width, unit.height, unit.trailer_length), (720, 1280, 15))
+        self.assertTrue(unit.data.endswith(trailer))
+        self.assertEqual(unit.decoder_data(), b'\0\0\0\1\x02\x01slice')
 
     def test_feedback_wrap_reports_pli_complete_and_rctl(self):
         f = Feedback(789, 123)
@@ -132,8 +253,8 @@ class MediaTests(unittest.TestCase):
         self.assertEqual(int.from_bytes(rr[16:20], 'big'), 65538)
         self.assertEqual(len(f.pli()), 12)
         self.assertEqual(f.complete(7200)[12:], struct.pack('!I', 7200))
-        self.assertEqual(len(f.rctl(104)), 32)
-        self.assertEqual(f.rctl(104)[8:12], b'RCTL')
+        self.assertEqual(f.rctl(), struct.pack('!BBHI4sIIIII', 128, 204, 7, 789, b'RCTL',
+            0x85000004, (7200 >> 8) << 16, 1, (7200 // 24) << 16, (4 << 16) | 0xea61))
 
     def test_recording_roundtrip_and_corruption(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -205,6 +326,116 @@ class MediaTests(unittest.TestCase):
 
 
 class AsyncMediaTests(unittest.IsolatedAsyncioTestCase):
+    async def test_live_receiver_recovers_out_of_order_fragments_at_sequence_wrap(self):
+        pipeline = MediaPipeline('iPhoneMirror.CoreDevice.' + 'a' * 32, live=True)
+        try:
+            pipeline.receiver.wait_key = False
+            packets = list(datagrams([b'\x02\x01' + b'x' * 1600], 65535, 800))
+            self.assertEqual(len(packets), 3)
+            for i in (0, 2, 2, 1):
+                pipeline.feed(packets[i])
+            unit = pipeline.queues[0].get_nowait()
+            self.assertEqual(unit.data, b'\0\0\0\1\x02\x01' + b'x' * 1600)
+            self.assertEqual((pipeline.receiver.gaps, pipeline.recovered_packets), (0, 1))
+            self.assertIsNone(pipeline.reorder_timer)
+        finally:
+            await pipeline.close()
+
+    async def test_live_receiver_expires_a_missing_fragment_and_requests_recovery(self):
+        pipeline = MediaPipeline('iPhoneMirror.CoreDevice.' + 'a' * 32, live=True)
+        try:
+            pipeline.receiver.wait_key = False
+            packets = list(datagrams([b'\x02\x01' + b'x' * 1600], 1, 800))
+            pipeline.feed(packets[0])
+            pipeline.feed(packets[2])
+            self.assertEqual(pipeline.receiver.gaps, 0)
+            async with asyncio.timeout(1):
+                while not pipeline.receiver.gaps:
+                    await asyncio.sleep(.005)
+            self.assertEqual(pipeline.receiver.gaps, 1)
+            self.assertTrue(pipeline.receiver.wait_key)
+            self.assertTrue(pipeline.queues[0].empty())
+            self.assertIsNone(pipeline.reorder_timer)
+        finally:
+            await pipeline.close()
+
+    async def test_partial_direct_frame_retires_the_preview_pipe(self):
+        if os.name != 'nt':
+            self.skipTest('Direct preview uses a Windows named pipe')
+        pipeline = MediaPipeline('iPhoneMirror.CoreDevice.' + 'a' * 32, live=True, direct_video=True)
+        reader = asyncio.StreamReader()
+        reader.feed_data(b'BVD' + b'B')
+        reader.feed_eof()
+        process = type('Decoder', (), {'stderr': reader})()
+        await pipeline._output(process)
+        self.assertTrue(pipeline.pipe_failed)
+        self.assertEqual((pipeline.decoded_video, pipeline.frames, pipeline.display_drops), (2, 1, 1))
+        self.assertEqual(pipeline.restart_tasks, [None, None])
+
+    async def test_direct_decoder_recovers_through_the_same_preview_pipe(self):
+        if os.name != 'nt':
+            self.skipTest('Direct preview uses a Windows named pipe')
+        try:
+            import win32file
+            import win32pipe
+            from coredevice_media import decoder_path
+            decoder_path()
+        except (ImportError, FileNotFoundError):
+            self.skipTest('Windows pipe bindings and the compatible decoder are required')
+        name = 'iPhoneMirror.CoreDevice.' + uuid.uuid4().hex
+        pipe = win32pipe.CreateNamedPipe(r'\\.\pipe' + '\\' + name, win32pipe.PIPE_ACCESS_INBOUND,
+            8, 1, 0, 1024 * 1024, 0, None)
+        pipeline = MediaPipeline(name, live=True, direct_video=True)
+        nals = next(units('portrait'))
+        payload = b''.join(b'\x00\x00\x00\x01' + nal for nal in nals)
+        received = asyncio.Queue()
+        loop = asyncio.get_running_loop()
+
+        def read_exact(size):
+            data = bytearray()
+            while len(data) < size:
+                data.extend(win32file.ReadFile(pipe, size - len(data))[1])
+            return data
+
+        def read_preview():
+            win32pipe.ConnectNamedPipe(pipe, None)
+            for _ in range(3):
+                header = FRAME.unpack(read_exact(FRAME.size))
+                if header[4]:
+                    read_exact(header[4])
+                loop.call_soon_threadsafe(received.put_nowait, header)
+
+        reader = asyncio.create_task(asyncio.to_thread(read_preview))
+        try:
+            await pipeline.start()
+            pipeline.interface_orientation = 1
+            pipeline.queues[0].put_nowait(AccessUnit(payload, 0, True, 144, 256))
+            first = await asyncio.wait_for(received.get(), 5)
+            self.assertEqual(first[:4], (b'IMCD', 5, 144, 256))
+            pipeline.processes[0].kill()
+            self.assertEqual(await asyncio.wait_for(received.get(), 5), (b'IMCD', 3, 0, 0, 0, 0))
+            async with asyncio.timeout(5):
+                while pipeline.decoder_restarts[0] != 1:
+                    await asyncio.sleep(.01)
+            pipeline.interface_orientation = 2
+            pipeline.queues[0].put_nowait(AccessUnit(payload, 800, True, 144, 256))
+            resumed = await asyncio.wait_for(received.get(), 5)
+            self.assertEqual(resumed[:4], (b'IMCD', 6, 144, 256))
+            await pipeline.finish()
+            self.assertEqual((pipeline.decoded_video, pipeline.frames, pipeline.display_drops), (2, 2, 0))
+        finally:
+            await pipeline.close()
+            win32file.CloseHandle(pipe)
+            await asyncio.gather(reader, return_exceptions=True)
+
+    async def test_live_preview_drops_only_decoded_frames_when_consumer_is_slow(self):
+        pipeline = MediaPipeline('iPhoneMirror.CoreDevice.' + 'a' * 32, live=True)
+        pipeline._queue_live_video(b'old', b'old pixels', True)
+        pipeline._queue_live_video(b'new', b'new pixels', True)
+        self.assertEqual(pipeline.live_video.get_nowait(), (b'new', b'new pixels', True))
+        self.assertEqual(pipeline.display_drops, 1)
+        self.assertEqual(pipeline.queue_drops, 0)
+
     async def test_decoder_failure_restarts_and_recovers_at_complete_keyframe(self):
         if not (ROOT / 'dist/CoreDevice/iPhoneMirror.MediaDecoder.exe').exists():
             self.skipTest('Build decoder first')

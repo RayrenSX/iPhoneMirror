@@ -127,6 +127,8 @@ internal static partial class Program
         DeviceSessionManager sessions, Dictionary<string, DeviceControlSession> controls,
         NativeCaptureStatus streaming, UpdateSettingsStore store, ProjectionSettingsWindow window, string output)
     {
+        ((RadioButton)window.FindName("ControlSettingsTab")).IsChecked = true;
+        window.UpdateLayout();
         var combo = FindVisualDescendants<ComboBox>(window).Single(box =>
             System.Windows.Automation.AutomationProperties.GetAutomationId(box) == "MirroringAutoControlComboBox");
         var option = vm.MirroringAutoControlModes.Single(item => item.Mode == ReverseControlMode.Usb);

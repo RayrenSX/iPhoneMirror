@@ -9,17 +9,20 @@ public partial class WindowStyleSettingsWindow : IPhoneMirror.UI.Controls.Rounde
     private readonly Func<double, bool> _apply;
     private readonly Func<bool, bool> _applyOpaqueOnHover;
     private readonly Func<bool, bool>? _applyPhoneFrame;
+    private readonly Func<bool, bool>? _applyClickThrough;
     private bool _ready;
     private double _appliedOpacity;
 
     internal WindowStyleSettingsWindow(double opacity, Func<double, bool> apply,
         bool opaqueOnHover, Func<bool, bool> applyOpaqueOnHover,
         bool phoneFrame = false, Func<bool, bool>? applyPhoneFrame = null,
-        string? phoneFrameDescription = null, bool phoneFrameAvailable = true)
+        string? phoneFrameDescription = null, bool phoneFrameAvailable = true,
+        Func<bool, bool>? applyClickThrough = null)
     {
         _apply = apply;
         _applyOpaqueOnHover = applyOpaqueOnHover;
         _applyPhoneFrame = applyPhoneFrame;
+        _applyClickThrough = applyClickThrough;
         InitializeComponent();
         PhoneFrameCheckBox.IsChecked = phoneFrame;
         PhoneFrameCheckBox.IsEnabled = phoneFrameAvailable;
@@ -28,6 +31,7 @@ public partial class WindowStyleSettingsWindow : IPhoneMirror.UI.Controls.Rounde
             SetPhoneFrameDescription(phoneFrameDescription);
         }
         PhoneFrameSection.Visibility = applyPhoneFrame is null ? Visibility.Collapsed : Visibility.Visible;
+        ClickThroughSection.Visibility = applyClickThrough is null ? Visibility.Collapsed : Visibility.Visible;
         LocalizationService.RefreshWhenLanguageChanges(this, () =>
         {
             FeedbackText.Text = LocalizationService.RefreshText(FeedbackText.Text);
@@ -64,6 +68,30 @@ public partial class WindowStyleSettingsWindow : IPhoneMirror.UI.Controls.Rounde
         _ready = false;
         PhoneFrameCheckBox.IsChecked = enabled;
         _ready = ready;
+    }
+
+    internal void SetClickThroughState(bool enabled, bool canEnable)
+    {
+        var ready = _ready;
+        _ready = false;
+        ClickThroughCheckBox.IsChecked = enabled;
+        ClickThroughCheckBox.IsEnabled = enabled || canEnable;
+        ClickThroughHint.Visibility = enabled || canEnable ? Visibility.Collapsed : Visibility.Visible;
+        _ready = ready;
+    }
+
+    private void OnClickThroughChanged(object sender, RoutedEventArgs e)
+    {
+        if (!_ready || _applyClickThrough is null) return;
+        var enabled = ClickThroughCheckBox.IsChecked == true;
+        if (_applyClickThrough(enabled))
+        {
+            FeedbackText.Visibility = Visibility.Collapsed;
+            return;
+        }
+        SetClickThroughState(!enabled, ClickThroughCheckBox.IsEnabled);
+        FeedbackText.Text = LocalizationService.Get("IndependentWindowClickThroughUnavailable");
+        FeedbackText.Visibility = Visibility.Visible;
     }
 
     internal void SetPhoneFrameDescription(string description)

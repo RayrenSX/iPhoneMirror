@@ -1,0 +1,73 @@
+<chrome:RoundedWindow x:Class="IPhoneMirror.App.Windows.PreviewFileTransferWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:animations="clr-namespace:IPhoneMirror.UI.Animations"
+    xmlns:chrome="clr-namespace:IPhoneMirror.UI.Controls"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    Title="{DynamicResource PreviewFilesTitle}" Width="480" SizeToContent="Height"
+    WindowStartupLocation="CenterOwner" ResizeMode="NoResize" ShowInTaskbar="False"
+    Foreground="{DynamicResource TextBrush}" WindowStyle="None" AllowsTransparency="True" Background="Transparent">
+    <Grid Style="{StaticResource SubWindowPageRoot}" animations:PageTransition.IsEnabled="True">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <Grid Style="{StaticResource SubWindowHeader}" animations:WindowDragBehavior.IsEnabled="True">
+            <TextBlock Text="{DynamicResource PreviewFilesTitle}" Style="{StaticResource SubWindowTitle}" Margin="0,0,48,0"/>
+            <Button x:Name="HeaderClose" Style="{StaticResource SubWindowCloseButton}" Click="CloseClick"
+                    ToolTip="{DynamicResource Close}" AutomationProperties.Name="{DynamicResource Close}">
+                <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Dismiss20" FontSize="18"/>
+            </Button>
+        </Grid>
+        <StackPanel Grid.Row="1" Margin="0,16,0,18">
+            <TextBlock x:Name="TargetText" FontWeight="SemiBold" TextWrapping="Wrap"/>
+            <TextBlock x:Name="SkippedText" Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" Margin="0,5,0,0"/>
+            <ItemsControl x:Name="FileNames" Margin="0,8,0,0">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <TextBlock Text="{Binding}" ToolTip="{Binding}" TextTrimming="CharacterEllipsis"
+                                   Foreground="{DynamicResource MutedTextBrush}" Margin="0,0,0,3"/>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <TextBlock x:Name="RemainingFiles" Foreground="{DynamicResource MutedTextBrush}"/>
+            <TextBlock Text="{DynamicResource PreviewFilesDestination}" Margin="0,14,0,5" FontWeight="SemiBold"/>
+            <ComboBox x:Name="Destination" IsEnabled="False" DisplayMemberPath="Name"
+                      SelectionChanged="DestinationChanged" AutomationProperties.Name="{DynamicResource PreviewFilesDestination}"/>
+            <Border x:Name="TransferPanel" Visibility="Collapsed" Margin="0,14,0,0" Padding="14,12"
+                    Background="{DynamicResource ControlFillBrush}" BorderBrush="{DynamicResource BorderSoftBrush}"
+                    BorderThickness="1" CornerRadius="10">
+                <StackPanel>
+                    <DockPanel LastChildFill="True">
+                        <TextBlock x:Name="TransferCount" DockPanel.Dock="Right" Margin="12,0,0,0"
+                                   VerticalAlignment="Center" Style="{StaticResource SecondaryText}"/>
+                        <TextBlock x:Name="TransferTitle" Style="{StaticResource StatusText}"/>
+                    </DockPanel>
+                    <ProgressBar x:Name="Progress" Height="8" Margin="0,10,0,0" Foreground="{DynamicResource AccentBrush}"
+                                 AutomationProperties.Name="{DynamicResource PreviewFilesSending}">
+                        <ProgressBar.Template>
+                            <ControlTemplate TargetType="ProgressBar">
+                                <Grid>
+                                    <Border x:Name="PART_Track" CornerRadius="4" Background="{DynamicResource WindowBackgroundBrush}"
+                                            BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="1"/>
+                                    <Border x:Name="PART_Indicator" CornerRadius="4" HorizontalAlignment="Left"
+                                            Background="{TemplateBinding Foreground}"/>
+                                </Grid>
+                            </ControlTemplate>
+                        </ProgressBar.Template>
+                    </ProgressBar>
+                    <TextBlock x:Name="CurrentFile" Style="{StaticResource SecondaryText}" Margin="0,9,0,0"
+                               TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"
+                               AutomationProperties.LiveSetting="Polite"/>
+                </StackPanel>
+            </Border>
+            <TextBlock x:Name="StatusText" Style="{StaticResource SecondaryText}" Margin="0,8,0,0" AutomationProperties.LiveSetting="Polite"/>
+        </StackPanel>
+        <WrapPanel Grid.Row="2" Style="{StaticResource DialogActions}">
+            <Button x:Name="CloseButton" Content="{DynamicResource Close}" Click="CloseClick" Margin="{StaticResource DialogActionMargin}"/>
+            <Button x:Name="SendButton" Content="{DynamicResource PreviewFilesSend}" Click="SendClick"
+                    IsEnabled="False" IsDefault="True" Style="{StaticResource PrimaryButton}" Margin="{StaticResource DialogActionMargin}"/>
+        </WrapPanel>
+    </Grid>
+</chrome:RoundedWindow>

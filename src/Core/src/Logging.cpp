@@ -25,8 +25,14 @@ std::mutex log_mutex;
 std::mutex lifecycle_mutex;
 std::ofstream log_file;
 std::filesystem::path log_path;
+std::string current_log_date;
 constexpr std::uintmax_t MaximumLogBytes = 16U * 1024U * 1024U;
 constexpr std::uintmax_t MaximumHeaderBytes = 1024;
+#ifdef IPHONEMIRROR_TEST_LOG_CLOCK
+constexpr auto IdleDateCheckInterval = std::chrono::milliseconds(200);
+#else
+constexpr auto IdleDateCheckInterval = std::chrono::minutes(1);
+#endif
 std::uintmax_t current_file_bytes{};
 std::filesystem::path rotation_failure_path;
 std::chrono::steady_clock::time_point rotation_retry_after{};
@@ -44,6 +50,9 @@ std::uint64_t byte_count{};
 std::uint64_t dropped_write_count{};
 std::string session_id;
 std::chrono::steady_clock::time_point session_started{};
+#ifdef IPHONEMIRROR_TEST_LOG_CLOCK
+std::chrono::system_clock::duration log_time_offset{};
+#endif
 std::once_flag fingerprint_salt_once;
 std::array<unsigned char, 32> fingerprint_salt{};
 bool fingerprint_salt_ready{};
@@ -128,9 +137,18 @@ std::string make_session_id() {
     return std::format("{:08X}-{:016X}", GetCurrentProcessId(), ticks);
 }
 
-std::string now_text();
+std::chrono::system_clock::time_point log_now() {
+#ifdef IPHONEMIRROR_TEST_LOG_CLOCK
+    return std::chrono::system_clock::now() + log_time_offset;
+#else
+    return std::chrono::system_clock::now();
+#endif
+}
+
+std::string timestamp_text(std::chrono::system_clock::time_point now = log_now());
 void initialize_session_locked();
-bool ensure_session_open_locked(bool implicit, std::size_t required_bytes = 0);
+bool ensure_session_open_locked(bool implicit, std::string_view timestamp,
+    std::size_t required_bytes = 0);
 
 void flush_pending_locked() {
     if (pending_lines == 0) return;
@@ -155,15 +173,14 @@ void write_line_locked(Level level, std::string_view category,
     const auto sanitized_message = sanitize_single_line(message);
     const auto line_number = sequence + 1;
     std::ostringstream line;
-    line << now_text() << " [tid="
+    const auto timestamp = timestamp_text();
+    line << timestamp << " [tid="
         << std::hash<std::thread::id>{}(std::this_thread::get_id())
         << "] [seq=" << line_number << "] [level=" << level_text(level)
         << "] [category=" << sanitized_category << "] [session="
         << session_id << "] " << sanitized_message << '\n';
     const auto text = line.str();
-    // The stream normally stays open for the entire capture session. Checking
-    // only when opening it lets a continuously running session grow forever.
-    if (!ensure_session_open_locked(true, text.size())) {
+    if (!ensure_session_open_locked(true, timestamp, text.size())) {
         ++dropped_write_count;
         return;
     }
@@ -194,10 +211,25 @@ void ensure_flush_thread_locked() {
         // Keep the GUI log tail genuinely live even if the last error is the
         // final line written. Flushing on this background worker avoids disk
         // I/O in the USB/decode/render hot paths.
+        auto next_date_check = std::chrono::steady_clock::now() + IdleDateCheckInterval;
         while (!token.stop_requested()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
             std::scoped_lock lock(log_mutex);
             flush_pending_locked();
+            const auto now = std::chrono::steady_clock::now();
+            if (now >= next_date_check) {
+                next_date_check = now + IdleDateCheckInterval;
+                try {
+                    if (log_file.is_open() && timestamp_text().compare(0, 10, current_log_date) != 0) {
+                        // Release yesterday's file so an idle session cannot
+                        // keep an expired active log locked indefinitely.
+                        log_file.close();
+                        log_file.clear();
+                    }
+                } catch (...) {
+                    // The flush worker must survive diagnostic failures.
+                }
+            }
         }
         std::scoped_lock lock(log_mutex);
         flush_pending_locked();
@@ -223,55 +255,92 @@ std::filesystem::path configured_path() {
     return std::filesystem::path(buffer);
 }
 
+bool publish_archive(const std::filesystem::path& source, const std::filesystem::path& path) {
+    auto previous = path;
+    previous += L".1";
+    auto alternate = path;
+    alternate += L".2";
+    if (MoveFileExW(source.c_str(), previous.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+        std::error_code error;
+        std::filesystem::remove(alternate, error);
+        return true;
+    }
+    // A viewer may have the previous archive open without delete sharing.
+    // Keep logging in that case, with space for only one extra bounded archive.
+    return MoveFileExW(source.c_str(), alternate.c_str(), MOVEFILE_REPLACE_EXISTING) != FALSE;
+}
+
+bool archive_oversized_log(const std::filesystem::path& path, std::uintmax_t bytes,
+    std::filesystem::file_time_type modified) {
+    // Obtain delete access before copying. If another process has the legacy
+    // file open without delete sharing, leave it and all archives untouched.
+    struct FileHandle {
+        HANDLE value;
+        ~FileHandle() { if (value != INVALID_HANDLE_VALUE) CloseHandle(value); }
+    };
+    const FileHandle input{CreateFileW(path.c_str(), GENERIC_READ | DELETE, FILE_SHARE_READ,
+        nullptr, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, nullptr)};
+    if (input.value == INVALID_HANDLE_VALUE) return false;
+
+    auto pending = path;
+    pending += L".rotation";
+    struct TemporaryArchive {
+        const std::filesystem::path& path;
+        ~TemporaryArchive() {
+            std::error_code error;
+            std::filesystem::remove(path, error);
+        }
+    };
+    const TemporaryArchive cleanup{pending};
+    {
+        std::ofstream archive(pending, std::ios::binary | std::ios::trunc);
+        if (!archive.is_open()) return false;
+        LARGE_INTEGER offset{};
+        offset.QuadPart = static_cast<LONGLONG>(bytes - MaximumLogBytes);
+        if (!SetFilePointerEx(input.value, offset, nullptr, FILE_BEGIN)) return false;
+        std::array<char, 64 * 1024> buffer;
+        auto remaining = MaximumLogBytes;
+        while (remaining != 0) {
+            const auto count = static_cast<DWORD>(
+                std::min<std::uintmax_t>(remaining, buffer.size()));
+            DWORD read{};
+            if (!ReadFile(input.value, buffer.data(), count, &read, nullptr) || read != count)
+                return false;
+            archive.write(buffer.data(), count);
+            if (!archive.good()) return false;
+            remaining -= count;
+        }
+        archive.close();
+        if (!archive.good()) return false;
+    }
+    std::error_code error;
+    std::filesystem::last_write_time(pending, modified, error);
+    if (!publish_archive(pending, path)) return false;
+    FILE_DISPOSITION_INFO disposition{TRUE};
+    return SetFileInformationByHandle(input.value, FileDispositionInfo, &disposition,
+        sizeof(disposition)) != FALSE;
+}
+
 bool rotate_if_needed(const std::filesystem::path& path,
-    std::uintmax_t required_bytes) {
+    std::string_view date, std::uintmax_t required_bytes, bool day_changed) {
     std::error_code error;
     const auto exists = std::filesystem::exists(path, error);
     if (error) return false;
     if (!exists) return true;
     const auto bytes = std::filesystem::file_size(path, error);
     if (error) return false;
-    if (bytes <= MaximumLogBytes &&
-        required_bytes <= MaximumLogBytes - bytes) return true;
-    auto previous = path;
-    previous += L".1";
-    std::filesystem::remove(previous, error);
+    if (bytes == 0) return true;
+    const auto modified = std::filesystem::last_write_time(path, error);
     if (error) return false;
-    if (bytes > MaximumLogBytes) {
-        // Older versions could produce gigabytes in one continuous session.
-        // Keep the most recent bounded tail instead of merely renaming that
-        // oversized file into an equally oversized archive.
-        std::ifstream input(path, std::ios::binary);
-        std::ofstream archive(previous, std::ios::binary | std::ios::trunc);
-        if (!input.is_open() || !archive.is_open()) return false;
-        input.seekg(static_cast<std::streamoff>(bytes - MaximumLogBytes));
-        std::array<char, 64 * 1024> buffer;
-        auto remaining = MaximumLogBytes;
-        while (remaining != 0) {
-            const auto count = static_cast<std::streamsize>(
-                std::min<std::uintmax_t>(remaining, buffer.size()));
-            input.read(buffer.data(), count);
-            if (input.gcount() != count) return false;
-            archive.write(buffer.data(), count);
-            if (!archive.good()) return false;
-            remaining -= static_cast<std::uintmax_t>(count);
-        }
-        archive.flush();
-        if (!archive.good()) return false;
-        archive.close();
-        if (!archive.good()) return false;
-        input.close();
-        std::filesystem::remove(path, error);
-        return !error;
-    }
-    std::filesystem::rename(path, previous, error);
-    // A locked archive must not turn a bounded log into an unbounded append.
-    // Keep the stream closed and retry on the next write instead.
-    return !error;
+    if (!day_changed && bytes <= MaximumLogBytes && required_bytes <= MaximumLogBytes - bytes &&
+        timestamp_text(std::chrono::clock_cast<std::chrono::system_clock>(modified))
+            .compare(0, 10, date) == 0)
+        return true;
+    return bytes > MaximumLogBytes ? archive_oversized_log(path, bytes, modified) :
+        publish_archive(path, path);
 }
 
-std::string now_text() {
-    const auto now = std::chrono::system_clock::now();
+std::string timestamp_text(std::chrono::system_clock::time_point now) {
     const auto time = std::chrono::system_clock::to_time_t(now);
     std::tm local{};
     localtime_s(&local, &time);
@@ -299,9 +368,11 @@ void initialize_session_locked() {
     }
 }
 
-bool ensure_session_open_locked(bool implicit, std::size_t required_bytes) {
+bool ensure_session_open_locked(bool implicit, std::string_view timestamp,
+    std::size_t required_bytes) {
     initialize_session_locked();
-    if (log_file.is_open() && log_file.good() &&
+    const auto date = timestamp.substr(0, 10);
+    if (log_file.is_open() && log_file.good() && current_log_date == date &&
         current_file_bytes <= MaximumLogBytes &&
         required_bytes <= MaximumLogBytes - current_file_bytes) return true;
     if (log_file.is_open()) {
@@ -313,13 +384,19 @@ bool ensure_session_open_locked(bool implicit, std::size_t required_bytes) {
 
     const auto custom_log_path =
         GetEnvironmentVariableW(L"IPHONE_MIRROR_LOG_FILE", nullptr, 0) != 0;
-    log_path = configured_path();
+    const auto path = configured_path();
+    // Flushing yesterday's buffered lines after midnight can give yesterday's
+    // file today's write time. Keep the date of the open stream across retries.
+    const auto day_changed = path == log_path && !current_log_date.empty() &&
+        current_log_date != date;
+    if (path != log_path) current_log_date.clear();
+    log_path = path;
     if (rotation_failure_path == log_path &&
         std::chrono::steady_clock::now() < rotation_retry_after)
         return false;
     if (!log_path.parent_path().empty())
         std::filesystem::create_directories(log_path.parent_path());
-    if (!rotate_if_needed(log_path, required_bytes + MaximumHeaderBytes)) {
+    if (!rotate_if_needed(log_path, date, required_bytes + MaximumHeaderBytes, day_changed)) {
         // A held archive or legacy source must not turn high-rate diagnostics
         // into a filesystem retry loop (or repeated 16 MiB tail copies).
         rotation_failure_path = log_path;
@@ -339,7 +416,7 @@ bool ensure_session_open_locked(bool implicit, std::size_t required_bytes) {
     const auto dropped_before_open = dropped_write_count;
     if (!session_header_written) {
         log_file << "\n=== iPhoneMirror capture session ===\n";
-        log_file << now_text() << " [startup] session=" << session_id
+        log_file << timestamp << " [startup] session=" << session_id
             << " pid=" << GetCurrentProcessId() << " arch="
 #if defined(_WIN64)
             << "x64"
@@ -351,7 +428,7 @@ bool ensure_session_open_locked(bool implicit, std::size_t required_bytes) {
         if (dropped_before_open != 0)
             log_file << " dropped_before_start=" << dropped_before_open;
     } else {
-        log_file << now_text() << " [log_recovery] session=" << session_id
+        log_file << timestamp << " [log_recovery] session=" << session_id
             << " log_target=" << (custom_log_path ? "custom" : "default")
             << " dropped_before_recovery=" << dropped_before_open;
     }
@@ -367,6 +444,7 @@ bool ensure_session_open_locked(bool implicit, std::size_t required_bytes) {
     }
 
     session_header_written = true;
+    current_log_date = date;
     current_file_bytes = std::filesystem::file_size(log_path);
     dropped_write_count = 0;
     last_flush = std::chrono::steady_clock::now();
@@ -375,6 +453,13 @@ bool ensure_session_open_locked(bool implicit, std::size_t required_bytes) {
 }
 
 } // namespace
+
+#ifdef IPHONEMIRROR_TEST_LOG_CLOCK
+void set_log_time_offset_for_testing(std::chrono::system_clock::duration offset) {
+    std::scoped_lock lock(log_mutex);
+    log_time_offset = offset;
+}
+#endif
 
 std::string fingerprint(std::string_view value) noexcept {
     try {
@@ -420,7 +505,7 @@ void initialize() {
     writes_suspended = false;
     rotation_retry_after = {};
     try {
-        (void)ensure_session_open_locked(false);
+        (void)ensure_session_open_locked(false, timestamp_text());
     } catch (...) {
         initialized = true;
     }
@@ -475,6 +560,26 @@ void shutdown() {
         // The next explicit initialize call re-enables writes.
         writes_suspended = true;
         if (!initialized) return;
+        if (session_header_written) {
+            try {
+                const auto timestamp = timestamp_text();
+                const auto elapsed = std::chrono::duration<double>(
+                    std::chrono::steady_clock::now() - session_started).count();
+                std::ostringstream summary;
+                summary << timestamp << " [shutdown] session=" << session_id
+                    << " lines=" << line_count << " warnings=" << warning_count
+                    << " errors=" << error_count << " bytes=" << byte_count
+                    << " elapsed_seconds=" << std::fixed << std::setprecision(3)
+                    << elapsed << " dropped_after_start=" << dropped_write_count << '\n';
+                const auto text = summary.str();
+                if (ensure_session_open_locked(false, timestamp, text.size())) {
+                    log_file << text;
+                    current_file_bytes += text.size();
+                }
+            } catch (...) {
+                // Diagnostics must not interrupt core shutdown.
+            }
+        }
         worker = std::move(flush_thread);
     }
     if (worker.joinable()) {
@@ -484,24 +589,7 @@ void shutdown() {
     {
         std::scoped_lock lock(log_mutex);
         if (log_file.is_open()) {
-            const auto elapsed = session_started.time_since_epoch().count() == 0
-                ? 0.0
-                : std::chrono::duration<double>(
-                    std::chrono::steady_clock::now() - session_started).count();
-            // A previous write or flush failure leaves failbit set. Clear it
-            // for one final best-effort summary, then close the actual handle
-            // regardless of whether that summary succeeds.
             log_file.clear();
-            std::ostringstream summary;
-            summary << now_text() << " [shutdown] session=" << session_id
-                << " lines=" << line_count << " warnings=" << warning_count
-                << " errors=" << error_count << " bytes=" << byte_count
-                << " elapsed_seconds=" << std::fixed << std::setprecision(3)
-                << elapsed << " dropped_after_start=" << dropped_write_count << '\n';
-            const auto text = summary.str();
-            if (current_file_bytes <= MaximumLogBytes &&
-                text.size() <= MaximumLogBytes - current_file_bytes)
-                log_file << text;
             log_file.flush();
             log_file.close();
         }
@@ -510,6 +598,7 @@ void shutdown() {
         session_header_written = false;
         pending_lines = 0;
         current_file_bytes = 0;
+        current_log_date.clear();
         session_id.clear();
         session_started = {};
     }

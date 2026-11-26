@@ -14,6 +14,7 @@
 #include "Transport/LibUsb0Readiness.h"
 #include "Transport/QtUsbTransport.h"
 #include "Capture/CaptureSession.h"
+#include "Capture/PreviewAudioSync.h"
 #include "Capture/UsbDisplaySize.h"
 #include "Capture/UsbOrientationMonitor.h"
 #include "Capture/WirelessCaptureSession.h"
@@ -470,32 +471,32 @@ void test_system_orientation_timeline() {
         "ordinary B retains video-stall recovery even when its audio remains live");
 }
 
-void test_display_fallback_with_busy_audio() {
+void test_native_display_reconfigure_with_busy_audio() {
     using namespace iPhoneMirror;
     using namespace std::chrono_literals;
     capture::detail::DisplayReconfigureGate gate;
     quicktime::SessionProtocol protocol(quicktime::SessionOptions{.native_airplay = true});
-    protocol.set_native_airplay(false);
     const auto release = protocol.begin_display_reconfigure(2360, 2360);
-    check(release.size() == 1, "native fallback begins by releasing the old display");
+    check(release.size() == 1, "native reconfiguration begins by releasing the old display");
     const auto begin = capture::detail::DisplayReconfigureGate::Clock::now();
     gate.begin(begin);
     unsigned reattachments{};
     // Audio arrives every 20ms: no idle USB read and no RELS are needed for
-    // the ordinary HPD1 to be issued within its display-release deadline.
+    // the native HPD1 to be issued within its display-release deadline.
     for (unsigned packet = 0; packet < 150; ++packet) {
         const auto now = begin + 20ms * packet;
         if (gate.ready(now)) {
             const auto attach = protocol.complete_display_reconfigure();
-            check(!attach.empty() && !contains_ascii(attach.front(), "Stevenote") &&
+            check(!attach.empty() && contains_ascii(attach.front(), "Stevenote") &&
+                contains_ascii(attach.front(), "H264DecoderSupports444") &&
                 contains_ascii(attach.front(), "DisplaySize"),
-                "busy-audio fallback reattaches the ordinary B display");
+                "busy-audio reconfiguration retains the native B display and decoder capabilities");
             check(now == begin + 1200ms, "continuous transport traffic cannot postpone the release deadline");
             gate.finish();
             ++reattachments;
         }
     }
-    check(reattachments == 1 && !gate.pending(), "fallback reattaches once and accepts subsequent video");
+    check(reattachments == 1 && !gate.pending(), "native display reattaches once and accepts subsequent video");
     gate.begin(begin + 5s);
     gate.observe_release();
     check(gate.ready(begin + 5s), "a real RELS acknowledgment completes fallback without waiting for timeout");
@@ -550,6 +551,22 @@ void test_queued_frame_orientation_metadata() {
     check(apply_video_input_metadata(pre_oriented, VideoInputMetadata{251, received_at, 0U, false},
               false, received_at) == FrameOrientationResult::Applied && !pre_oriented.device_orientation_turns,
         "ordinary USB with pre-oriented landscape pixels cannot report a physical side from rotation zero");
+    for (unsigned direction : {3U, 4U}) {
+        const auto turns = springboard_rotation_turns(direction);
+        const auto pts = 260 + direction;
+        inputs.push({pts, received_at, std::nullopt, false, turns});
+        auto compatibility = make_frame(pts);
+        const auto original_pixels = compatibility.nv12;
+        check(apply_video_input_metadata(compatibility, inputs.take(pts), false, received_at + 2s) ==
+                FrameOrientationResult::Applied && compatibility.device_orientation_turns == turns &&
+            compatibility.width == 4 && compatibility.height == 2 && compatibility.nv12 == original_pixels &&
+            compatibility.received_at == received_at,
+            "USB compatibility uses the sampled left/right direction for artwork without rotating video");
+    }
+    auto mismatched = make_frame(270);
+    check(apply_video_input_metadata(mismatched, VideoInputMetadata{270, received_at, std::nullopt, false, 0U},
+              false, received_at) == FrameOrientationResult::Applied && !mismatched.device_orientation_turns,
+        "a portrait system sample cannot place the sensor on an already-oriented landscape frame");
     auto unmatched = make_frame(999);
     const auto original_pixels = unmatched.nv12;
     check(apply_video_input_metadata(unmatched, inputs.take(999), true, received_at) ==
@@ -844,7 +861,8 @@ void test_session_protocol() {
         "CWPA produces HPD1, clock reply and HPA1");
     check(decode_framed(event.outbound[0]).subtype == fourcc('h', 'p', 'd', '1'), "CWPA sends HPD1");
     check(decode_framed(event.outbound[1]).kind == PacketKind::Reply, "CWPA sends clock RPLY");
-    check(decode_framed(event.outbound[2]).subtype == fourcc('h', 'p', 'a', '1'), "CWPA sends HPA1");
+    const auto startup_audio = decode_framed(event.outbound[2]);
+    check(startup_audio.subtype == fourcc('h', 'p', 'a', '1'), "CWPA sends HPA1");
 
     const auto afmt = decode_framed(read_fixture("fixtures/quicktime_video_hack/afmt-request"));
     event = session.process(afmt);
@@ -887,6 +905,62 @@ void test_session_protocol() {
         decode_framed(stop_complete.front()).subtype == fourcc('h', 'p', 'd', '0') &&
         session.state() == SessionState::Stopped,
         "session emits the final HPD0 after release notifications");
+
+    SessionProtocol phone_audio(SessionOptions{});
+    check(phone_audio.set_audio_route(false).empty(), "a route change waits for the audio clock");
+    event = phone_audio.process(cwpa);
+    check(event.outbound.size() == 2 &&
+        decode_framed(event.outbound[0]).subtype == fourcc('h', 'p', 'd', '1'),
+        "phone-only audio starts video without requesting HPA1");
+    const auto to_pc = decode_framed(phone_audio.set_audio_route(true));
+    check(to_pc.subtype == fourcc('h', 'p', 'a', '1') && to_pc.clock_ref == startup_audio.clock_ref,
+        "a running session can request PC audio on the device clock");
+    check(phone_audio.set_audio_route(true).empty(), "unchanged routes do not write to the phone");
+    const auto to_device = decode_framed(phone_audio.set_audio_route(false));
+    check(to_device.subtype == fourcc('h', 'p', 'a', '0') && to_device.clock_ref == startup_audio.clock_ref,
+        "a running session can hand audio back to the device");
+    auto audio_stop = cwpa;
+    audio_stop.subtype = fourcc('s', 't', 'o', 'p');
+    audio_stop.clock_ref = startup_audio.clock_ref;
+    event = phone_audio.process(audio_stop);
+    check(event.outbound.size() == 1 && event.state == SessionState::Negotiating,
+        "an audio clock STOP acknowledges the route release while keeping video alive");
+    event = phone_audio.process(audio_stop);
+    check(event.outbound.size() == 1 && event.state == SessionState::Stopped,
+        "an independent STOP still ends the session");
+    check(phone_audio.stop_messages().size() == 2,
+        "a phone-only route preserves the original USB shutdown controls");
+}
+
+void test_preview_audio_sync() {
+    using namespace std::chrono_literals;
+    using iPhoneMirror::capture::PreviewAudioSync;
+    using iPhoneMirror::media::DecodedFrame;
+    PreviewAudioSync preview;
+    const auto now = std::chrono::steady_clock::now();
+    const auto make_frame = [&](std::chrono::milliseconds age, std::uint32_t width = 1080) {
+        auto frame = std::make_shared<DecodedFrame>();
+        frame->received_at = now - age;
+        frame->width = width;
+        frame->height = 1920;
+        return frame;
+    };
+    const auto first = make_frame(60ms);
+    const auto second = make_frame(30ms);
+    const auto newest = make_frame(0ms);
+    preview.publish(first, true);
+    preview.publish(second, true);
+    preview.publish(newest, true);
+    check(preview.select(newest, 25, now) == second, "preview uses the newest frame due for audio");
+    check(preview.select(newest, 0, now) == newest, "muted audio uses the newest frame");
+    check(preview.select(newest, 25, now + 30ms) == newest, "an idle screen catches up to the newest frame");
+    const auto rotated = make_frame(0ms, 1920);
+    preview.publish(rotated, true);
+    check(preview.select(rotated, 100, now) == rotated, "resolution changes clear old preview frames");
+    preview.clear();
+    for (int i = 12; i >= 0; --i) preview.publish(make_frame(i * 1ms), true);
+    check(preview.select(newest, 100, now)->received_at == now - 7ms,
+        "preview history is bounded to protect the decoder texture pool");
 }
 
 void test_usb_projection_modes() {
@@ -979,6 +1053,18 @@ void test_usb_projection_modes() {
 
     const auto native_airplay = make_usb_display_configuration(
         UsbProjectionMode::AirPlay, 1640, 2360, 0, 0, true);
+    for (const auto panel : {detail::VideoDimensions{1206, 2622}, detail::VideoDimensions{1080, 2340}}) {
+        const auto phone_native = make_usb_display_configuration(
+            UsbProjectionMode::AirPlay, panel.width, panel.height, 0, 0, true, false);
+        const auto hpd1 = initial_hpd1(phone_native.session_options);
+        check(phone_native.session_options.native_airplay && !phone_native.session_options.demo_mode &&
+            phone_native.session_options.requested_width == 4096 &&
+            phone_native.session_options.requested_height == 4096 &&
+            contains_ascii(hpd1, "Stevenote") && contains_ascii(hpd1, "H264DecoderSupports444"),
+            "native iPhone B uses presentation and decoder capabilities without the demo status bar");
+        check(!phone_native.adaptive_reconfiguration,
+            "native iPhone B never lowers its request to match a reduced first frame");
+    }
     check(native_airplay.session_options.native_airplay && !native_airplay.session_options.demo_mode,
         "native iPad presentation keeps Valeria disabled");
     check(!native_airplay.adaptive_reconfiguration,
@@ -988,15 +1074,15 @@ void test_usb_projection_modes() {
     const auto native_hpd1 = initial_hpd1(native_airplay.session_options);
     check(contains_ascii(native_hpd1, "Stevenote") && contains_ascii(native_hpd1, "H264DecoderSupports444") &&
         contains_ascii(native_hpd1, "DisplaySize"), "native iPad HPD1 carries the matched display and decoder capabilities");
-    iPhoneMirror::quicktime::SessionProtocol fallback_protocol(native_airplay.session_options);
-    fallback_protocol.set_native_airplay(false);
-    check(fallback_protocol.begin_display_reconfigure(2360, 2360).size() == 1,
-        "losing system direction releases the native display before renegotiating ordinary B");
-    const auto fallback_hpd1 = fallback_protocol.complete_display_reconfigure();
-    check(!fallback_hpd1.empty() && !contains_ascii(fallback_hpd1.front(), "Stevenote") &&
-        !contains_ascii(fallback_hpd1.front(), "H264DecoderSupports444") &&
-        contains_ascii(fallback_hpd1.front(), "DisplaySize"),
-        "ordinary fallback explicitly removes both native display and 444 decoder flags");
+    iPhoneMirror::quicktime::SessionProtocol native_protocol(native_airplay.session_options);
+    native_protocol.reset();
+    check(native_protocol.begin_display_reconfigure(4096, 4096).size() == 1,
+        "native reconnect releases the old display before requesting a new one");
+    const auto reconnect_hpd1 = native_protocol.complete_display_reconfigure();
+    check(!reconnect_hpd1.empty() && contains_ascii(reconnect_hpd1.front(), "Stevenote") &&
+        contains_ascii(reconnect_hpd1.front(), "H264DecoderSupports444") &&
+        contains_ascii(reconnect_hpd1.front(), "DisplaySize"),
+        "native reconnect preserves both presentation and 444 decoder capabilities");
     check(!contains_ascii(initial_hpd1(airplay.session_options), "Stevenote"),
         "missing software runtime retains the compatible non-Stevenote request");
     const auto custom_native = make_usb_display_configuration(
@@ -1008,18 +1094,8 @@ void test_usb_projection_modes() {
     check(tablet.session_options.requested_width == 2360 && tablet.session_options.requested_height == 2360 &&
         !tablet.session_options.native_airplay && !tablet.session_options.demo_mode && !tablet.adaptive_reconfiguration,
         "normal iPad B sessions keep rotation available and never enable Stevenote as a hidden fallback");
-    check(!make_usb_display_configuration(UsbProjectionMode::Demo, 1640, 2360, 0, 0, true).session_options.native_airplay &&
-        !make_usb_display_configuration(UsbProjectionMode::Aisi, 1640, 2360, 0, 0, true).session_options.native_airplay,
-        "native decoder availability does not change A/C protocol modes");
-
-    const auto aisi = make_usb_display_configuration(
-        UsbProjectionMode::Aisi, 1206, 2622, 1920, 1080);
-    check(!aisi.session_options.demo_mode, "Aisi mode disables Valeria");
-    check(aisi.session_options.requested_width == 1565 &&
-        aisi.session_options.requested_height == 1565,
-        "Aisi mode uses its fixed square display target");
-    check(!aisi.adaptive_reconfiguration,
-        "Aisi mode keeps the fixed target during orientation changes");
+    check(!make_usb_display_configuration(UsbProjectionMode::Demo, 1640, 2360, 0, 0, true).session_options.native_airplay,
+        "native decoder availability does not change the compatible protocol");
 }
 
 void test_usb_diagnostic_display_override() {
@@ -1040,7 +1116,7 @@ void test_usb_diagnostic_display_override() {
             "USB diagnostic display rejects either invalid member without partial application");
     }
 
-    for (const auto mode : {UsbProjectionMode::Demo, UsbProjectionMode::AirPlay, UsbProjectionMode::Aisi}) {
+    for (const auto mode : {UsbProjectionMode::Demo, UsbProjectionMode::AirPlay}) {
         for (const bool native : {false, true}) {
             const auto original = make_usb_display_configuration(mode, 1640, 2360, 0, 0, native, true);
             const auto overridden = make_usb_display_configuration(mode, 1640, 2360, 0, 0,
@@ -1189,6 +1265,26 @@ void test_device_metadata_recovery() {
     cached.mux_port = 27015;
     cached.name = L"Saved iPhone";
     cached.product_type = L"iPhone13,1";
+    DeviceRecord mux_ready;
+    mux_ready.udid = L"00008101-0000000000000001";
+    mux_ready.state = ConnectionState::Ready;
+    mux_ready.lockdown_accessible = true;
+    std::vector<DeviceRecord> inventory{mux_ready};
+    const std::vector<PhysicalAppleDevice> windows{
+        {L"Already listed", LR"(USB\VID_05AC&PID_12A8\000081010000000000000001)"},
+        {L"Other iPhone", LR"(USB\VID_05AC&PID_12A8\00008101-0000000000000002)"},
+        {L"Unrecognized location", LR"(USB\VID_05AC&PID_12A8\6&9FDA5C&0&4)"},
+        {L"Excluded Apple accessory", LR"(USB\VID_05AC&PID_110A\000081010000000000000003)"},
+    };
+    check(detail::canonical_device_udid("00008101-ABCDEF0000000002") ==
+        detail::canonical_device_udid("00008101abcdef0000000002"),
+        "Windows and usbmux representations share a stable UDID");
+    detail::append_windows_usb_devices(inventory, windows, {{"00008101-0000000000000002", cached}});
+    check(inventory.size() == 2 && inventory.front().lockdown_accessible &&
+        inventory.back().state == ConnectionState::UsbPresentNoMux &&
+        inventory.back().name == cached.name && !inventory.back().lockdown_accessible &&
+        inventory.back().usb_connected && inventory.back().mux_port == 0,
+        "Windows-only devices supplement usbmux without stale readiness or duplicates");
     cached.device_color = L"1";
     cached.enclosure_color = L"9";
     cached.housing_color = L"9";
@@ -1848,6 +1944,17 @@ void test_external_media_source() {
     check(first.snapshot().video_frames == 1, "rejected CoreDevice frames do not advance counters");
     check(first.publish_external(1, 8, 4, pixels) && first.snapshot().width == 8,
         "CoreDevice rotation follows a complete decoded frame");
+    pixels[0] = 77;
+    check(first.publish_external(8, 4, 8, pixels) &&
+        first.snapshot().width == 8 && first.snapshot().height == 4 &&
+        first.latest_frame()->device_orientation_turns == 1U &&
+        first.latest_frame()->nv12[7] == 77,
+        "CoreDevice rotates a raw portrait panel clockwise and preserves its physical direction");
+    check(first.publish_external(8, 8, 4, pixels) && first.latest_frame()->nv12[0] == 77,
+        "CoreDevice does not rotate pixels already encoded in landscape");
+    std::this_thread::sleep_for(std::chrono::milliseconds(520));
+    check(first.publish_external(8, 4, 8, pixels) && first.snapshot().fps > 0,
+        "Continuous CoreDevice frames must not reset the FPS sample");
     std::vector<std::uint8_t> odd_pixels(3 * 5 + 2 * 2 * 3, 128);
     check(first.publish_external(1, 3, 5, odd_pixels) && first.snapshot().width == 3 && first.latest_frame(),
         "CoreDevice preserves odd native panel dimensions with ceil-sized chroma planes");
@@ -1967,6 +2074,20 @@ void test_capture_media_safety_helpers() {
             std::all_of(canonical_output.begin() + 16, canonical_output.end(),
                 [](std::uint8_t value) { return value == 128; }),
         "full-range SDR NV12 export preserves gray 243 and neutral chroma");
+    auto padded_nv12 = full_range_gray;
+    padded_nv12.stride = 8;
+    constexpr std::size_t padded_height = 6;
+    padded_nv12.nv12.assign(8 * (padded_height + padded_height / 2), 0xCC);
+    for (std::size_t row = 0; row < 4; ++row)
+        std::copy_n(full_range_gray.nv12.data() + row * 4, 4,
+            padded_nv12.nv12.data() + row * 8);
+    for (std::size_t row = 0; row < 2; ++row)
+        std::copy_n(full_range_gray.nv12.data() + 16 + row * 4, 4,
+            padded_nv12.nv12.data() + (padded_height + row) * 8);
+    std::vector<std::uint8_t> padded_export(24, 0xA5);
+    check(iPhoneMirror::media::detail::copy_nv12_frame_letterboxed_sdr(
+            padded_nv12, padded_export, 4, 4) && padded_export == canonical_output,
+        "full-size NV12 export skips stride and allocation-height padding");
     std::vector<std::uint8_t> scaled_canonical_output(8U * 8U * 3U / 2U);
     check(iPhoneMirror::media::detail::copy_nv12_frame_letterboxed_sdr(
             full_range_gray, scaled_canonical_output, 8, 8) &&
@@ -2266,6 +2387,11 @@ void test_capture_media_safety_helpers() {
             media_started + StreamingSilenceWatchdog::SilenceLimit) ==
                 std::chrono::milliseconds(10'000),
         "streaming silence watchdog expires at ten seconds");
+    const auto phone_audio_limit = StreamingSilenceWatchdog::PhoneAudioSilenceLimit;
+    check(!silence_watchdog.expired(media_started + phone_audio_limit -
+              std::chrono::milliseconds(1), phone_audio_limit) &&
+          silence_watchdog.expired(media_started + phone_audio_limit, phone_audio_limit),
+        "phone-only audio allows longer idle screens but eventually detects a silent session");
     silence_watchdog.observe_media(media_started + std::chrono::seconds(9));
     check(!silence_watchdog.expired(media_started + std::chrono::seconds(18)) &&
         silence_watchdog.expired(media_started + std::chrono::seconds(19)),
@@ -2456,6 +2582,39 @@ void test_wireless_i420_conversion() {
     check(nv12 == std::vector<std::uint8_t>{
         1, 2, 3, 0, 4, 5, 6, 0, 10, 20, 11, 21,
     }, "wireless NV12 planes and chroma order are correct");
+    for (const bool padded : {false, true}) {
+        auto wide = header;
+        wide.width = padded ? 65 : 66;
+        wide.height = 5;
+        constexpr std::uint32_t chroma_width = 33;
+        constexpr std::uint32_t chroma_height = 3;
+        wide.stride[0] = padded ? 72 : wide.width;
+        wide.stride[1] = padded ? 39 : chroma_width;
+        wide.stride[2] = padded ? 43 : chroma_width;
+        wide.plane_size[0] = wide.stride[0] * wide.height;
+        wide.plane_size[1] = wide.stride[1] * chroma_height;
+        wide.plane_size[2] = wide.stride[2] * chroma_height;
+        std::vector<std::uint8_t> input(wide.plane_size[0] + wide.plane_size[1] + wide.plane_size[2]);
+        for (std::size_t index = 0; index < input.size(); ++index)
+            input[index] = static_cast<std::uint8_t>(index * 29U);
+
+        constexpr std::size_t expected_stride = 66;
+        std::vector<std::uint8_t> expected(expected_stride * (wide.height + chroma_height), 0);
+        for (std::size_t row = 0; row < wide.height; ++row)
+            std::copy_n(input.data() + row * wide.stride[0], wide.width,
+                expected.data() + row * expected_stride);
+        for (std::size_t row = 0; row < chroma_height; ++row) {
+            for (std::size_t col = 0; col < chroma_width; ++col) {
+                const auto output = (wide.height + row) * expected_stride + 2 * col;
+                expected[output] = input[wide.plane_size[0] + row * wide.stride[1] + col];
+                expected[output + 1] = input[wide.plane_size[0] + wide.plane_size[1] + row * wide.stride[2] + col];
+            }
+        }
+        check(iPhoneMirror::capture::detail::convert_i420_to_nv12(wide, input, nv12, stride) &&
+            stride == static_cast<std::int32_t>(expected_stride) && nv12 == expected,
+            padded ? "I420 interleave preserves padded planes and odd dimensions" :
+                "I420 interleave preserves tightly packed planes and its scalar tail");
+    }
     iPhoneMirror::capture::WirelessClientStream stream(L"test", L"test");
     stream.set_identity(L"test", true);
     stream.publish_video(header, i420);
@@ -3247,12 +3406,13 @@ int main(int argc, char** argv) {
         test_h264();
         test_decoded_frame_rotation();
         test_system_orientation_timeline();
-        test_display_fallback_with_busy_audio();
+    test_native_display_reconfigure_with_busy_audio();
         test_queued_frame_orientation_metadata();
         test_bundled_h264_444_decoder();
         test_coremedia();
         test_upstream_capture_fixtures();
         test_session_protocol();
+        test_preview_audio_sync();
         test_usb_projection_modes();
         test_usb_diagnostic_display_override();
         test_apple_usb_serial_matching();

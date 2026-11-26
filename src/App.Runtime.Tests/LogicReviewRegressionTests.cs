@@ -24,10 +24,11 @@ internal static partial class Program
         Console.WriteLine("Logic review regressions passed: audio lifetime, paste frame limits, physical-device teardown and restart ordering.");
     }
 
-    private static void WaitReviewTask(Task task)
+    private static void WaitReviewTask(Task task, TimeSpan? maximumWait = null)
     {
         var timeout = Stopwatch.StartNew();
-        while (!task.IsCompleted && timeout.Elapsed < TimeSpan.FromSeconds(10))
+        var limit = maximumWait ?? TimeSpan.FromSeconds(10);
+        while (!task.IsCompleted && timeout.Elapsed < limit)
             AdvanceDispatcher(TimeSpan.FromMilliseconds(10));
         InteractionAssert(task.IsCompleted, "Logic review regression timed out.");
         task.GetAwaiter().GetResult();

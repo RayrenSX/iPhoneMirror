@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <emmintrin.h>
 #include <filesystem>
 #include <format>
 #include <iterator>
@@ -189,18 +190,38 @@ bool convert_i420_to_nv12(const wireless::MessageHeader& header,
     const auto* y_plane = payload.data();
     const auto* u_plane = y_plane + header.plane_size[0];
     const auto* v_plane = u_plane + header.plane_size[1];
-    for (std::uint32_t row = 0; row < header.height; ++row)
-        std::copy_n(y_plane + static_cast<std::size_t>(row) * header.stride[0],
-            header.width, destination.data() + static_cast<std::size_t>(row) * stride);
-    auto* uv = destination.data() + y_bytes;
-    for (std::uint32_t row = 0; row < chroma_height; ++row) {
-        const auto* source_u = u_plane + static_cast<std::size_t>(row) * header.stride[1];
-        const auto* source_v = v_plane + static_cast<std::size_t>(row) * header.stride[2];
-        auto* output = uv + static_cast<std::size_t>(row) * stride;
-        for (std::uint32_t column = 0; column < chroma_width; ++column) {
+    if (header.stride[0] == stride && header.width == stride) {
+        std::copy_n(y_plane, y_bytes, destination.data());
+    } else {
+        for (std::uint32_t row = 0; row < header.height; ++row)
+            std::copy_n(y_plane + static_cast<std::size_t>(row) * header.stride[0],
+                header.width, destination.data() + static_cast<std::size_t>(row) * stride);
+    }
+
+    const auto interleave_chroma = [](const std::uint8_t* source_u, const std::uint8_t* source_v,
+        std::uint8_t* output, std::size_t samples) {
+        // SSE2 is part of the Windows x64 baseline. Padded rows are processed
+        // separately so neither the vector loads nor the tail include padding.
+        std::size_t column{};
+        for (; column + 16U <= samples; column += 16U) {
+            const auto u = _mm_loadu_si128(reinterpret_cast<const __m128i*>(source_u + column));
+            const auto v = _mm_loadu_si128(reinterpret_cast<const __m128i*>(source_v + column));
+            _mm_storeu_si128(reinterpret_cast<__m128i*>(output + column * 2U), _mm_unpacklo_epi8(u, v));
+            _mm_storeu_si128(reinterpret_cast<__m128i*>(output + column * 2U + 16U), _mm_unpackhi_epi8(u, v));
+        }
+        for (; column < samples; ++column) {
             output[column * 2U] = source_u[column];
             output[column * 2U + 1U] = source_v[column];
         }
+    };
+    auto* uv = destination.data() + y_bytes;
+    if (header.stride[1] == chroma_width && header.stride[2] == chroma_width) {
+        interleave_chroma(u_plane, v_plane, uv, static_cast<std::size_t>(chroma_width) * chroma_height);
+    } else {
+        for (std::uint32_t row = 0; row < chroma_height; ++row)
+            interleave_chroma(u_plane + static_cast<std::size_t>(row) * header.stride[1],
+                v_plane + static_cast<std::size_t>(row) * header.stride[2],
+                uv + static_cast<std::size_t>(row) * stride, chroma_width);
     }
     return true;
 }
@@ -441,11 +462,14 @@ std::shared_ptr<const media::DecodedFrame> WirelessClientStream::latest_frame() 
 }
 
 std::shared_ptr<const media::DecodedFrame> WirelessClientStream::next_render_frame() {
-    // AirPlay may send nothing while the phone screen is static. Every preview
-    // must retain access to the latest immutable frame for resize/repaint and
-    // newly opened windows, without another renderer consuming it first.
+    std::uint32_t delay{};
+    if (sync_audio_preview_.load(std::memory_order_relaxed) &&
+        play_audio_.load(std::memory_order_relaxed) && effective_audio_volume() > 0) {
+        std::scoped_lock lock(audio_mutex_);
+        if (audio_renderer_) delay = audio_renderer_->preview_delay_ms();
+    }
     std::scoped_lock lock(mutex_);
-    return latest_frame_;
+    return preview_audio_sync_.select(latest_frame_, delay);
 }
 
 std::shared_ptr<const AudioPacket> WirelessClientStream::next_audio_packet(
@@ -462,6 +486,17 @@ void WirelessClientStream::set_audio_enabled(bool enabled) noexcept {
     play_audio_.store(enabled, std::memory_order_relaxed);
     std::scoped_lock lock(audio_mutex_);
     if (audio_renderer_) audio_renderer_->set_enabled(enabled);
+}
+
+void WirelessClientStream::set_audio_playback_preferences(std::uint32_t buffer, bool sync) {
+    {
+        std::scoped_lock lock(audio_mutex_);
+        audio_buffer_ = buffer;
+        if (audio_renderer_) audio_renderer_->set_buffer(static_cast<audio::PlaybackBuffer>(buffer));
+    }
+    std::scoped_lock lock(mutex_);
+    sync_audio_preview_.store(sync, std::memory_order_relaxed);
+    if (!sync) preview_audio_sync_.clear();
 }
 
 void WirelessClientStream::set_audio_volume(float volume) noexcept {
@@ -496,7 +531,7 @@ std::uint32_t WirelessClientStream::target_fps() const noexcept {
 }
 
 void WirelessClientStream::publish_video(const wireless::MessageHeader& header,
-    std::span<const std::uint8_t> payload) {
+    std::span<const std::uint8_t> payload, bool external, std::optional<unsigned> device_turns) {
     const auto received_at = std::chrono::steady_clock::now();
     auto frame = std::make_shared<media::DecodedFrame>();
     if (!detail::convert_i420_to_nv12(header, payload, frame->nv12, frame->stride)) {
@@ -515,6 +550,15 @@ void WirelessClientStream::publish_video(const wireless::MessageHeader& header,
     // samples as video-range expands light UI grays (for example 243) to 255.
     frame->color.range = coremedia::ColorRange::Full;
     frame->received_at = received_at;
+    if (external && device_turns) {
+        // CoreDevice's raw built-in panel is ordinarily portrait even when
+        // SpringBoard is landscape. Landscape-encoded frames already have
+        // landscape pixels; preserve their orientation.
+        if (header.width < header.height && !media::detail::rotate_decoded_frame(*frame, *device_turns))
+            return;
+        if ((frame->width > frame->height) == ((*device_turns & 1U) != 0))
+            frame->device_orientation_turns = device_turns;
+    }
 
     std::scoped_lock lock(mutex_);
     // The hub can observe a frame concurrently with a disconnect callback.
@@ -523,7 +567,9 @@ void WirelessClientStream::publish_video(const wireless::MessageHeader& header,
     if (!connected_) return;
     frame->timestamp_100ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
         received_at - started_at_).count() / 100;
-    const auto active_content = screen_content_geometry_.process(*frame);
+    // The CoreDevice decoder crops and scales to the device's panel. The
+    // AirPlay black-margin detector would mistake legitimate dark content for padding.
+    const auto active_content = external ? std::nullopt : screen_content_geometry_.process(*frame);
     // Track orientation on capture so previews cannot miss a brief portrait
     // transition between two landscape frames of the same dimensions.
     if (frame->width < frame->height) {
@@ -574,6 +620,7 @@ void WirelessClientStream::publish_video(const wireless::MessageHeader& header,
             frame->width, frame->height));
     }
     latest_frame_ = frame;
+    preview_audio_sync_.publish(frame, sync_audio_preview_.load(std::memory_order_relaxed));
     snapshot_.state = State::Streaming;
     snapshot_.message = L"Wireless mirroring";
     mirror_state_ = wireless::MirrorSenderState::Active;
@@ -662,7 +709,8 @@ void WirelessClientStream::publish_audio(const wireless::MessageHeader& header,
                     play_audio_.load(std::memory_order_relaxed),
                     effective_audio_volume(),
                     has_video ? audio::WasapiBufferingMode::LowLatency :
-                                audio::WasapiBufferingMode::NetworkJitter);
+                                audio::WasapiBufferingMode::NetworkJitter,
+                    static_cast<audio::PlaybackBuffer>(audio_buffer_));
             } catch (const std::exception& error) {
                 audio_renderer_failed_ = true;
                 logging::write(std::format("wireless audio playback disabled for device_fp={}: {}",
@@ -677,6 +725,7 @@ void WirelessClientStream::clear_media() noexcept {
     {
         std::scoped_lock lock(mutex_);
         latest_frame_.reset();
+        preview_audio_sync_.clear();
         snapshot_.width = snapshot_.height = 0;
         screen_content_geometry_.reset();
         if (active_screen_content_) {

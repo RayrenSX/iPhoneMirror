@@ -4,7 +4,7 @@ Thanks for helping improve iPhone/iPad mirroring, audio and output workflows on 
 
 ## Before opening an issue
 
-- Use the latest published preview or current `main` build.
+- Reproduce with the latest [published preview](https://github.com/RayrenSX/iPhoneMirror/releases) or the current v1.8.5-pre7 `main` build. Include the complete version from About. [pre7 release notes](docs/en/RELEASE_NOTES.md)
 - Search existing issues first.
 - Remove UDIDs, device names, pairing records, account information and personal
   screen content from logs and screenshots.
@@ -22,8 +22,8 @@ Thanks for helping improve iPhone/iPad mirroring, audio and output workflows on 
   bad, libav), libplist and OpenSSL for the bundled UxPlay fallback
 - Python 3.13 x64 for the versioned USB bridge packaging recipe and diagnostics
 
-See the [development and testing guide](docs/DEVELOPMENT.md) for dependency sources,
-build switches, artifact layouts, and focused tests, and the [documentation index](docs/README.md)
+See the [development and testing guide](docs/en/DEVELOPMENT.md) for dependency sources,
+build switches, artifact layouts, and focused tests, and the [documentation index](docs/en/README.md)
 for maintained references versus historical audit reports.
 
 Build, test and publish:
@@ -80,7 +80,7 @@ installation, registry filter mutation and rollback behavior live in
   Chinese (Taiwan), English, and Japanese resource keys in sync.
 - Update the README, user guide, architecture/protocol notes, or release notes
   when a user-visible workflow, dependency, port, or output format changes.
-- Link new documentation from the [index](docs/README.md), its archive, or the
+- Link new documentation from the [index](docs/en/README.md), its archive, or the
   release/issue indexes. Keep historical test results scoped to their original
   environment; describe untracked logs as local artifact paths, not repository links.
 - Run `python scripts/verify_docs.py` for documentation changes. It checks local

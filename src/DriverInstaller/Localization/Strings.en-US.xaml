@@ -43,25 +43,26 @@
     <system:String x:Key="Recheck">Recheck</system:String>
     <system:String x:Key="CannotOpenLogs">Could not open logs</system:String>
     <system:String x:Key="QuickInstallTitle">Install all drivers</system:String>
-    <system:String x:Key="QuickInstallBody">The tool checks Apple USB support, the shared capture driver, and the selected iPhone, then installs missing components. If the parent driver needs repair, you will see the current binding and target driver and be asked to confirm that change separately.</system:String>
+    <system:String x:Key="QuickInstallBody">Check for and install missing mirroring drivers. You’ll confirm any Apple parent driver change separately.</system:String>
     <system:String x:Key="StartInstall">Start installation</system:String>
     <system:String x:Key="ConnectPhoneTitle">Connect an iPhone</system:String>
     <system:String x:Key="ConnectPhoneBody">Apple USB support is ready. Connect and unlock the iPhone, then tap Trust if prompted. The tool continues automatically after it detects the device.</system:String>
     <system:String x:Key="StartDetection">Start detection</system:String>
     <system:String x:Key="FailureTitle">Driver operation failed</system:String>
     <system:String x:Key="FailureHeading">The driver operation could not be completed</system:String>
-    <system:String x:Key="FailureMethods">Choose one of the following options</system:String>
-    <system:String x:Key="HelpTitle">Get community help</system:String>
-    <system:String x:Key="HelpBody">Join QQ group 1050045279 and provide the operation log.</system:String>
+    <system:String x:Key="FailureOpenLog">Open log folder</system:String>
+    <system:String x:Key="HelpTitle">Get help</system:String>
+    <system:String x:Key="HelpBody">Join the QQ group and share the operation log.</system:String>
     <system:String x:Key="CopyGroup">Copy group number</system:String>
-    <system:String x:Key="AisiTitle">Prepare the driver with Aisi Screen Mirroring</system:String>
-    <system:String x:Key="AisiBody">Download Aisi Screen Mirroring from its official website, complete one normal wired mirroring session, then return and recheck.</system:String>
+    <system:String x:Key="AisiTitle">Mirror with Aisi</system:String>
+    <system:String x:Key="AisiBody">Mirror once over USB with Aisi, then recheck here.</system:String>
     <system:String x:Key="OpenWebsite">Open website</system:String>
     <system:String x:Key="DriverCleanupTitle">Clean up device drivers</system:String>
-    <system:String x:Key="DriverCleanupBody">Choose a device in a separate window to remove its associated device nodes and driver packages that can be safely removed, which may include Apple drivers. Packages used by other devices are preserved. If package usage cannot be verified, only device nodes are removed. Confirmation is required before changing the system.</system:String>
+    <system:String x:Key="DriverCleanupBody">Choose a device and confirm cleanup. It may remove Apple drivers.</system:String>
     <system:String x:Key="RunDriverCleanup">Clean up device drivers</system:String>
     <system:String x:Key="DriverCleanupScriptMissing">The driver cleanup script was not found: {0}</system:String>
-    <system:String x:Key="DriverCleanupScriptStartFailed">Could not start the driver cleanup script: {0}</system:String>
+    <system:String x:Key="DriverCleanupUnavailableTitle">Could not start driver cleanup</system:String>
+    <system:String x:Key="DriverCleanupScriptStartFailed">Try again or reopen Driver Manager as administrator.</system:String>
     <system:String x:Key="Close">Close</system:String>
     <system:String x:Key="Minimize">Minimize</system:String>
     <system:String x:Key="Maximize">Maximize or restore</system:String>
@@ -82,17 +83,17 @@
     <system:String x:Key="LogSuffix">Log: {0}</system:String>
     <system:String x:Key="NoSelection">No device selected</system:String>
     <system:String x:Key="WaitDeviceTimeout">Timed out waiting for an Apple device. Log: {0}</system:String>
-    <system:String x:Key="SelectedDeviceDisconnected">The selected device disconnected. Select it again and retry. Log: {0}</system:String>
+    <system:String x:Key="SelectedDeviceDisconnected">The selected device disconnected. Select it again and retry.</system:String>
     <system:String x:Key="RepairingParent">Repairing the parent driver for {0}…</system:String>
-    <system:String x:Key="ParentRepairFailed">The parent driver is still not usbccgp after repair; automatic installation stopped. Log: {0}</system:String>
+    <system:String x:Key="ParentRepairFailed">Automatic installation stopped because the USB composite driver required for capture could not be verified after rebinding.</system:String>
     <system:String x:Key="DeviceReady">All mirroring drivers for {0} are ready.</system:String>
     <system:String x:Key="InstallingDriver">Installing the capture driver for {0}…</system:String>
     <system:String x:Key="RepairingDriver">Repairing the capture driver for {0}…</system:String>
-    <system:String x:Key="ReconnectTimeout">Timed out waiting for the device to reconnect. Log: {0}</system:String>
+    <system:String x:Key="ReconnectTimeout">Timed out waiting for the device to reconnect.</system:String>
     <system:String x:Key="QuickInstallComplete">Installation complete. The mirroring driver for {0} is ready.</system:String>
     <system:String x:Key="WaitingForDevice">Waiting for an Apple device…</system:String>
     <system:String x:Key="ConfirmOperation">Confirm {0}</system:String>
-    <system:String x:Key="ConfirmOperationBody" xml:space="preserve">Perform {0} on the following device:&#xA;&#xA;{1}&#xA;{2}&#xA;&#xA;Only this device's libusb0 filter is changed. Apple's official driver is not replaced. Windows may request administrator approval.</system:String>
+    <system:String x:Key="ConfirmOperationBody" xml:space="preserve">Device: {0}&#xA;This changes only this device’s mirroring filter.</system:String>
     <system:String x:Key="Operating">Operation: {0} — {1}…</system:String>
     <system:String x:Key="ReplugTimeout">Timed out waiting for the device to disconnect or reconnect. The operation was rolled back or completed; review the log and retry.</system:String>
     <system:String x:Key="DriverUninstalled">The capture filter was removed from the current device.</system:String>
@@ -109,7 +110,7 @@
     <system:String x:Key="DevicesMissing">Devices detected: {0}. Click the button to install missing drivers.</system:String>
     <system:String x:Key="GroupCopiedTitle">Group number copied</system:String>
     <system:String x:Key="GroupCopiedBody">QQ group 1050045279 was copied. Search for it in QQ to apply.</system:String>
-    <system:String x:Key="CannotOpenQq">Could not open QQ</system:String>
+    <system:String x:Key="CannotCopyGroup">Could not copy the QQ group number</system:String>
     <system:String x:Key="Connected">Connected</system:String>
     <system:String x:Key="HistoricalDevice">Previously connected device</system:String>
     <system:String x:Key="CaptureInstalled">Capture driver installed</system:String>
@@ -145,7 +146,7 @@
     <system:String x:Key="AppleDownloadUnavailable">The official Apple installer could not be obtained automatically. The Apple Devices page was opened in Microsoft Store.</system:String>
     <system:String x:Key="AppleCompatibilityDownloadUnavailable">The missing Apple Mobile Device Service compatibility component could not be downloaded. Check the network and retry; details were written to the log.</system:String>
     <system:String x:Key="AppleSignatureInvalid">The Apple installer failed Windows signature validation and was not executed.</system:String>
-    <system:String x:Key="AppleInstallerFailed" xml:space="preserve">The Apple Mobile Device Support component failed with exit code {0}.&#xA;{1}&#xA;Log: {2}</system:String>
+    <system:String x:Key="AppleInstallerFailed" xml:space="preserve">Apple USB support could not be installed (code {0}).</system:String>
     <system:String x:Key="AppleRestartRequired" xml:space="preserve">Apple Mobile Device Support was installed, but Windows must restart to finish registering the driver and service. Restart the PC, then check again.&#xA;Log: {0}</system:String>
     <system:String x:Key="AppleServiceNotReady" xml:space="preserve">Apple USB support is incomplete: the service or Apple USB driver package is not ready. Connect and unlock the iPhone, then check again.&#xA;Log: {0}</system:String>
     <system:String x:Key="Appearance">Appearance</system:String>
@@ -174,15 +175,23 @@
     <system:String x:Key="ParentNoInf" xml:space="preserve">No driver package</system:String>
     <system:String x:Key="ParentHealthy" xml:space="preserve">Started and healthy</system:String>
     <system:String x:Key="ParentNeedsAttention" xml:space="preserve">Not started or needs attention</system:String>
-    <system:String x:Key="ParentManagerHelp" xml:space="preserve">You can change any current parent binding, including Apple, third-party, or missing drivers. Wired mirroring normally requires USB Composite Device (usbccgp). Select the target driver, then review and confirm the change.</system:String>
-    <system:String x:Key="ParentDriverSelection" xml:space="preserve">Target driver (system composite driver and drivers available for this device)</system:String>
+    <system:String x:Key="ParentManagerHelp" xml:space="preserve">You can choose a compatible driver for this device or reinstall its current driver. Wired mirroring requires a working USB composite driver (usbccgp). Review the change before confirming.</system:String>
+    <system:String x:Key="ParentDriverSelection">Choose a compatible driver</system:String>
+    <system:String x:Key="ParentCurrentDriver">Current driver · {0} · {1}</system:String>
+    <system:String x:Key="ParentDriverRecommended">Recommended</system:String>
+    <system:String x:Key="ParentDriverListLimited">Some drivers could not be read.</system:String>
+    <system:String x:Key="ParentNoChoices">No compatible drivers found.</system:String>
+    <system:String x:Key="ParentShowDetails">Show technical details</system:String>
+    <system:String x:Key="ParentHideDetails">Hide technical details</system:String>
     <system:String x:Key="ParentResetHelp" xml:space="preserve">Rebuild device removes the selected parent and its child interfaces. Reconnect the phone afterward. Driver packages remain installed, so Windows may choose the same driver again; select a driver above to change the binding.</system:String>
     <system:String x:Key="ParentReset" xml:space="preserve">Rebuild device</system:String>
     <system:String x:Key="ParentBind" xml:space="preserve">Bind selected driver</system:String>
     <system:String x:Key="ParentConfirmTitle" xml:space="preserve">Confirm Apple parent driver change</system:String>
     <system:String x:Key="ParentConfirmApply" xml:space="preserve">Confirm change</system:String>
-    <system:String x:Key="ParentConfirmBody" xml:space="preserve">Device: {0}&#xA;{1}&#xA;&#xA;Current state:&#xA;{2}&#xA;&#xA;Action / target driver:&#xA;{3}&#xA;&#xA;This changes this phone’s parent driver and may replace an Apple or third-party binding. USB connectivity, mirroring, control, and Apple software connections may be interrupted. Child interfaces may be enumerated again. Windows may request administrator approval, reconnection, or a restart.&#xA;&#xA;Driver binding and filter state will be saved before changes. A failed binding triggers an attempt to restore the previous binding, but recovery is not guaranteed. Continue?</system:String>
-    <system:String x:Key="ParentCompositeUnavailable" xml:space="preserve">The Windows USB composite driver is unavailable. Open parent driver management for other options.</system:String>
+    <system:String x:Key="ParentConfirmBody" xml:space="preserve">Device: {0}&#xA;Target driver: {1}&#xA;&#xA;Changing the driver temporarily disconnects the device. Settings are backed up, but recovery may fail.</system:String>
+    <system:String x:Key="SetupParentRepairRequired">Open Driver Manager and use one-click installation or parent driver management to repair the USB composite driver for the selected device, then check again.</system:String>
+    <system:String x:Key="DriverOperationRejected">The driver operation stopped before changing the system.</system:String>
+    <system:String x:Key="ParentCompositeUnavailable" xml:space="preserve">Windows found no USB composite driver compatible with this device. Open parent driver management to see available drivers or re-enumerate the device.</system:String>
     <system:String x:Key="ParentDeviceUnavailable" xml:space="preserve">The selected phone is disconnected. Reconnect it before continuing.</system:String>
     <system:String x:Key="ParentListUnavailable" xml:space="preserve">The driver list could not be read. Rebuild the device and retry; see the log for details.</system:String>
     <system:String x:Key="ParentBackupFormat" xml:space="preserve">State snapshot: {0}</system:String>
@@ -191,13 +200,15 @@
     <system:String x:Key="ParentResetRestartRequired" xml:space="preserve">Windows requires a PC restart to finish removing the parent device. Reconnect the phone and refresh afterward.</system:String>
     <system:String x:Key="ParentResetComplete" xml:space="preserve">Parent device removal was requested. Unplug and reconnect the phone so Windows can enumerate it again, then check its parent driver status.</system:String>
     <system:String x:Key="ParentChangeRejected" xml:space="preserve">No change was made: the device state, confirmation, or target driver changed, or preparation failed. Refresh and confirm again; see the log for details.</system:String>
-    <system:String x:Key="ParentChangeRolledBack" xml:space="preserve">Parent driver binding failed. The previous driver binding was restored; its original problem may remain. See the log for details.</system:String>
+    <system:String x:Key="ParentChangeRolledBack" xml:space="preserve">The parent driver change failed. The previous driver was restored.</system:String>
     <system:String x:Key="ParentRollbackRestartRequired" xml:space="preserve">Parent driver binding failed. Windows accepted restoration of the previous binding, but a PC restart is required. Refresh afterward to verify recovery.</system:String>
     <system:String x:Key="ParentChangeRecoveryNeeded" xml:space="preserve">The parent driver operation did not complete and recovery could not be verified. Reconnect the phone and refresh; use parent driver management or Device Manager to rebind if needed. The state snapshot and log contain operation details.</system:String>
     <system:String x:Key="DriverWaitingSafeStop" xml:space="preserve">The operation is taking longer than expected. Cancellation was requested; waiting for the current step and recovery to finish. Keep this window open. Log: {0}</system:String>
     <system:String x:Key="ParentListPartial" xml:space="preserve">Some driver lists could not be read. Available choices are still listed. Details:</system:String>
-    <system:String x:Key="ReconnectVerificationFailed" xml:space="preserve">Reconnect verification failed. Check the connection, device problem code, parent driver binding, and capture filter state.</system:String>
+    <system:String x:Key="ReconnectVerificationFailed" xml:space="preserve">The device could not be verified after reconnecting. Unlock your iPhone, reconnect the USB cable, and recheck.</system:String>
     <system:String x:Key="DriverRefreshFailed" xml:space="preserve">Status refresh failed; the operation result above is preserved. Reason: {0}. Log: {1}</system:String>
     <system:String x:Key="HelpBrowserFailedTitle" xml:space="preserve">Cannot open the help website</system:String>
-    <system:String x:Key="HelpBrowserFailed" xml:space="preserve">Open this address manually: {0}. Reason: {1}</system:String>
+    <system:String x:Key="HelpBrowserFailed" xml:space="preserve">Open {0} in your browser.</system:String>
+    <system:String x:Key="ParentReenumerateConfirmBody" xml:space="preserve">Device: {0}&#xA;Reconnect your iPhone after the reset so Windows can detect it again.</system:String>
+    <system:String x:Key="OpenLogFailedBody">Reopen Driver Manager and try again.</system:String>
 </ResourceDictionary>

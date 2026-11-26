@@ -16,6 +16,7 @@ import struct
 import sys
 import threading
 import time
+from collections import OrderedDict
 from dataclasses import dataclass
 
 MAX_AU = 16 * 1024 * 1024
@@ -24,6 +25,8 @@ FRAME = struct.Struct("<4sIIIIq")
 RECORD = struct.Struct("<QBI")
 CAPTURE_MAGIC = b"IMRTP\x01\r\n"
 START = b"\x00\x00\x00\x01"
+VIDEO_REORDER_SECONDS = .008
+VIDEO_REORDER_PACKETS = 32
 
 
 @dataclass(frozen=True)
@@ -34,6 +37,7 @@ class RtpPacket:
     marker: bool
     payload_type: int
     payload: bytes
+    extension_profile: int = 0
 
 
 def parse_rtp(data: bytes) -> RtpPacket:
@@ -43,10 +47,12 @@ def parse_rtp(data: bytes) -> RtpPacket:
     offset = 12 + (data[0] & 15) * 4
     if offset > end:
         raise ValueError("Truncated CSRC")
+    profile = 0
     if data[0] & 16:
         if offset + 4 > end:
             raise ValueError("Truncated extension")
-        offset += 4 + struct.unpack_from("!H", data, offset + 2)[0] * 4
+        profile, words = struct.unpack_from("!HH", data, offset)
+        offset += 4 + words * 4
     if data[0] & 32:
         padding = data[-1]
         if not padding or padding > end - offset:
@@ -55,19 +61,30 @@ def parse_rtp(data: bytes) -> RtpPacket:
     if offset >= end:
         raise ValueError("Empty RTP payload")
     seq, ts, ssrc = struct.unpack_from("!HII", data, 2)
-    return RtpPacket(seq, ts, ssrc, bool(data[1] & 128), data[1] & 127, data[offset:end])
+    return RtpPacket(seq, ts, ssrc, bool(data[1] & 128), data[1] & 127, data[offset:end], profile)
+
+
+def rvra_trailer(nal: bytes) -> tuple[int, int, int]:
+    """Return the active width, height and escaped trailer length of a slice."""
+    if len(nal) < 16 or ((nal[0] >> 1) & 63) >= 32 or nal[-1] != 3:
+        return 0, 0, 0
+    # Four separator zeros are escaped by HEVC. If the height ends in
+    # zero (for example 1280), it adds a second emulation-prevention byte.
+    if nal[-10:-5] == b"\x00\x00\x03\x00\x00":
+        length = 14
+    elif len(nal) >= 17 and nal[-12:-5] == b"\x00\x00\x03\x00\x00\x03\x00":
+        length = 15
+    else:
+        return 0, 0, 0
+    w, h = struct.unpack_from("!HH", nal, len(nal) - length)
+    if (2 <= w <= 8192 and 2 <= h <= 8192 and not (w | h) & 1
+            and (length == 15) == (h & 0xff == 0)):
+        return w, h, length
+    return 0, 0, 0
 
 
 def active_size(nal: bytes) -> tuple[int, int]:
-    # Only the observed 14-byte RVRA trailer is accepted. Never scan entropy data
-    # for a small hardcoded list of phone dimensions.
-    if len(nal) >= 16:
-        tail = nal[-14:]
-        if tail[4:9] == b"\x00\x00\x03\x00\x00" and tail[-1] == 3:
-            w, h = struct.unpack_from("!HH", tail)
-            if 2 <= w <= 8192 and 2 <= h <= 8192 and not (w | h) & 1:
-                return w, h
-    return 0, 0
+    return rvra_trailer(nal)[:2]
 
 
 @dataclass(frozen=True)
@@ -77,6 +94,14 @@ class AccessUnit:
     key: bool
     width: int = 0
     height: int = 0
+    trailer_offset: int | None = None
+    trailer_length: int = 0
+
+    def decoder_data(self) -> bytes:
+        if self.trailer_offset is None:
+            return self.data
+        at = self.trailer_offset
+        return self.data[:at] + self.data[at + self.trailer_length:]
 
 
 class HevcReceiver:
@@ -200,8 +225,19 @@ class HevcReceiver:
                 return None
             nals = [self.parameters[k] for k in (32, 33, 34)] + [n for n in nals if (n[0] >> 1) & 63 not in (32, 33, 34)]
             self.wait_key = False
-        w, h = next((size for n in reversed(nals) if (size := active_size(n)) != (0, 0)), (0, 0))
-        return AccessUnit(b"".join(START + n for n in nals), packet.timestamp, key, w, h)
+        w = h = 0
+        trailer_offset = None
+        trailer_length = 0
+        remaining = 0
+        data = b"".join(START + n for n in nals)
+        for nal in reversed(nals):
+            w, h, trailer_length = rvra_trailer(nal)
+            if w:
+                # Apple passes this size separately from the HEVC slice.
+                trailer_offset = len(data) - remaining - trailer_length
+                break
+            remaining += len(START) + len(nal)
+        return AccessUnit(data, packet.timestamp, key, w, h, trailer_offset, trailer_length)
 
 
 class Feedback:
@@ -209,7 +245,8 @@ class Feedback:
         self.local, self.remote = local_ssrc, remote_ssrc
         self.highest = self.base = None
         self.received = self.expected_prior = self.received_prior = 0
-        self.first_ts = self.last_ts = 0
+        self.last_ts = 0
+        self.frame_packets = self.last_frame_packets = 0
         self.last_at = self.last_sr_at = 0.0
         self.lsr = 0
 
@@ -218,13 +255,17 @@ class Feedback:
             return
         if self.highest is None:
             self.highest = self.base = p.sequence
-            self.first_ts = p.timestamp
         else:
             delta = (p.sequence - (self.highest & 65535)) & 65535
             if delta == 0 or delta >= 32768:
                 return
             self.highest += delta
         self.received += 1
+        if p.timestamp != self.last_ts:
+            self.frame_packets = 0
+        self.frame_packets += 1
+        if p.marker:
+            self.last_frame_packets = self.frame_packets
         self.last_ts, self.last_at = p.timestamp, now
 
     def note_rtcp(self, data: bytes, now: float):
@@ -263,11 +304,14 @@ class Feedback:
     def complete(self, timestamp):
         return struct.pack("!BBHIII", 128, 204, 3, self.local, 5, timestamp)
 
-    def rctl(self, now):
-        idle = max(0, min(65535, int((now - self.last_at) * 1000))) if self.last_at else 0
-        return struct.pack("!BBHI4sIHIHHHHH", 128, 204, 7, self.local, b"RCTL", 0x85000004,
-                           ((self.last_ts - self.first_ts) & 0xffffffff) >> 8 & 65535,
-                           0, idle, int(now * 1024) & 65535, 0, self.received & 65535, 60000)
+    def rctl(self):
+        # DisplayService compares the reported arrival clock to its own RTP
+        # clock. A host clock with a different epoch looks like congestion.
+        # Match the 24 kHz clock and packet-count fields used by Xcode.
+        return struct.pack("!BBHI4sIIIII", 128, 204, 7, self.local, b"RCTL", 0x85000004,
+                           ((self.last_ts >> 8) & 0xffff) << 16, self.last_frame_packets,
+                           ((self.last_ts // 24) & 0xffff) << 16,
+                           ((self.received & 0xffff) << 16) | 0xea61)
 
 
 class PacketRecording:
@@ -320,23 +364,48 @@ def decoder_path() -> Path:
 
 
 class MediaPipeline:
-    def __init__(self, pipe: str, width=0, height=0, recording: Path | None = None):
+    def __init__(self, pipe: str, width=0, height=0, recording: Path | None = None, *, live=False,
+                 panel_width=0, panel_height=0, direct_video=False):
         if not re.fullmatch(r"iPhoneMirror\.CoreDevice\.[a-f0-9]{32}", pipe):
             raise ValueError("Invalid private media pipe")
-        if any(type(n) is not int or n < 0 or n > 8192 or n == 1 for n in (width, height)) or bool(width) != bool(height):
+        if (any(type(n) is not int or n < 0 or n > 8192 or n == 1
+                for n in (width, height, panel_width, panel_height))
+                or bool(width) != bool(height) or bool(panel_width) != bool(panel_height)):
             raise ValueError("Invalid output dimensions")
         self.pipe_name, self.width, self.height = pipe, width, height
+        self.panel_width, self.panel_height = panel_width, panel_height
+        self.direct_video = direct_video and live and os.name == "nt"
         self.receiver = HevcReceiver()
-        self.queues = [asyncio.Queue(4), asyncio.Queue(12)]
+        self.live = live
+        self.reorder = {}
+        self.reorder_timer = None
+        self.recovered_packets = 0
+        self.queues = [asyncio.Queue(12 if live else 4), asyncio.Queue(12)]
         self.tasks, self.processes = [], []
         self.output_tasks = []
         self.feedback_task = None
         self.pipe = None
+        self.pipe_failed = False
+        self.live_video = asyncio.Queue(1) if live and not self.direct_video else None
+        self.display_drops = 0
+        self.received_video = 0
+        self.decoded_video = 0
+        self.interface_orientation = None
+        self.frame_orientations = OrderedDict()
         self.pipe_lock = threading.Lock()
         self.recording = PacketRecording(recording) if recording else None
         self.feedback = [None, None]
         self.senders = [None, None]
         self.last_pli = 0
+        self.pli_requests = 0
+        self.pli_retry_delay = .7
+        self.last_size = (0, 0)
+        self.size_changes = 0
+        self.missing_sizes = 0
+        self.double_escaped_sizes = 0
+        self.recovery_since = self.last_size_change = 0.0
+        self.source_frame_gap = 0.0
+        self.last_received_frame = 0.0
         self.frames = self.audio_frames = self.queue_drops = 0
         self.error = None
         self.closing = False
@@ -352,21 +421,32 @@ class MediaPipeline:
         self.restart_tasks = [None, None]
         self.restart_at = [0, 0]
 
+    async def _start_decoder(self, executable, channel):
+        direct = self.direct_video and not channel
+        args = ["--audio"] if channel else ["--direct-video"] if direct else []
+        return await asyncio.create_subprocess_exec(str(executable), *args,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=self.pipe if direct else asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE if direct else asyncio.subprocess.DEVNULL,
+            limit=1024 * 1024, creationflags=0x08000000 if os.name == "nt" else 0)
+
     async def start(self, audio=False):
+        if self.direct_video and audio:
+            raise ValueError("Direct video requires a dedicated preview pipe")
         executable = decoder_path()
         try:
             self.pipe = await asyncio.wait_for(asyncio.to_thread(open,
                 "\\\\.\\pipe\\" + self.pipe_name, "wb", buffering=0), 5)
             for channel in range(2 if audio else 1):
-                proc = await asyncio.create_subprocess_exec(str(executable), *( ["--audio"] if channel else []),
-                    stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.DEVNULL, creationflags=0x08000000 if os.name == "nt" else 0)
+                proc = await self._start_decoder(executable, channel)
                 self.processes.append(proc)
                 output = asyncio.create_task(self._output(proc, channel))
                 self.output_tasks.append(output)
                 tasks = [asyncio.create_task(self._input(channel, proc)), output]
                 self.decoder_tasks[channel] = tasks
                 self.tasks.extend(tasks)
+            if self.live_video is not None:
+                self.tasks.append(asyncio.create_task(self._write_live_video()))
             self.feedback_task = asyncio.create_task(self._feedback())
             self.tasks.append(self.feedback_task)
         except BaseException:
@@ -402,10 +482,16 @@ class MediaPipeline:
                             for report in feedback.reports(now, time.time()):
                                 await self._send(channel, report)
                         if channel == 0:
-                            await self._send(0, feedback.rctl(now))
-                            if (self.receiver.wait_key or now - self.last_video > 2) and now - self.last_pli > .5:
+                            # Ordinary RTCP reports keep the stream alive.
+                            # AVConference rate control requires timely per-frame
+                            # receipts. The decoder/IPC cannot supply that timing.
+                            if self._should_request_keyframe(now):
                                 await self._send(0, feedback.pli())
                                 self.last_pli = now
+                                self.pli_requests += 1
+                                if self.receiver.wait_key:
+                                    self.pli_retry_delay = min(4.0, 2 * self.pli_retry_delay)
+                                self.recovery_since = 0.0
                 if now >= report_at:
                     report_at = now + 1
                 await asyncio.sleep(.05)
@@ -413,6 +499,78 @@ class MediaPipeline:
             raise
         except Exception as error:
             self.error = "feedback_" + type(error).__name__
+
+    def _should_request_keyframe(self, now):
+        if self.receiver.wait_key:
+            return now - self.last_pli >= self.pli_retry_delay
+        if now - self.last_video > 2:
+            # Static displays may send nothing. One probe per idle episode
+            # is sufficient until fresh input resumes.
+            return self.last_pli < self.last_video
+        # Avoid requesting large IDRs during continuous encoder adaptation.
+        return bool(self.recovery_since and now - self.last_pli >= 3 and
+                    now - self.last_size_change >= 1.2)
+
+    def _note_video_frame(self, unit, now):
+        if self.last_received_frame:
+            self.source_frame_gap = max(self.source_frame_gap, now - self.last_received_frame)
+        self.last_received_frame = now
+        size = unit.width, unit.height
+        if unit.key:
+            self.recovery_since = 0.0
+            self.pli_retry_delay = .7
+            if not unit.width:
+                self.last_size = (0, 0)
+        if unit.trailer_length == 15:
+            self.double_escaped_sizes += 1
+        if not unit.width:
+            self.missing_sizes += 1
+        elif size != self.last_size:
+            if self.last_size[0]:
+                self.size_changes += 1
+                if not unit.key:
+                    self.recovery_since = self.recovery_since or now
+                    self.last_size_change = now
+            self.last_size = size
+
+    def _cancel_reorder_timer(self):
+        if self.reorder_timer is not None:
+            self.reorder_timer.cancel()
+            self.reorder_timer = None
+
+    def _drain_reorder(self, expired=False):
+        if expired:
+            self.reorder_timer = None
+        while self.reorder:
+            next_seq = (self.receiver.sequence + 1) & 65535
+            if next_seq in self.reorder:
+                packet = self.reorder.pop(next_seq)
+                self.recovered_packets += 1
+            elif expired or len(self.reorder) >= VIDEO_REORDER_PACKETS:
+                nearest = min(self.reorder, key=lambda seq: (seq - next_seq) & 65535)
+                packet = self.reorder.pop(nearest)
+                expired = False
+            else:
+                if self.reorder_timer is None:
+                    self.reorder_timer = asyncio.get_running_loop().call_later(
+                        VIDEO_REORDER_SECONDS, self._drain_reorder, True)
+                return
+            self._receive_video(packet)
+        self._cancel_reorder_timer()
+
+    def _ordered_video(self, packet):
+        sequence = self.receiver.sequence
+        if sequence is None or packet.ssrc != self.receiver.ssrc:
+            self.reorder.clear()
+            self._cancel_reorder_timer()
+            self._receive_video(packet)
+            return
+        delta = (packet.sequence - sequence) & 65535
+        if delta == 1:
+            self._receive_video(packet)
+        elif 1 < delta < 32768:
+            self.reorder.setdefault(packet.sequence, packet)
+        self._drain_reorder()
 
     def feed(self, data: bytes, channel=0):
         if self.closing or self.error and not self.error.startswith('feedback_'):
@@ -436,31 +594,48 @@ class MediaPipeline:
         if feedback:
             if packet.ssrc != feedback.remote:
                 return
-            feedback.note(packet, time.monotonic())
+            if channel:
+                feedback.note(packet, time.monotonic())
         if self.decoder_errors[channel]:
             return
         if channel == 0:
-            unit = self.receiver.push(packet)
-            if unit is None:
-                return
-            if self.encoded_recording:
-                record = self.encoded_recording
-                try:
-                    if not record["started"] and unit.key:
-                        record["started"] = True
-                    if record["started"]:
-                        if record["bytes"] + len(unit.data) > 1024**3:
-                            self.stop_recording()
-                        else:
-                            record["file"].write(unit.data)
-                            record["bytes"] += len(unit.data)
-                except OSError as error:
-                    self.recording_error = type(error).__name__
-                    self.stop_recording()
-        else:
-            if packet.payload_type != 101 or len(self.processes) < 2:
-                return
-            unit = AccessUnit(packet.payload, packet.timestamp, True)
+            if self.live:
+                self._ordered_video(packet)
+            else:
+                self._receive_video(packet)
+        elif packet.payload_type == 101 and len(self.processes) >= 2:
+            self._enqueue(AccessUnit(packet.payload, packet.timestamp, True), channel)
+
+    def _receive_video(self, packet):
+        now = time.monotonic()
+        if feedback := self.feedback[0]:
+            feedback.note(packet, now)
+        unit = self.receiver.push(packet)
+        if unit is None:
+            return
+        self.received_video += 1
+        if self.live:
+            self._note_video_frame(unit, now)
+        self._record_video(unit)
+        self._enqueue(unit, 0)
+
+    def _record_video(self, unit):
+        if self.encoded_recording:
+            record = self.encoded_recording
+            try:
+                if not record["started"] and unit.key:
+                    record["started"] = True
+                if record["started"]:
+                    if record["bytes"] + len(unit.data) > 1024**3:
+                        self.stop_recording()
+                    else:
+                        record["file"].write(unit.data)
+                        record["bytes"] += len(unit.data)
+            except OSError as error:
+                self.recording_error = type(error).__name__
+                self.stop_recording()
+
+    def _enqueue(self, unit, channel):
         queue = self.queues[channel]
         if queue.full():
             self.queue_drops += 1
@@ -483,11 +658,19 @@ class MediaPipeline:
                         self.first_timestamps[channel] = unit.timestamp
                     ticks = (unit.timestamp - self.first_timestamps[channel]) & 0xffffffff
                     pts = ticks * 10000000 // (48000 if channel else 24000)
-                    proc.stdin.write(PACKET.pack(b"IMPK", len(unit.data), pts, unit.width, unit.height, self.width, self.height))
-                    proc.stdin.write(unit.data)
+                    active_width = unit.width
+                    if not channel and self.interface_orientation in (1, 2, 3, 4):
+                        if self.direct_video:
+                            active_width |= self.interface_orientation << 28
+                        else:
+                            self.frame_orientations[pts] = self.interface_orientation
+                            if len(self.frame_orientations) > 128:
+                                self.frame_orientations.popitem(last=False)
+                    payload = unit.decoder_data()
+                    proc.stdin.write(PACKET.pack(b"IMPK", len(payload), pts, active_width, unit.height,
+                        self.width | self.panel_width << 16, self.height | self.panel_height << 16))
+                    proc.stdin.write(payload)
                     await proc.stdin.drain()
-                    if not channel and self.feedback[0]:
-                        await self._send(0, self.feedback[0].complete(unit.timestamp))
                 finally:
                     self.queues[channel].task_done()
         except asyncio.CancelledError:
@@ -495,34 +678,97 @@ class MediaPipeline:
         except Exception as error:
             self._decoder_failed(channel, "decoder_input_" + type(error).__name__)
 
-    def _write(self, data):
+    def _write(self, *blocks):
         with self.pipe_lock:
-            self.pipe.write(data)
+            try:
+                for data in blocks:
+                    remaining = memoryview(data)
+                    while remaining:
+                        count = self.pipe.write(remaining)
+                        if not count:
+                            raise BrokenPipeError("Media pipe closed")
+                        remaining = remaining[count:]
+            except (OSError, ValueError):
+                self.pipe_failed = True
+                raise
 
     async def mark_reconnecting(self):
         if self.pipe and not self.closing:
-            await asyncio.to_thread(self._write, FRAME.pack(b'IMCD', 3, 0, 0, 0, 0))
+            header = FRAME.pack(b'IMCD', 3, 0, 0, 0, 0)
+            if self.live_video is None:
+                await asyncio.to_thread(self._write, header)
+            else:
+                self._queue_live_video(header, b'', False)
+
+    def _queue_live_video(self, header, pixels, is_frame):
+        if self.live_video.full():
+            _, _, dropped_frame = self.live_video.get_nowait()
+            self.display_drops += int(dropped_frame)
+        self.live_video.put_nowait((header, pixels, is_frame))
+
+    async def _write_live_video(self):
+        try:
+            while True:
+                header, pixels, is_frame = await self.live_video.get()
+                await asyncio.to_thread(self._write, header, pixels)
+                self.frames += int(is_frame)
+        except (OSError, ValueError):
+            pass
 
     async def _output(self, proc, channel=0):
         try:
+            if self.direct_video and not channel:
+                writing = False
+                while completed := await proc.stderr.read(4096):
+                    written = completed.count(b'V')
+                    dropped = completed.count(b'D')
+                    self.frames += written
+                    self.decoded_video += written + dropped
+                    self.display_drops += dropped
+                    if b'X' in completed:
+                        self.pipe_failed = True
+                        return
+                    for event in completed:
+                        if event == ord('D'):
+                            continue
+                        if event == ord('B') and not writing:
+                            writing = True
+                        elif event == ord('V') and writing:
+                            writing = False
+                        else:
+                            raise ValueError("Invalid decoder acknowledgement")
+                if not self.closing and not self.finishing:
+                    # An interrupted payload leaves the byte stream unframed.
+                    # The owner must retire it instead of appending a new frame.
+                    if writing or await proc.wait() == 3:
+                        self.pipe_failed = True
+                    else:
+                        self._decoder_failed(channel, "decoder_output_closed")
+                return
             while True:
                 header = await proc.stdout.readexactly(FRAME.size)
                 magic, kind, w, h, size, pts = FRAME.unpack(header)
                 if magic != b"IMCD" or kind not in (1, 2) or not 0 < size <= 64 * 1024 * 1024:
                     raise ValueError("Invalid decoder output")
                 data = await proc.stdout.readexactly(size)
-                await asyncio.to_thread(self._write, header + data)
-                if kind == 1:
-                    self.frames += 1
+                self.decoded_video += int(kind == 1)
+                if kind == 1 and (orientation := self.frame_orientations.pop(pts, None)) in (1, 2, 3, 4):
+                    header = FRAME.pack(magic, 4 + orientation, w, h, size, pts)
+                if kind == 1 and self.live_video is not None:
+                    self._queue_live_video(header, data, True)
                 else:
-                    self.audio_frames += 1
+                    await asyncio.to_thread(self._write, header + data)
+                    if kind == 1:
+                        self.frames += 1
+                    else:
+                        self.audio_frames += 1
         except asyncio.CancelledError:
             raise
         except asyncio.IncompleteReadError as error:
             if not self.closing and not (self.finishing and not error.partial):
                 self._decoder_failed(channel, "decoder_output_truncated")
         except Exception as error:
-            if not self.closing:
+            if not self.closing and not self.pipe_failed:
                 self._decoder_failed(channel, "decoder_output_" + type(error).__name__)
 
     def _decoder_failed(self, channel, error):
@@ -535,7 +781,7 @@ class MediaPipeline:
         try:
             # Bound restarts during permanently broken input, but allow later recovery.
             await asyncio.sleep(max(.1, self.restart_at[channel] + 2 - time.monotonic()))
-            if self.closing or self.finishing:
+            if self.closing or self.finishing or self.pipe_failed:
                 return
             self.restart_at[channel] = time.monotonic()
             previous = self.decoder_tasks[channel]
@@ -549,17 +795,21 @@ class MediaPipeline:
                 with contextlib.suppress(ProcessLookupError):
                     proc.kill()
             await proc.wait()
+            if self.direct_video and not channel and proc.returncode == 3:
+                self.pipe_failed = True
+                return
             queue = self.queues[channel]
             while not queue.empty():
                 queue.get_nowait()
                 queue.task_done()
             if not channel:
                 self.receiver.resync()
+                self.reorder.clear()
+                self._cancel_reorder_timer()
+                self.frame_orientations.clear()
                 await self.mark_reconnecting()
             self.first_timestamps[channel] = None
-            proc = await asyncio.create_subprocess_exec(str(decoder_path()), *(["--audio"] if channel else []),
-                stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
-                creationflags=0x08000000 if os.name == "nt" else 0)
+            proc = await self._start_decoder(decoder_path(), channel)
             self.processes[channel] = proc
             output = asyncio.create_task(self._output(proc, channel))
             self.output_tasks.append(output)
@@ -645,6 +895,8 @@ class MediaPipeline:
         if self.closing:
             return
         self.closing = True
+        self.reorder.clear()
+        self._cancel_reorder_timer()
         for task in self.tasks:
             task.cancel()
         for proc in self.processes:

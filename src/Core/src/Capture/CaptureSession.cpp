@@ -30,6 +30,7 @@
 #include <limits>
 #include <memory>
 #include <semaphore>
+#include <system_error>
 #include <thread>
 #include <optional>
 #include <utility>
@@ -815,6 +816,11 @@ detail::FrameOrientationResult detail::apply_video_input_metadata(
     // artwork only when the input canvas itself is portrait.
     if (metadata && (metadata->native_airplay || portrait_input))
         frame.device_orientation_turns = metadata->rotation_turns;
+    // The compatibility encoder already turns its pixels. Independently
+    // observed physical direction only selects the artwork on a matching axis.
+    if (metadata && metadata->physical_turns && frame.width != frame.height &&
+        (*metadata->physical_turns & 1U) == static_cast<unsigned>(frame.width > frame.height))
+        frame.device_orientation_turns = metadata->physical_turns;
     frame.received_at = metadata ? metadata->received_at : fallback_received_at;
     return FrameOrientationResult::Applied;
 }
@@ -860,11 +866,6 @@ UsbDisplayConfiguration make_usb_display_configuration(UsbProjectionMode mode,
         // A downsampled first frame is not a panel measurement. In the native
         // presentation path retain the panel/custom request through startup.
         configuration.adaptive_reconfiguration = false;
-        break;
-    case UsbProjectionMode::Aisi:
-        options.demo_mode = false;
-        options.requested_width = 1565;
-        options.requested_height = 1565;
         break;
     }
     // This bypasses the ordinary symmetric capability policy only for an
@@ -1097,6 +1098,7 @@ void CaptureSession::stop() noexcept {
     {
         std::scoped_lock lock(mutex_);
         latest_frame_.reset();
+        preview_audio_sync_.clear();
     }
     release_usb_transition_gate();
 }
@@ -1115,6 +1117,21 @@ void CaptureSession::set_audio_volume(float volume) noexcept {
     std::scoped_lock lock(audio_mutex_);
     if (audio_renderer_) audio_renderer_->set_volume(clamped);
     logging::write(std::format("audio volume={:.3f}", clamped));
+}
+
+void CaptureSession::set_audio_playback_preferences(std::uint32_t buffer, bool sync) {
+    {
+        std::scoped_lock lock(audio_mutex_);
+        audio_buffer_ = buffer;
+        if (audio_renderer_) audio_renderer_->set_buffer(static_cast<audio::PlaybackBuffer>(buffer));
+    }
+    std::scoped_lock lock(mutex_);
+    sync_audio_preview_.store(sync, std::memory_order_relaxed);
+    if (!sync) preview_audio_sync_.clear();
+}
+
+void CaptureSession::set_device_audio_route(bool enabled) noexcept {
+    device_audio_route_.store(enabled, std::memory_order_release);
 }
 
 void CaptureSession::set_target_fps(std::uint32_t target_fps) noexcept {
@@ -1172,11 +1189,15 @@ std::shared_ptr<const media::DecodedFrame> CaptureSession::latest_frame() const 
 }
 
 std::shared_ptr<const media::DecodedFrame> CaptureSession::next_render_frame() {
-    // All preview windows read the same immutable latest-frame mailbox. A
-    // destructive FIFO here leaves multi-window renderers with stale GPU
-    // references, eventually exhausting the shared-texture pool.
+    std::uint32_t delay{};
+    if (sync_audio_preview_.load(std::memory_order_relaxed) &&
+        play_audio_.load(std::memory_order_relaxed) && audio_volume_.load(std::memory_order_relaxed) > 0 &&
+        !device_audio_route_.load(std::memory_order_acquire)) {
+        std::scoped_lock lock(audio_mutex_);
+        if (audio_renderer_) delay = audio_renderer_->preview_delay_ms();
+    }
     std::scoped_lock lock(mutex_);
-    return latest_frame_;
+    return preview_audio_sync_.select(latest_frame_, delay);
 }
 
 std::shared_ptr<const AudioPacket> CaptureSession::next_audio_packet(
@@ -1307,8 +1328,7 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
             preferences_.usb_requested_width, preferences_.usb_requested_height));
     }
     const char* projection_mode = preferences_.usb_projection_mode == UsbProjectionMode::Demo
-        ? "demo" : preferences_.usb_projection_mode == UsbProjectionMode::AirPlay
-        ? "airplay" : "aisi";
+        ? "demo" : "airplay";
     logging::write(std::format(
         "usb_projection mode={} valeria={} native_size={} display_size={}x{} adaptive={} stevenote={} h264_444={}",
         projection_mode, session_options.demo_mode,
@@ -1317,6 +1337,7 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
         adaptive_display, session_options.native_airplay, session_options.native_airplay));
     quicktime::SessionProtocol protocol(session_options);
     UsbOrientationMonitor orientation_monitor;
+    std::jthread optional_orientation_startup;
     std::atomic_bool native_airplay_active{};
     std::atomic_bool native_orientation_failed{};
     bool audio_initialization_disabled{};
@@ -1334,6 +1355,7 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
     const auto shutdown_usb = [&]() noexcept {
         if (!usb || shutdown_done) return;
         shutdown_done = true;
+        optional_orientation_startup.request_stop();
         const bool handshake_started = protocol.state() != quicktime::SessionState::WaitingForPing;
         const auto stop_messages = protocol.stop_messages();
         logging::write(std::format(
@@ -1418,6 +1440,7 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                 sync_stop_count, release_count, decoded_packet_count,
                 final_hpd0_sent));
         } catch (...) {}
+        if (optional_orientation_startup.joinable()) optional_orientation_startup.join();
         orientation_monitor.stop();
         // AppleUsbFilter is unsafe when the stream handle that owns bulk pipes
         // is also used to disconnect its own PnP node. For libusb0, take the
@@ -1490,6 +1513,13 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
     try {
         bool quicktime_open_recovered{};
         bool newly_activated_libusb0{};
+        if (preferences_.usb_projection_mode == UsbProjectionMode::AirPlay &&
+            !media::BundledH264Decoder::available()) {
+            failure_stage = FailureStage::Decoder;
+            failure_kind = FailureKind::VideoStream;
+            failure_code = -2110;
+            throw std::runtime_error("Native AirPlay decoder runtime is unavailable");
+        }
         if (usb_backend_ == UsbBackend::LibUsb0) {
             bool quicktime_activation_requested{};
             bool adopted_existing_quicktime{};
@@ -1731,22 +1761,38 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
         active_backend_release.arm([active_backend] {
             release_active_usb_backend(active_backend);
         });
-        if (tablet && preferences_.usb_projection_mode == UsbProjectionMode::AirPlay &&
-            media::BundledH264Decoder::available() && orientation_monitor.start(serial_, stop_token)) {
+        if (preferences_.usb_projection_mode == UsbProjectionMode::AirPlay) {
+            // B is the original-quality path on both iPhone and iPad. Never
+            // silently start ordinary AirPlay when a native prerequisite is
+            // missing: its encoder can select a much smaller source frame.
+            failure_stage = FailureStage::VideoStream;
+            failure_kind = FailureKind::VideoStream;
+            failure_code = -2111;
+            if (!orientation_monitor.start(serial_, stop_token)) {
+                if (stop_token.stop_requested())
+                    throw std::runtime_error("Native AirPlay startup cancelled");
+                throw std::runtime_error("Native AirPlay system orientation is unavailable");
+            }
             session_options = make_usb_display_configuration(preferences_.usb_projection_mode,
                 native.width, native.height, preferences_.usb_requested_width,
-                preferences_.usb_requested_height, true, true, diagnostic_display).session_options;
+                preferences_.usb_requested_height, true, tablet, diagnostic_display).session_options;
             session_options.request_audio = true;
             protocol = quicktime::SessionProtocol(session_options);
             native_airplay_active.store(true, std::memory_order_release);
             logging::write("usb_projection native_airplay=true h264_444=true orientation=springboard");
             logging::write(std::format("usb_projection native_canvas_request={}x{}",
                 session_options.requested_width, session_options.requested_height));
-        } else if (session_options.native_airplay) {
-            // A decoder alone is insufficient: native iPad samples omit the
-            // display transform even while their content changes direction.
-            session_options.native_airplay = false;
-            protocol = quicktime::SessionProtocol(session_options);
+        } else {
+            // A can present as soon as QuickTime delivers video. The read-only
+            // side channel may become ready later or be missing on this device.
+            try {
+                optional_orientation_startup = std::jthread([&](std::stop_token token) {
+                    if (!orientation_monitor.start(serial_, token, false) && !token.stop_requested())
+                        logging::write("usb_orientation worker_unavailable mode=demo fallback=video");
+                });
+            } catch (const std::system_error&) {
+                logging::write("usb_orientation worker_unavailable mode=demo fallback=video");
+            }
         }
         set_state(State::Handshaking, L"已连接 QuickTime 端点，等待 PING");
         failure_stage = FailureStage::QuickTimeHandshake;
@@ -1759,6 +1805,7 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
             bool reset_decoder{};
             bool native_airplay{};
             std::optional<unsigned> rotation_turns;
+            std::optional<unsigned> physical_turns;
             std::uint32_t content_session_generation{};
         };
         std::mutex video_queue_mutex;
@@ -1803,6 +1850,7 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
             std::uint32_t applied_reconnect_generation{};
             detail::VideoInputMetadataQueue input_times;
             std::optional<unsigned> reported_rotation;
+            std::optional<unsigned> reported_artwork_rotation;
             std::optional<std::array<std::uint32_t, 10>> reported_geometry;
             std::optional<std::array<std::uint32_t, 8>> reported_active_area;
             media::ScreenContentGeometry screen_content;
@@ -1860,6 +1908,7 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                     reported_active_area.reset();
                     reported_geometry.reset();
                     reported_rotation.reset();
+                    reported_artwork_rotation.reset();
                     applied_content_session_generation = pending.content_session_generation;
                 }
                 if (pending.reset_decoder) {
@@ -1885,6 +1934,7 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                     if (configured_format) {
                         std::scoped_lock lock(mutex_);
                         latest_frame_.reset();
+                        preview_audio_sync_.clear();
                         logging::write(std::format(
                             "video_worker preview_frames_cleared format_change={}x{}_to_{}x{}",
                             configured_format->width, configured_format->height,
@@ -2080,7 +2130,7 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                                     : "unknown"));
                     }
                     input_times.push({timestamp_100ns, pending.received_at,
-                        pending.rotation_turns, pending.native_airplay});
+                        pending.rotation_turns, pending.native_airplay, pending.physical_turns});
                     const double decode_ms = std::chrono::duration<double, std::milli>(
                         std::chrono::steady_clock::now() - decode_started).count();
                     const bool report_decode = video_decode_count % 120 == 0 ||
@@ -2163,6 +2213,12 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                                 *reported_rotation, decoded_frame.width, decoded_frame.height,
                                 decoded_frame.timestamp_100ns));
                         }
+                        if (!native_frame && reported_artwork_rotation != decoded_frame.device_orientation_turns) {
+                            reported_artwork_rotation = decoded_frame.device_orientation_turns;
+                            logging::write(std::format("usb_artwork_orientation turns={} width={} height={}",
+                                reported_artwork_rotation ? static_cast<int>(*reported_artwork_rotation) : -1,
+                                decoded_frame.width, decoded_frame.height));
+                        }
                         published = std::make_shared<media::DecodedFrame>(std::move(decoded_frame));
                         ++video_output_count;
                         std::scoped_lock lock(mutex_);
@@ -2179,6 +2235,7 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                                 published->width, published->height, panel_pixels));
                         }
                         latest_frame_ = published;
+                        preview_audio_sync_.publish(published, sync_audio_preview_.load(std::memory_order_relaxed));
                         snapshot_.width = published->width;
                         snapshot_.height = published->height;
                     }
@@ -2244,7 +2301,6 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
         std::uint64_t usb_reads{}, usb_empty_reads{};
         double max_usb_read_ms{}, max_usb_reply_ms{}, max_packet_batch_ms{};
         detail::DisplayReconfigureGate display_reconfigure;
-        bool native_fallback_reconfigure{};
         auto ping_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(8);
         std::optional<std::chrono::steady_clock::time_point>
             first_video_wait_started;
@@ -2253,8 +2309,10 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
         detail::FastStreamReconnectGate fast_stream_reconnect_gate;
         detail::StreamingSilenceWatchdog media_silence_watchdog;
         detail::StreamingSilenceWatchdog video_silence_watchdog;
+        auto next_phone_audio_usb_check = std::chrono::steady_clock::time_point::min();
         const auto request_fast_reconnect_for_missing_frame_rate = [&] {
-            if (display_reconfigure.pending()) return;
+            if (display_reconfigure.pending() ||
+                device_audio_route_.load(std::memory_order_acquire)) return;
             const auto now = std::chrono::steady_clock::now();
             if (video_silence_watchdog.silence_duration(now) <
                 std::chrono::milliseconds(2500)) return;
@@ -2281,9 +2339,32 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
             const auto now = std::chrono::steady_clock::now();
             if (!media_silence_watchdog.expired(now)) return;
 
+            const bool phone_audio = device_audio_route_.load(std::memory_order_acquire) &&
+                protocol.state() != quicktime::SessionState::Stopped;
+            const bool in_phone_audio_grace = phone_audio && !media_silence_watchdog.expired(
+                now, detail::StreamingSilenceWatchdog::PhoneAudioSilenceLimit);
+            // Avoid enumerating the entire Windows device tree on every USB
+            // read while still noticing an unplug during the longer grace period.
+            if (in_phone_audio_grace && now < next_phone_audio_usb_check) return;
+
             const auto silence = media_silence_watchdog.silence_duration(now);
             const bool usb_parent_present =
                 device::is_apple_usb_parent_present(serial_);
+            // An idle picture can arrive less often without PCM traffic. Allow
+            // more time and try one in-place reconnect before retiring a silent
+            // USB session. A missing USB device still uses the usual deadline.
+            if (usb_parent_present && phone_audio) {
+                if (in_phone_audio_grace) {
+                    next_phone_audio_usb_check = now + std::chrono::seconds(1);
+                    return;
+                }
+                if (!display_reconfigure.pending() && fast_stream_reconnect_gate.request()) {
+                    fast_stream_reconnect_requested.store(true, std::memory_order_release);
+                    media_silence_watchdog.arm(now);
+                    logging::write("quicktime_fast_reconnect requested=phone_audio_media_silent usb_configuration=retained");
+                    return;
+                }
+            }
             failure_stage = FailureStage::VideoStream;
             failure_kind = usb_parent_present
                 ? FailureKind::SystemClosed
@@ -2310,47 +2391,36 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
             }
             throw std::runtime_error(diagnostic);
         };
-        const auto fallback_to_ordinary_airplay = [&] {
-            if (!native_airplay_active.exchange(false, std::memory_order_acq_rel)) return;
-            session_options.native_airplay = false;
-            protocol.set_native_airplay(false);
-            if (!diagnostic_display) {
-                const auto ordinary_edge = std::max(session_options.requested_width, session_options.requested_height);
-                session_options.requested_width = session_options.requested_height = ordinary_edge;
-            }
-            {
-                std::scoped_lock lock(video_queue_mutex);
-                video_queue.clear();
-                video_queue_bytes = 0;
-                video_queue_budget.reset();
-            }
-            decoder_reconnect_generation.fetch_add(1, std::memory_order_acq_rel);
-            content_session_generation.fetch_add(1, std::memory_order_acq_rel);
-            for (const auto& request : protocol.begin_display_reconfigure(
-                    session_options.requested_width, session_options.requested_height))
-                usb->write(request, 1000);
-            native_fallback_reconfigure = true;
-            display_reconfigure.begin(std::chrono::steady_clock::now());
-            first_video_wait_started.reset();
-            // Retain the shared mux broker for reverse control until capture ends.
-            logging::write("usb_projection native_airplay=false fallback=orientation_or_video_unavailable usb_configuration=retained");
-        };
         while (!stop_token.stop_requested()) {
             video_worker_failure.rethrow_if_set();
             if (native_orientation_failed.exchange(false, std::memory_order_acq_rel) ||
                 (native_airplay_active.load(std::memory_order_acquire) &&
-                    !orientation_monitor.at(std::chrono::steady_clock::now())))
-                fallback_to_ordinary_airplay();
+                    !orientation_monitor.at(std::chrono::steady_clock::now()))) {
+                failure_stage = FailureStage::VideoStream;
+                failure_kind = FailureKind::VideoStream;
+                failure_code = -2111;
+                throw std::runtime_error("Native AirPlay system orientation was interrupted; original-quality negotiation retained");
+            }
             if (display_reconfigure.ready(std::chrono::steady_clock::now())) {
                 for (const auto& request : protocol.complete_display_reconfigure())
                     usb->write(request, 1000);
                 logging::write(std::format(
-                    "display reconfigure complete release_seen={} native_fallback={}",
-                    display_reconfigure.released(), native_fallback_reconfigure));
+                    "display reconfigure complete release_seen={}",
+                    display_reconfigure.released()));
                 display_reconfigure.finish();
-                native_fallback_reconfigure = false;
                 first_video_wait_started.reset();
                 video_silence_watchdog.arm(std::chrono::steady_clock::now());
+            }
+            if (!display_reconfigure.pending()) {
+                const bool to_pc = !device_audio_route_.load(std::memory_order_acquire);
+                if (auto route = protocol.set_audio_route(to_pc); !route.empty()) {
+                    usb->write(route, 1000);
+                    stop_audio_renderer();
+                    const auto now = std::chrono::steady_clock::now();
+                    media_silence_watchdog.arm(now);
+                    video_silence_watchdog.arm(now);
+                    logging::write(std::format("quicktime_audio_route output={}", to_pc ? "windows" : "device"));
+                }
             }
             const auto activity_log_now = std::chrono::steady_clock::now();
             if (activity_log_now - last_activity_log_at >= std::chrono::seconds(2)) {
@@ -2440,10 +2510,6 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                 const auto now = std::chrono::steady_clock::now();
                 if (!first_video_wait_started) first_video_wait_started = now;
                 if (now - *first_video_wait_started >= std::chrono::seconds(12)) {
-                    if (native_airplay_active.load(std::memory_order_acquire)) {
-                        fallback_to_ordinary_airplay();
-                        continue;
-                    }
                     failure_stage = FailureStage::VideoStream;
                     failure_kind = FailureKind::NoVideoFrames;
                     failure_code = -2105;
@@ -2513,7 +2579,7 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                             std::chrono::steady_clock::now() - reply_started).count());
                 }
 
-                if (event.video_sample && !native_fallback_reconfigure) {
+                if (event.video_sample) {
                     failure_stage = FailureStage::Decoder;
                     failure_kind = FailureKind::VideoStream;
                     failure_code = -2107;
@@ -2531,6 +2597,8 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                         : preferences_.usb_projection_mode == UsbProjectionMode::AirPlay
                             ? coremedia::display_rotation_turns(pending.sample.display_rotation)
                             : std::nullopt;
+                    if (!pending.native_airplay && preferences_.usb_projection_mode == UsbProjectionMode::Demo)
+                        pending.physical_turns = orientation_monitor.at(pending.received_at);
                     if (pending.sample.format) pending.format = std::move(pending.sample.format);
                     else if (protocol.video_format()) pending.format = *protocol.video_format();
                     const auto incoming_bytes = pending.sample.sample_data.size();
@@ -2600,7 +2668,7 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                     if (enqueued) video_queue_cv.notify_one();
                 }
 
-                if (event.audio_sample) {
+                if (event.audio_sample && !device_audio_route_.load(std::memory_order_relaxed)) {
                     last_audio_activity_ns.store(std::chrono::duration_cast<std::chrono::nanoseconds>(
                         std::chrono::steady_clock::now().time_since_epoch()).count(),
                         std::memory_order_release);
@@ -2635,7 +2703,9 @@ void CaptureSession::run(std::stop_token stop_token) noexcept {
                                 audio_renderer_ = std::make_unique<audio::WasapiRenderer>(
                                     *audio_format->audio,
                                     play_audio_.load(std::memory_order_relaxed),
-                                    audio_volume_.load(std::memory_order_relaxed));
+                                    audio_volume_.load(std::memory_order_relaxed),
+                                    audio::WasapiBufferingMode::LowLatency,
+                                    static_cast<audio::PlaybackBuffer>(audio_buffer_));
                             } catch (const std::exception& error) {
                                 logging::write(std::format(
                                     "wasapi initialization_disabled error={}", error.what()));

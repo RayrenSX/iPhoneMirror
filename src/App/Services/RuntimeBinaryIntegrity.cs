@@ -30,6 +30,18 @@ internal static class RuntimeBinaryIntegrity
     private const string FfmpegHash =
         "1326dde4c84ff1f96fe6b8916c5bed29e163e9b5dccf995f6f3db069d143ec5e";
 
+    private static readonly Lazy<string[]?> AirPlayPhoneAudioTestHashes = new(() =>
+    {
+        using var stream = typeof(RuntimeBinaryIntegrity).Assembly.GetManifestResourceStream(
+            "IPhoneMirror.App.Components.AirPlayPhoneAudioTest.sha256");
+        if (stream is null) return null;
+        using var reader = new StreamReader(stream);
+        var hashes = reader.ReadToEnd().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        if (hashes.Length != 2 || !hashes.All(IsSha256))
+            throw new InvalidDataException("Invalid embedded AirPlay phone audio test hashes.");
+        return hashes;
+    });
+
     private static readonly Lazy<string> PublishedFfmpegHash = new(() =>
     {
         using var stream = typeof(RuntimeBinaryIntegrity).Assembly.GetManifestResourceStream(
@@ -46,9 +58,16 @@ internal static class RuntimeBinaryIntegrity
     internal static bool VerifyWirelessDirectory(string directory,
         out string failure)
     {
+        var testHashes = AirPlayPhoneAudioTestHashes.Value;
         foreach (var (name, expected) in WirelessHashes)
         {
-            if (!VerifyFile(Path.Combine(directory, name), expected, out failure))
+            var hash = testHashes is null ? expected : name switch
+            {
+                "airplay2dll.dll" => testHashes[0],
+                "dnssd.dll" => testHashes[1],
+                _ => expected,
+            };
+            if (!VerifyFile(Path.Combine(directory, name), hash, out failure))
                 return false;
         }
         failure = string.Empty;

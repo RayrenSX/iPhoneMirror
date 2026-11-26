@@ -1,3 +1,5 @@
+using System.Buffers.Binary;
+using System.IO.Pipes;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
@@ -17,6 +19,66 @@ internal static partial class Program
 {
     private static void Verify(bool condition, string message)
     { if (!condition) throw new InvalidOperationException(message); }
+
+    private static void TestCoreDevicePipe()
+    {
+        TestCoreDevicePipeAsync().GetAwaiter().GetResult();
+        Console.WriteLine("CoreDevice media pipe passed mixed-size audio and video and sustained video downsizing.");
+    }
+
+    private static async Task TestCoreDevicePipeAsync()
+    {
+        using var core = new NativeCore();
+        var session = core.CreateExternalSession("pipe-test-" + Guid.NewGuid().ToString("N"), false, 0);
+        Verify(session.Success && session.Handle is not null, session.Message);
+        using var handle = session.Handle!;
+        await using var feed = new CoreDeviceCaptureFeed(core, handle, null);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var producer = new NamedPipeClientStream(".", feed.PipeName, PipeDirection.Out,
+            PipeOptions.Asynchronous);
+        await producer.ConnectAsync(timeout.Token);
+
+        async Task SendAsync(uint kind, uint width, uint height, byte[] payload)
+        {
+            var header = new byte[28];
+            "IMCD"u8.CopyTo(header);
+            BinaryPrimitives.WriteUInt32LittleEndian(header.AsSpan(4), kind);
+            BinaryPrimitives.WriteUInt32LittleEndian(header.AsSpan(8), width);
+            BinaryPrimitives.WriteUInt32LittleEndian(header.AsSpan(12), height);
+            BinaryPrimitives.WriteUInt32LittleEndian(header.AsSpan(16), (uint)payload.Length);
+            await producer.WriteAsync(header, timeout.Token);
+            await producer.WriteAsync(payload, timeout.Token);
+        }
+
+        const uint smallWidth = 64, smallHeight = 48;
+        var largeVideo = new byte[128 * 96 * 3 / 2];
+        var smallVideo = Enumerable.Repeat((byte)147, (int)(smallWidth * smallHeight * 3 / 2)).ToArray();
+        byte[] largeAudio = [1, 2, 3, 4, 5, 6, 7, 8];
+        byte[] smallAudio = [9, 10, 11, 12];
+        await SendAsync(1, 128, 96, largeVideo);
+        await SendAsync(2, 48000, 2, largeAudio);
+        await SendAsync(1, smallWidth, smallHeight, smallVideo);
+        await SendAsync(1, 128, 96, largeVideo);
+        for (var index = 0; index < CoreDeviceCaptureFeed.VideoFramesBeforeBufferShrink; index++)
+            await SendAsync(1, smallWidth, smallHeight, smallVideo);
+        await SendAsync(2, 48000, 2, smallAudio);
+        producer.Dispose();
+        await feed.Completion.WaitAsync(timeout.Token);
+
+        var status = core.GetDeviceSessionStatus(handle);
+        Verify(status.Width == smallWidth && status.Height == smallHeight &&
+            status.VideoFrames == 3UL + CoreDeviceCaptureFeed.VideoFramesBeforeBufferShrink &&
+            status.AudioPackets == 2, "The media feed lost an interleaved packet after its payload shrank.");
+        var frame = core.GetDeviceOutputNv12Frame(handle, smallWidth, smallHeight);
+        Verify(frame is not null && frame.Pixels.SequenceEqual(smallVideo),
+            "A smaller video frame included data from the older, larger frame.");
+        var firstAudio = core.GetDeviceOutputAudioPacket(handle, 0);
+        Verify(firstAudio is not null && firstAudio.Pcm.SequenceEqual(largeAudio),
+            "The first audio packet was overwritten by the next pipe read.");
+        var secondAudio = core.GetDeviceOutputAudioPacket(handle, firstAudio!.Sequence);
+        Verify(secondAudio is not null && secondAudio.Pcm.SequenceEqual(smallAudio),
+            "A smaller audio packet included data from the older, larger packet.");
+    }
 
     private static int RunCoreDeviceReplayTest(string path)
     {

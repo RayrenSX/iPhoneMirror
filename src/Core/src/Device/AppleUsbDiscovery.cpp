@@ -91,7 +91,7 @@ ServiceState apple_mobile_device_service_state() noexcept {
 }
 
 std::vector<PhysicalAppleDevice> discover_physical_apple_usb_devices() {
-    HDEVINFO raw = SetupDiGetClassDevsW(nullptr, nullptr, nullptr, DIGCF_ALLCLASSES | DIGCF_PRESENT);
+    HDEVINFO raw = SetupDiGetClassDevsW(nullptr, L"USB", nullptr, DIGCF_ALLCLASSES | DIGCF_PRESENT);
     if (raw == INVALID_HANDLE_VALUE) return {};
     std::unique_ptr<void, DevInfoDeleter> set(raw);
 
@@ -103,15 +103,11 @@ std::vector<PhysicalAppleDevice> discover_physical_apple_usb_devices() {
             if (GetLastError() == ERROR_NO_MORE_ITEMS) break;
             continue;
         }
-        const auto id = instance_id(raw, data);
+        auto id = instance_id(raw, data);
         if (!is_apple_mobile_capture_parent_instance_id(id)) continue;
-        const std::wstring hardware = property(raw, data, SPDRP_HARDWAREID);
-        const std::wstring upper_hardware = uppercase(hardware);
-        if (upper_hardware.find(L"USB\\VID_05AC") == std::wstring::npos) continue;
-
         std::wstring description = property(raw, data, SPDRP_FRIENDLYNAME);
         if (description.empty()) description = property(raw, data, SPDRP_DEVICEDESC);
-        results.push_back({std::move(description), hardware});
+        results.push_back({std::move(description), std::move(id)});
     }
     return results;
 }

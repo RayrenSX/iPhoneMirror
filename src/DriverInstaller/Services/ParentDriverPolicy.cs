@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using IPhoneMirror.DriverInstaller.Models;
 
 namespace IPhoneMirror.DriverInstaller.Services;
@@ -13,7 +14,22 @@ public sealed record ParentDriverChoice(string InfPath, string Section, string D
     public string VersionText => $"{Version >> 48}.{(Version >> 32) & 65535}.{(Version >> 16) & 65535}.{Version & 65535}";
     public string DisplayText => $"{Description} — {Provider} — {VersionText} ({Path.GetFileName(InfPath)})";
     internal bool IsComposite => Path.GetFileName(InfPath).Equals("usb.inf", StringComparison.OrdinalIgnoreCase)
-        && Section.Equals("Composite.Dev", StringComparison.OrdinalIgnoreCase);
+        && SectionMatches(Section, "Composite.Dev");
+    internal bool IsCaptureDriver => IsComposite ||
+        (Provider.Equals("Apple, Inc.", StringComparison.OrdinalIgnoreCase) ||
+         Provider.Equals("Apple Inc.", StringComparison.OrdinalIgnoreCase)) &&
+        SectionMatches(Section, "AppleUSB_CCGPDriverInstall");
+
+    internal static ParentDriverChoice? SelectCaptureDriver(IReadOnlyList<ParentDriverChoice> compatible) =>
+        compatible.FirstOrDefault(choice => choice.IsComposite) ??
+        compatible.FirstOrDefault(choice => choice.IsCaptureDriver);
+
+    internal static bool SectionMatches(string installed, string selected) =>
+        installed.Equals(selected, StringComparison.OrdinalIgnoreCase) ||
+        installed.StartsWith(selected, StringComparison.OrdinalIgnoreCase) &&
+        Regex.IsMatch(installed[selected.Length..], @"^\.NT(?:amd64|x86|arm64)?(?:\.\d+)*$",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
     internal bool SameDriver(ParentDriverChoice other) =>
         InfPath.Equals(other.InfPath, StringComparison.OrdinalIgnoreCase) &&
         Section.Equals(other.Section, StringComparison.OrdinalIgnoreCase) &&
@@ -66,6 +82,8 @@ internal sealed record ParentDriverConsent(string InstanceId, string StateFinger
             Inf = device.DriverInf.ToUpperInvariant(),
             Section = device.DriverSection.ToUpperInvariant(),
             device.DriverVersion,
+            device.IsStarted,
+            device.ProblemCode,
             Upper = device.UpperFilters.Select(value => value.ToUpperInvariant()).ToArray(),
             Lower = (device.LowerFilters ?? []).Select(value => value.ToUpperInvariant()).ToArray(),
         }))));

@@ -18,12 +18,42 @@ internal static class DiagnosticLogMaintenanceTests
             await TestContinuousMaintenanceAsync(Path.Combine(root, "continuous"));
             TestManagedRotationMaintainsDirectory(reverseControl: false);
             TestManagedRotationMaintainsDirectory(reverseControl: true);
-            Console.WriteLine("PASS diagnostic log maintenance: continuous cleanup, retention, directory budget, active/locked file protection, recovery and immediate managed rotation cleanup.");
+            TestManagedDailyAndUtf8SizeRotation(root);
+            await TestLockedManagedArchiveAsync(Path.Combine(root, "locked-managed"));
+            Console.WriteLine("PASS diagnostic log maintenance: daily and UTF-8 size rotation, continuous cleanup, retention, directory budget and active/locked file protection.");
         }
         finally
         {
             Directory.Delete(root, recursive: true);
         }
+    }
+
+    private static void TestManagedDailyAndUtf8SizeRotation(string root)
+    {
+        var path = Path.Combine(root, "daily.log");
+        DiagnosticLogger.AppendLog(path, "previous day\n", 32, 2);
+        var previousDay = DateTime.UtcNow.AddDays(-2);
+        File.SetLastWriteTimeUtc(path, previousDay);
+        previousDay = File.GetLastWriteTimeUtc(path);
+
+        // 10 Chinese characters and a newline use 31 bytes in UTF-8.
+        var entry = new string('日', 10) + "\n";
+        DiagnosticLogger.AppendLog(path, entry, 32, 2);
+        Assert(File.ReadAllText(path) == entry && new FileInfo(path).Length == 31,
+            "Writing on a new day must open a new file without a UTF-8 BOM.");
+        var dailyArchive = Archives(root, "daily.log").Single();
+        Assert(File.ReadAllText(dailyArchive) == "previous day\n" &&
+               File.GetLastWriteTimeUtc(dailyArchive) == previousDay,
+            "Daily rotation must preserve the archived data and its age.");
+
+        DiagnosticLogger.AppendLog(path, "a", 32, 2);
+        Assert(new FileInfo(path).Length == 32,
+            "An entry that fits exactly must stay in the current file.");
+        DiagnosticLogger.AppendLog(path, "b\n", 32, 2);
+        var nextArchive = Archives(root, "daily.log").Single(file => file != dailyArchive);
+        Assert(File.ReadAllText(path) == "b\n" && File.ReadAllText(nextArchive) == entry + "a" &&
+               File.ReadAllText(dailyArchive) == "previous day\n",
+            "Same-day size rotation must retain each previous segment in order.");
     }
 
     private static void TestRetentionAndDirectoryLimit(string directory)
@@ -32,12 +62,14 @@ internal static class DiagnosticLogMaintenanceTests
         var now = DateTimeOffset.UtcNow;
         var activeNames = new[] { "application.log", "capture.log", "reverse-control.log", "startup.log" };
         foreach (var name in activeNames)
-            CreateFile(directory, name, MiB, now.AddDays(-30));
-        var expired = CreateFile(directory, "expired.log.1", MiB, now.AddDays(-15));
+            CreateFile(directory, name, MiB, now);
+        var expired = CreateFile(directory, "startup.log.1", MiB, now.AddDays(-15));
         var oldest = CreateFile(directory, "capture.log.1", 24 * MiB, now.AddDays(-4));
         var newer = CreateFile(directory, "application.log.1", 24 * MiB, now.AddDays(-3));
         var newest = CreateFile(directory, "reverse-control.log.1", 24 * MiB, now.AddDays(-2));
         var unrelated = CreateFile(directory, "keep.data", 30 * MiB, now.AddDays(-30));
+        var unrelatedLog = CreateFile(directory, "other-program.log", 30 * MiB, now.AddDays(-30));
+        var unrelatedArchive = CreateFile(directory, "application.log.backup", 30 * MiB, now.AddDays(-30));
 
         var result = DiagnosticLogger.CleanupDirectory(directory, now, includeActiveLogs: false);
         Assert(result.DeletedFiles == 2 && result.DeletedBytes == 25 * MiB,
@@ -45,9 +77,65 @@ internal static class DiagnosticLogMaintenanceTests
         Assert(!File.Exists(expired) && !File.Exists(oldest) && File.Exists(newer) && File.Exists(newest),
             "Directory cleanup must preserve recent archives once the total fits.");
         Assert(activeNames.All(name => File.Exists(Path.Combine(directory, name))),
-            "Automatic cleanup must preserve active log names even if their timestamps have expired.");
-        Assert(File.Exists(unrelated) && LogBytes(directory) <= DiagnosticLogger.MaximumDirectoryBytes,
-            "Non-log files must neither be deleted nor count toward the log budget.");
+            "Automatic budget cleanup must preserve recent active logs.");
+        Assert(File.Exists(unrelated) && File.Exists(unrelatedLog) && File.Exists(unrelatedArchive),
+            "Unrelated files in a custom log directory must not count toward the log budget.");
+        var inactive = Path.Combine(directory, "reverse-control.log");
+        File.SetLastWriteTimeUtc(inactive, now.AddDays(-30).UtcDateTime);
+        DiagnosticLogger.CleanupDirectory(directory, now, includeActiveLogs: false);
+        Assert(!File.Exists(inactive), "An unused active log must expire.");
+        DiagnosticLogger.CleanupDirectory(directory, now, includeActiveLogs: true);
+        Assert(File.Exists(unrelatedLog) && File.Exists(unrelatedArchive),
+            "Manual cleanup must preserve unrelated files in a custom log directory.");
+    }
+
+    private static async Task TestLockedManagedArchiveAsync(string directory)
+    {
+        Directory.CreateDirectory(directory);
+        var now = DateTimeOffset.UtcNow;
+        var path = CreateFile(directory, "application.log", 128, now);
+        var oldest = CreateFile(directory, "application.log.4", 16, now.AddDays(-4));
+        for (var index = 1; index <= 3; ++index)
+            CreateFile(directory, $"application.log.{index}", 16, now.AddDays(-index));
+        using (var handle = new FileStream(oldest, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+        {
+            DiagnosticLogger.AppendLog(path, "current log\n", 128, 4, maintainDirectory: true);
+            Assert(File.ReadAllText(path) == "current log\n" &&
+                   Archives(directory, "application.log").Count() == 5,
+                "A locked managed archive must not prevent rotation or discard younger archives.");
+            File.WriteAllText(path, new string('x', 128));
+            DiagnosticLogger.AppendLog(path, "another current log\n", 128, 4, maintainDirectory: true);
+            Assert(File.ReadAllText(path) == "another current log\n" &&
+                   Archives(directory, "application.log").Count() == 5,
+                "Further rotations must stay bounded while the oldest archive is locked.");
+
+            var remainingLocks = Archives(directory, "application.log").Where(file => file != oldest)
+                .Select(file => new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                .ToArray();
+            try
+            {
+                var fullLog = new string('x', 128);
+                File.WriteAllText(path, fullLog);
+                try
+                {
+                    DiagnosticLogger.AppendLog(path, "extra log\n", 128, 4, maintainDirectory: true);
+                    throw new InvalidOperationException("Rotation should fail when every archive slot is locked.");
+                }
+                catch (IOException)
+                {
+                    Assert(File.ReadAllText(path) == fullLog &&
+                           Archives(directory, "application.log").Count() == 5,
+                        "Full locked archive slots must preserve the active log and the file limit.");
+                }
+            }
+            finally
+            {
+                foreach (var archiveLock in remainingLocks) archiveLock.Dispose();
+            }
+        }
+        await using var maintenance = DiagnosticLogger.StartDirectoryMaintenance(directory, TimeSpan.FromMilliseconds(25));
+        await EventuallyAsync(() => !File.Exists(oldest),
+            "The background sweep must retry excess archives after their locks release.");
     }
 
     private static async Task TestContinuousMaintenanceAsync(string directory)
@@ -109,6 +197,9 @@ internal static class DiagnosticLogMaintenanceTests
         .Where(path => Path.GetExtension(path).Equals(".log", StringComparison.OrdinalIgnoreCase) ||
                        Path.GetFileName(path).Contains(".log.", StringComparison.OrdinalIgnoreCase))
         .Sum(path => new FileInfo(path).Length);
+
+    private static IEnumerable<string> Archives(string directory, string activeName) =>
+        Directory.EnumerateFiles(directory, activeName + ".*", new EnumerationOptions());
 
     private static async Task EventuallyAsync(Func<bool> condition, string message)
     {

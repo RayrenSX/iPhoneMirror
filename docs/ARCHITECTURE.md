@@ -1,8 +1,8 @@
 # iPhoneMirror 架构
 
-2026-11-12 对照当前工作区核对，主程序/驱动管理器项目版本为 `1.8.5-pre5`（源码基线 `1eb833a`）。
-本页描述实现边界，不表示测试版已公开发布。构建与测试见[开发指南](DEVELOPMENT.md)，
-全部文档见[索引](README.md)。
+[文档索引](README.md) · [English architecture guide](en/ARCHITECTURE.md)
+
+本页描述本地 main 的 v1.8.5-pre7 实现。构建与测试见[开发指南](DEVELOPMENT.md)。版本范围见[pre7 发布说明](releases/v1.8.5-pre7.md)。
 
 ## 数据流
 
@@ -48,6 +48,13 @@ native session / media-cast frame
 `iPhoneMirror.UxPlayHost.exe` 管理 UxPlay/GStreamer 子进程，将镜像视频和 PCM 转成
 相同无线 IPC，再接入 `WirelessCaptureSession`。UxPlay 不提供 URL/HLS/DLNA 视频应用投放。
 
+### 当前本地的其他媒体与工具路径
+
+- 已配对无线设备的 CoreDevice 视频：`PairedDeviceDiscovery` 只读发现与验证身份，`CoreDeviceCaptureFeed` 通过桥接器启动 `tools/coredevice_media.py`，定制 `coredevice_decoder` 解码 HEVC 并经专用管道送入预览。要求 iOS／iPadOS 27+ 及对应开发者服务，目前只传画面。设备身份与扫描时序见[配对无线发现](PAIRED_WIRELESS_DISCOVERY.md)。
+- USB 推荐协议为 AirPlay 原生 presentation，兼容选项为演示模式；二者仍通过 USB QuickTime 传输。旧 C 固定尺寸协商已移除，迁移规则见[协议说明](PROTOCOL.md#当前有线模式与尺寸协商)。
+- `DeviceHubPanel` 通过现有反控桥调用设备管理；资源管理器映射由本机 WebDAV 服务代理当前设备允许访问的文件域，不暴露任意手机文件系统。签名工作进程与安装分开，前者只处理本地 IPA，后者复用就绪的目标设备通道。
+- 文字识别通过 Windows OCR 在本地处理捕获帧；画面调整、窗口样式、预览圆角和边框属于显示层，不能视为录制、截图或 API 帧的修改。
+
 ### 反向控制与 USBMux 共存
 
 ```text
@@ -66,7 +73,7 @@ WPF preview input → ReverseControlInputRouter / device binding
 使反控能与隐藏 USB 配置下的投屏共存；该本地服务不承载视频，也不能等同于固定 `37015`。
 停止对应有线投屏前，主程序先释放反控桥占用的 USBMux 接口，再由核心恢复 USB 配置。
 
-USB/无线反控需按设备验证开发者模式、DDI 和 mainTouchscreen `257`；
+USB/无线触控反控最低要求 iOS／iPadOS 17.4，仍需按设备验证开发者模式、DDI 和 mainTouchscreen `257`；
 `ready` 表示服务验证通过，不能代替真实输入效果验收。无线桥不回退到 USB。
 蓝牙输入不依赖这套 DDI 路径，受 BLE 外设能力和辅助触控约束。主预览和独立窗口支持默认关闭的实验性绝对位置鼠标；
 切换模式涉及 HID 描述符变化，可能需要重新配对。该 UI 能力不等同于 HTTP API 的绝对触控支持，
@@ -81,7 +88,7 @@ src/Core (C++ DLL)
 │  └─ DeviceManager        多设备合并、配对/Lockdown 元数据
 ├─ Transport
 │  ├─ Socket               有超时的 Winsock RAII
-│  ├─ UsbMuxClient         27015/37015 plist 协议
+│  ├─ UsbMuxClient         Apple 27015 或已明确配置的本地 mux 端口，plist 协议
 │  ├─ QtUsbTransport       vendor request、非首配置切换、bulk I/O
 │  └─ LibUsb0Transport     Windows libusb0 filter 后端
 ├─ Protocol
@@ -112,7 +119,7 @@ src/UxPlayHost (独立备用宿主)
 src/App (WPF/.NET)
 ├─ Interop                 C ABI P/Invoke 与原生预览绑定
 ├─ Models/ViewModels       UI 状态、设备轮询、多设备切换、命令
-├─ Services               驱动只读检测/管理器启动、媒体输出、虚拟摄像头、BLE/USB/无线反控、截图
+├─ Services               驱动检测、媒体输出、虚拟摄像头、BLE/USB/无线反控、设备管理、OCR、签名及窗口布局
 ├─ Automation             回环 HTTP API、鉴权、限流、OpenAPI；复用 Services/Automation 的设备与控制租约
 ├─ Updater                Release 解析、下载校验、Setup/ZIP 更新交接与用户设置
 └─ MainWindow/Windows      主窗口、镜像独立窗口、视频投放界面（独立窗口同时供 OBS 捕获）
@@ -122,6 +129,15 @@ src/Shared / src/SharedUI
 
 tools/usb_touch_bridge.py + tools/iostouch
 └─ CoreDevice/HID、DDI 准备、USBMux 共存、输入状态与恢复；由仓库内配方构建
+
+tools/device_hub.py / device_management.py / explorer_*.py
+└─ 受约束的设备管理动作及可访问文件域；由应用与 SDK/API 复用
+
+tools/coredevice_media.py / coredevice_decoder.c / ipa_signing.py
+└─ 实验性媒体桥与解码器、隔离的本地签名工作进程
+
+sdk/python
+└─ 鉴权 HTTP 客户端与 stdio MCP；复用服务权限、能力与控制租约
 
 src/VirtualCamera (Windows Media Foundation component)
 ├─ MediaSource             current-user frame server media source (RGB32/NV12 metadata)
@@ -182,7 +198,7 @@ src/DriverInstaller (独立 WPF/.NET EXE)
    普通用户随后即可启动；摄像头只提供视频；
 4. 共享纹理/Spout 或 OBS source plugin：仍是可评估的低拷贝优化，不属于当前公开接口。
 
-当前工作区允许在录制/推流时显式选择麦克风，与来源 PCM 混音；默认关闭。
+当前直播页允许显式选择麦克风，与来源 PCM 混音；默认关闭。录制页没有麦克风选择入口。
 缺少可用音频管线时不能启用麦克风混音，虚拟摄像头仍只发布视频。
 
 ## 安全与发布

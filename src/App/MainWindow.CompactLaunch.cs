@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using System.Windows;
 using IPhoneMirror.App.Localization;
+using IPhoneMirror.App.Models;
 using IPhoneMirror.App.Services;
+using IPhoneMirror.App.Windows;
 
 namespace IPhoneMirror.App;
 
@@ -10,6 +12,22 @@ public partial class MainWindow
     private bool _compactPreviewActive;
     private readonly CancellationTokenSource _compactLaunchCancellation = new();
     private readonly SemaphoreSlim _compactLaunchGate = new(1, 1);
+
+    internal static void CreateCompactShortcut(DeviceViewModel device, Window owner)
+    {
+        var title = LocalizationService.Get("CompactLaunchTitle");
+        string message;
+        try
+        {
+            var path = CompactLaunchOptions.CreateDesktopShortcut(device.Udid, device.DisplayName);
+            message = LocalizationService.Format("CompactShortcutCreated", path);
+        }
+        catch (Exception error)
+        {
+            message = LocalizationService.Format("CompactLaunchFailed", error.Message);
+        }
+        AppPromptWindow.Inform(title, message, owner);
+    }
 
     private async Task InitializeDeviceStartupAsync()
     {
@@ -47,7 +65,7 @@ public partial class MainWindow
                 // A wired shortcut must not spend its discovery budget starting
                 // unrelated AirPlay/DLNA receivers and their child processes.
                 var refresh = options.DeviceId is { } id &&
-                    !Models.DeviceViewModel.IsWirelessUdid(id)
+                    !DeviceViewModel.IsWirelessUdid(id)
                     ? _viewModel.RefreshCompactDeviceAsync()
                     : _viewModel.RefreshAsync(forceDeviceEnumeration: true);
                 await refresh
@@ -98,7 +116,7 @@ public partial class MainWindow
             WindowState = WindowState.Normal;
             Activate();
             _viewModel.AddUiLog(LocalizationService.Format("CompactLaunchFailed", message));
-            IPhoneMirror.App.Windows.AppPromptWindow.Inform(LocalizationService.Get("CompactLaunchTitle"),
+            AppPromptWindow.Inform(LocalizationService.Get("CompactLaunchTitle"),
                 LocalizationService.Format("CompactLaunchFailed", message), this);
         }
         finally { if (acquired) _compactLaunchGate.Release(); }

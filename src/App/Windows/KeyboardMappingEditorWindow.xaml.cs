@@ -179,7 +179,7 @@ public partial class KeyboardMappingEditorWindow : IPhoneMirror.UI.Controls.Roun
         var compact = StepScroller.ActualWidth < 520;
         CompactIndicator.Visibility = compact ? Visibility.Visible : Visibility.Collapsed;
         StepIndicator.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
-        StepNumberText.Visibility = StepTitle.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+        StepTitle.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
         StepHeading.Margin = new Thickness(0, 0, 0, compact ? 12 : 24);
         // Center short steps, but let enlarged text grow beyond the viewport.
         // A fixed page height clips the centered step before scrolling can help.

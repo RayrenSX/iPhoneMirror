@@ -11,6 +11,10 @@
 #include <string>
 #include <thread>
 
+namespace iPhoneMirror::logging {
+void set_log_time_offset_for_testing(std::chrono::system_clock::duration offset);
+}
+
 namespace {
 constexpr std::uintmax_t MaximumLogBytes = 16U * 1024U * 1024U;
 
@@ -30,6 +34,7 @@ public:
             L"-" + std::to_wstring(GetTickCount64()));
     const std::filesystem::path path = directory / L"capture.log";
     const std::filesystem::path archive = directory / L"capture.log.1";
+    const std::filesystem::path alternate = directory / L"capture.log.2";
 
     Fixture() {
         std::wstring buffer(32768, L'\0');
@@ -42,6 +47,7 @@ public:
 
     ~Fixture() {
         iPhoneMirror::logging::shutdown();
+        iPhoneMirror::logging::set_log_time_offset_for_testing({});
         SetEnvironmentVariableW(L"IPHONE_MIRROR_LOG_FILE",
             previous_path.empty() ? nullptr : previous_path.c_str());
         std::error_code error;
@@ -53,7 +59,7 @@ public:
             "active native log exceeds 16 MiB");
         check(std::filesystem::file_size(archive) <= MaximumLogBytes,
             "native log archive exceeds 16 MiB");
-        check(!std::filesystem::exists(directory / L"capture.log.2"),
+        check(!std::filesystem::exists(alternate),
             "native logging retains more than one archive");
     }
 
@@ -70,15 +76,20 @@ void test_continuous_rotation_and_locked_archive() {
         logging::write(logging::Level::Info, "rotation", payload);
     fixture.check_bounds();
 
-    // Windows normally prevents deleting or renaming files whose readers did
-    // not grant FILE_SHARE_DELETE. Filling the active log must stop writing
-    // rather than append forever when the retained archive is held open.
+    // The producer continues rotating when a viewer holds one archive.
     const auto locked = CreateFileW(fixture.archive.c_str(), GENERIC_READ,
         FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     check(locked != INVALID_HANDLE_VALUE, "failed to lock native log archive");
     for (int index = 0; index < 300; ++index)
         logging::write(logging::Level::Warning, "rotation", payload);
-    fixture.check_bounds();
+    check(std::filesystem::file_size(fixture.alternate) <= MaximumLogBytes,
+        "native logger did not use a bounded alternate archive");
+    logging::write("logging-continued-with-one-locked-archive");
+    const auto locked_alternate = CreateFileW(fixture.alternate.c_str(), GENERIC_READ,
+        FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    check(locked_alternate != INVALID_HANDLE_VALUE, "failed to lock alternate archive");
+    for (int index = 0; index < 300; ++index)
+        logging::write(logging::Level::Warning, "rotation", payload);
     const auto blocked_size = std::filesystem::file_size(fixture.path);
     logging::write("blocked-rotation-must-not-be-appended");
     // A short line can fit in the remaining budget; repeat full-sized writes
@@ -88,6 +99,7 @@ void test_continuous_rotation_and_locked_archive() {
     check(std::filesystem::file_size(fixture.path) <= blocked_size + 1024,
         "rotation failure keeps appending full-size native log records");
     CloseHandle(locked);
+    CloseHandle(locked_alternate);
 
     std::this_thread::sleep_for(std::chrono::milliseconds(1100));
     logging::write(logging::Level::Info, "rotation", payload);
@@ -118,6 +130,33 @@ void test_shutdown_at_size_limit() {
         "native shutdown summary exceeds the active file byte budget");
 }
 
+void test_daily_rotation() {
+    namespace logging = iPhoneMirror::logging;
+    Fixture fixture;
+    {
+        std::ofstream existing(fixture.path);
+        existing << "previous-day-before-startup\n";
+    }
+    std::filesystem::last_write_time(fixture.path,
+        std::chrono::file_clock::now() - std::chrono::hours(48));
+    logging::initialize();
+    logging::write("previous-day-during-session");
+    check(read(fixture.archive).find("previous-day-before-startup") != std::string::npos,
+        "native logger did not rotate yesterday's file on startup");
+
+    logging::set_log_time_offset_for_testing(std::chrono::hours(48));
+    logging::write("new-day-during-session");
+    logging::write("same-day-during-session");
+    logging::shutdown();
+    check(read(fixture.archive).find("previous-day-during-session") != std::string::npos,
+        "native logger did not archive the previous day while running");
+    const auto active = read(fixture.path);
+    check(active.find("previous-day-during-session") == std::string::npos &&
+        active.find("new-day-during-session") != std::string::npos &&
+        active.find("same-day-during-session") != std::string::npos,
+        "native logger did not keep the first and later lines of the new day together");
+}
+
 void test_oversized_legacy_log() {
     namespace logging = iPhoneMirror::logging;
     Fixture fixture;
@@ -127,7 +166,19 @@ void test_oversized_legacy_log() {
         stream.seekp(MaximumLogBytes + 1024);
         stream << "legacy-log-tail-must-be-retained\n";
     }
+    {
+        std::ofstream existing(fixture.archive);
+        existing << "existing-archive-must-survive-a-blocked-migration";
+    }
+    const auto source_lock = CreateFileW(fixture.path.c_str(), GENERIC_READ,
+        FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    check(source_lock != INVALID_HANDLE_VALUE, "failed to lock oversized legacy log");
     logging::initialize();
+    const auto archive_before_retry = read(fixture.archive);
+    CloseHandle(source_lock);
+    check(archive_before_retry == "existing-archive-must-survive-a-blocked-migration",
+        "blocked migration must preserve the old archive");
+    std::this_thread::sleep_for(std::chrono::milliseconds(1100));
     logging::write("new-session-after-oversized-legacy-log");
     logging::shutdown();
     fixture.check_bounds();
@@ -137,6 +188,32 @@ void test_oversized_legacy_log() {
         "oversized legacy native log does not retain a bounded recent tail");
     check(read(fixture.path).find("new-session-after-oversized-legacy-log") != std::string::npos,
         "native logging does not start after trimming an oversized legacy log");
+}
+
+void test_shutdown_after_midnight() {
+    namespace logging = iPhoneMirror::logging;
+    Fixture fixture;
+    logging::initialize();
+    logging::write("before-midnight");
+    logging::set_log_time_offset_for_testing(std::chrono::hours(48));
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    bool released = false;
+    do {
+        const auto handle = CreateFileW(fixture.path.c_str(), DELETE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (handle != INVALID_HANDLE_VALUE) {
+            CloseHandle(handle);
+            released = true;
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    } while (std::chrono::steady_clock::now() < deadline);
+    check(released, "an idle session must release the previous day's active log for cleanup");
+    logging::shutdown();
+    check(read(fixture.archive).find("before-midnight") != std::string::npos &&
+        read(fixture.path).find("[shutdown]") != std::string::npos,
+        "shutdown after midnight must archive the prior day and write a bounded summary");
 }
 
 void test_concurrent_rotation() {
@@ -164,9 +241,11 @@ int main() {
     try {
         test_continuous_rotation_and_locked_archive();
         test_shutdown_at_size_limit();
+        test_daily_rotation();
+        test_shutdown_after_midnight();
         test_oversized_legacy_log();
         test_concurrent_rotation();
-        std::cout << "PASS native continuous/concurrent rotation, locked-archive recovery and shutdown bounds\n";
+        std::cout << "PASS native daily/size rotation, concurrent writers, locked-archive recovery and shutdown bounds\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "FAIL " << error.what() << '\n';

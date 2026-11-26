@@ -508,11 +508,31 @@ function Get-CleanupText {
 # Configuration
 # ============================================================
 
-$PnpUtil = Join-Path $env:windir 'System32\pnputil.exe'
+$systemDirectory = [Environment]::SystemDirectory
+$windowsDirectory = [IO.Directory]::GetParent($systemDirectory).FullName
+$PnpUtil = Join-Path $systemDirectory 'pnputil.exe'
 
-$LogRoot = Join-Path `
-    $env:ProgramData `
-    'iPhoneMirror.Driver\DeviceCleanup'
+function Get-CleanupLogRoot {
+    # Use the same machine registration as the driver host. The elevated
+    # bootstrap strips environment variables, including ProgramData.
+    $machine = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
+        [Microsoft.Win32.RegistryHive]::LocalMachine,
+        [Microsoft.Win32.RegistryView]::Registry64)
+    try {
+        $folders = $machine.OpenSubKey('SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders')
+        if ($null -eq $folders) { throw 'The Windows shared data folder is unavailable.' }
+        try {
+            $path = $folders.GetValue('Common AppData', $null,
+                [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+            if ($path -isnot [string] -or $path -notmatch '^[A-Za-z]:\\' -or $path.Contains('%')) {
+                throw 'Windows did not return an absolute shared data folder.'
+            }
+            return [IO.Path]::Combine($path, 'iPhoneMirror.Driver\DeviceCleanup')
+        }
+        finally { $folders.Dispose() }
+    }
+    finally { $machine.Dispose() }
+}
 
 # Apple USB VID
 $AppleVid = '05AC'
@@ -1928,7 +1948,10 @@ Write-Host (Get-CleanupText 'ReinstallAdvice') `
     -ForegroundColor Yellow
 Write-Host ''
 
+$LogRoot = $null
 try {
+
+    $LogRoot = Get-CleanupLogRoot
 
     # ========================================================
     # Scan
@@ -2478,7 +2501,7 @@ try {
             if ($script:PreservedDrivers.Contains($driver.InfName)) { continue }
             $infPath =
                 Join-Path `
-                    $env:windir `
+                    $windowsDirectory `
                     "INF\$($driver.InfName)"
 
             if (Test-Path -LiteralPath $infPath) {
@@ -2690,44 +2713,29 @@ catch {
     # Emergency log
     # --------------------------------------------------------
 
-    try {
+    if ($LogRoot -and -not ($ListOnly -or $PreviewOnly)) {
+        try {
+            New-Item -ItemType Directory -Path $LogRoot -Force | Out-Null
+            $errorLog = Join-Path $LogRoot ('fatal-' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff') + '.log')
+            @(
+                (Get-CleanupText 'FatalError')
+                ''
+                ('Time: ' + (Get-Date))
+                ('Message: ' + $_.Exception.Message)
+                ''
+                'Position:'
+                $_.InvocationInfo.PositionMessage
+                ''
+                'Stack:'
+                $_.ScriptStackTrace
+            ) | Set-Content -LiteralPath $errorLog -Encoding UTF8
 
-        New-Item `
-            -ItemType Directory `
-            -Path $LogRoot `
-            -Force |
-            Out-Null
-
-        $errorLog =
-            Join-Path `
-                $LogRoot `
-                (
-                    'fatal-' +
-                    (Get-Date -Format 'yyyyMMdd-HHmmss-fff') +
-                    '.log'
-                )
-
-        @(
-            (Get-CleanupText 'FatalError')
-            ''
-            ('Time: ' + (Get-Date))
-            ('Message: ' + $_.Exception.Message)
-            ''
-            'Position:'
-            $_.InvocationInfo.PositionMessage
-            ''
-            'Stack:'
-            $_.ScriptStackTrace
-        ) |
-            Set-Content `
-                -LiteralPath $errorLog `
-                -Encoding UTF8
-
-        Write-Host (
-            (Get-CleanupText 'ErrorLog' -Values @($errorLog))
-        ) -ForegroundColor DarkGray
-    }
-    catch {
+            Write-Host (
+                (Get-CleanupText 'ErrorLog' -Values @($errorLog))
+            ) -ForegroundColor DarkGray
+        }
+        catch {
+        }
     }
 
     Stop-Cleanup 1

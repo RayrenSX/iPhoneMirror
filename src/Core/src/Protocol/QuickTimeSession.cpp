@@ -226,12 +226,15 @@ std::uint64_t correlation(const Packet& packet) {
 
 } // namespace
 
-SessionProtocol::SessionProtocol(SessionOptions options) : options_(options) { reset(); }
+SessionProtocol::SessionProtocol(SessionOptions options)
+    : options_(options), release_audio_on_stop_(options.request_audio) { reset(); }
 
 void SessionProtocol::reset() {
     state_ = SessionState::WaitingForPing;
     epoch_ = std::chrono::steady_clock::now();
     device_audio_clock_ = local_audio_clock_ = device_video_clock_ = local_video_clock_ = local_host_clock_ = 0;
+    have_audio_clock_ = false;
+    audio_route_release_pending_ = false;
     video_frames_ = audio_packets_ = 0;
     need_sent_ = reply_received_ = 0;
     last_video_sample_at_.reset();
@@ -272,10 +275,12 @@ SessionEvent SessionProtocol::process(const Packet& packet) {
             if (packet.subtype == fourcc('c', 'w', 'p', 'a')) {
                 if (packet.payload.size() < 32) throw std::runtime_error("CWPA has no device audio clock");
                 device_audio_clock_ = u64le(packet.payload.data() + 24);
+                have_audio_clock_ = true;
                 local_audio_clock_ = device_audio_clock_ + 0x1000;
                 event.outbound.push_back(make_hpd1(options_));
                 event.outbound.push_back(clock_reply(id, local_audio_clock_));
-                if (options_.request_audio) event.outbound.push_back(make_hpa1(device_audio_clock_));
+                if (options_.request_audio && state_ != SessionState::Stopping && state_ != SessionState::Stopped)
+                    event.outbound.push_back(make_hpa1(device_audio_clock_));
                 state_ = SessionState::Negotiating;
             } else if (packet.subtype == fourcc('a', 'f', 'm', 't')) {
                 if (packet.payload.size() < 64) throw std::runtime_error("AFMT has no ASBD");
@@ -304,7 +309,10 @@ SessionEvent SessionProtocol::process(const Packet& packet) {
                 event.outbound.push_back(zero_reply(id));
             } else if (packet.subtype == fourcc('s', 't', 'o', 'p')) {
                 event.outbound.push_back(zero_reply(id));
-                state_ = SessionState::Stopped;
+                const bool route_release = audio_route_release_pending_ &&
+                    (packet.clock_ref == device_audio_clock_ || packet.clock_ref == local_audio_clock_);
+                if (route_release && state_ != SessionState::Stopping) audio_route_release_pending_ = false;
+                else state_ = SessionState::Stopped;
             } else {
                 event.warning = "unsupported SYNC subtype " + fourcc_string(packet.subtype);
             }
@@ -382,7 +390,7 @@ SessionEvent SessionProtocol::process(const Packet& packet) {
 std::vector<std::vector<std::uint8_t>> SessionProtocol::stop_messages() {
     state_ = SessionState::Stopping;
     std::vector<std::vector<std::uint8_t>> messages;
-    if (options_.request_audio) {
+    if (release_audio_on_stop_ || options_.request_audio) {
         // Use the negotiated device audio clock when available. If the
         // session failed before CWPA/PING, still send the same audio-stop
         // control as the reference clients with the protocol empty clock.
@@ -391,6 +399,15 @@ std::vector<std::vector<std::uint8_t>> SessionProtocol::stop_messages() {
     }
     messages.push_back(async_control(fourcc('h', 'p', 'd', '0'), EmptyClockRef));
     return messages;
+}
+
+std::vector<std::uint8_t> SessionProtocol::set_audio_route(bool to_pc) {
+    if (options_.request_audio == to_pc) return {};
+    options_.request_audio = to_pc;
+    if (!have_audio_clock_) return {};
+    if (!to_pc) audio_route_release_pending_ = true;
+    return to_pc ? make_hpa1(device_audio_clock_) :
+        async_control(fourcc('h', 'p', 'a', '0'), device_audio_clock_);
 }
 
 std::vector<std::vector<std::uint8_t>> SessionProtocol::complete_stop_messages() {

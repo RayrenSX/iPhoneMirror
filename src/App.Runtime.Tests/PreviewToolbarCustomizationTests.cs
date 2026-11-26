@@ -33,7 +33,8 @@ internal static partial class Program
                 "Whole-window layout management returned.");
             var live = (Panel)main.FindName("PreviewQuickActions");
             var original = live.Children.OfType<Button>().ToArray();
-            var catalog = original.Select(b => new ToolbarAction(AutomationProperties.GetAutomationId(b), AutomationProperties.GetName(b),
+            var allButtons = ((Dictionary<string, FrameworkElement>)KeyboardField(main, "_previewToolbarItems")).Values.OfType<Button>().ToArray();
+            var catalog = allButtons.Select(b => new ToolbarAction(AutomationProperties.GetAutomationId(b), AutomationProperties.GetName(b),
                 ((StackPanel)b.Content).Children.OfType<IPhoneMirror.App.Controls.ThemedSymbolIcon>().First().Symbol)).ToArray();
             var screenshot = original.Single(b => AutomationProperties.GetAutomationId(b) == "QuickScreenshotButton");
             var originalContext = screenshot.DataContext; var originalEnabled = screenshot.IsEnabled;
@@ -71,7 +72,8 @@ internal static partial class Program
                 InteractionAssert(Math.Abs(((FrameworkElement)editor.FindName("SurroundShade")).Opacity - .85) < .001,
                     "Surrounding interface was not darkened.");
                 InteractionAssert(editor.FindName("FullScreenButton") is null &&
-                    editor.FindName("EditGroupButton") is null && ((Panel)editor.FindName("LibraryItems")).Children.Count == 8,
+                    editor.FindName("EditGroupButton") is null &&
+                    ((Panel)editor.FindName("LibraryItems")).Children.Count == PreviewToolbarSettings.AvailableItems.Length,
                     "Nonessential features remain in the basic editor.");
                 ((ListBox)editor.FindName("PreviewList")).SelectedItem = ((ListBox)editor.FindName("PreviewList")).Items.Cast<ToolbarRow>().Single(x => x.Id == "QuickScreenshotButton");
                 KeyboardCall(editor, "OnHide", editor, new RoutedEventArgs()); Settle();
@@ -83,6 +85,16 @@ internal static partial class Program
                 InteractionAssert(editor.TargetToolbarBounds == toolbarAnchor, "Opening the library moved the toolbar focus anchor.");
                 InteractionAssert(((ScrollViewer)editor.FindName("OptionsScroll")).VerticalOffset < 1,
                     "Opening the library left its heading and first actions out of view.");
+                var libraryGrid = (Panel)editor.FindName("LibraryItems");
+                var libraryCards = libraryGrid.Children.OfType<Button>().ToArray();
+                var libraryBounds = libraryGrid.TransformToAncestor(editor).TransformBounds(new Rect(libraryGrid.RenderSize));
+                var editorPanel = (FrameworkElement)editor.FindName("SettingsPanel");
+                var editorBounds = editorPanel.TransformToAncestor(editor).TransformBounds(new Rect(editorPanel.RenderSize));
+                InteractionAssert(Math.Abs(libraryBounds.Left - editorBounds.Left - (editorBounds.Right - libraryBounds.Right)) < 18 &&
+                    Math.Abs(libraryCards[0].ActualWidth - libraryCards[1].ActualWidth) < 1 &&
+                    Math.Abs(libraryCards[0].TranslatePoint(new Point(), libraryGrid).Y -
+                             libraryCards[1].TranslatePoint(new Point(), libraryGrid).Y) < 1,
+                    "The library grid is not centered with two equally sized columns.");
                 SaveWindowRender(editor, Path.Combine(output, "basic-library.png"));
                 var add = ((Panel)editor.FindName("LibraryItems")).Children.OfType<Button>().Single(b => (string)b.Tag == "QuickScreenshotButton");
                 add.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent)); Settle();
@@ -113,7 +125,8 @@ internal static partial class Program
                 allowSave = true; InteractionAssert(editor.SaveDraft(), "Saving basic toolbar settings failed.");
                 InteractionAssert(JsonSerializer.Serialize(store.Load().PreviewToolbar) == JsonSerializer.Serialize(editor.Draft), "Basic settings did not survive disk roundtrip.");
                 var clone = app.UpdateSettings.Clone(); clone.PreviewToolbar!.Items.Clear();
-                InteractionAssert(app.UpdateSettings.PreviewToolbar!.Items.Count == 8, "Settings clone shares toolbar items.");
+                InteractionAssert(app.UpdateSettings.PreviewToolbar!.Items.Count == PreviewToolbarSettings.DefaultItems.Length,
+                    "Settings clone shares toolbar items.");
                 foreach (var id in PreviewToolbarSettings.DefaultItems) editor.SetItemVisible(id, false);
                 Settle();
                 InteractionAssert(editor.Draft.Items.Count == 0 && ((FrameworkElement)editor.FindName("EmptyHint")).IsVisible,
@@ -189,7 +202,7 @@ internal static partial class Program
             foreach (var language in new[] { "zh-CN", "en-US", "ja-JP", "zh-TW", "zh-HK" })
             {
                 LocalizationService.SetLanguage(language);
-                var localized = original.Select(b => new ToolbarAction(AutomationProperties.GetAutomationId(b), AutomationProperties.GetName(b),
+                var localized = allButtons.Select(b => new ToolbarAction(AutomationProperties.GetAutomationId(b), AutomationProperties.GetName(b),
                     ((StackPanel)b.Content).Children.OfType<IPhoneMirror.App.Controls.ThemedSymbolIcon>().First().Symbol)).ToArray();
                 var render = new PreviewToolbarSettingsWindow(new(), localized, _ => { }, _ => true) { Owner = main };
                 render.ConfigureToolbarFocus(main, (FrameworkElement)main.FindName("EnvironmentPanel"));
@@ -256,8 +269,11 @@ internal static partial class Program
             InteractionAssert(migrated.Items.SequenceEqual(["QuickFullScreenButton", "WirelessControlButton", "QuickScreenshotButton"]) && migrated.IconsOnly &&
                 !JsonSerializer.Serialize(migrated).Contains("Groups"), "Experimental container configuration was not flattened to basic settings.");
             InteractionAssert(JsonSerializer.Deserialize<PreviewToolbarSettings>("""{"Items":[]}""")!.Items.Count == 0 &&
-                JsonSerializer.Deserialize<PreviewToolbarSettings>("""{"Items":[42,null]}""")!.Items.Count == 8,
+                JsonSerializer.Deserialize<PreviewToolbarSettings>("""{"Items":[42,null]}""")!.Items.Count == PreviewToolbarSettings.DefaultItems.Length,
                 "Empty/damaged settings are not handled independently.");
+            var complete = new PreviewToolbarSettings { Items = PreviewToolbarSettings.AvailableItems.ToList() };
+            InteractionAssert(JsonSerializer.Deserialize<PreviewToolbarSettings>(JsonSerializer.Serialize(complete))!.Items.SequenceEqual(complete.Items),
+                "Saving every optional action must not reset a customized toolbar to the six defaults.");
             Console.WriteLine("PASS basic toolbar: whole-interface uniform zoom/dimming, input gates, basic visibility/reorder/icons, save/failure/cancel/clone/migration, hidden/empty/reduced-motion, reverse/early close, five-language layouts, basic action library, no containers/window manager.");
             return 0;
         }

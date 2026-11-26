@@ -1,6 +1,8 @@
 # 开发、测试与发布
 
-本文于 2026-11-12 对照当前工作区脚本核对，主程序与驱动管理器项目版本为 `1.8.5-pre5`（源码基线 `1eb833a`）。
+[文档索引](README.md) · [English development guide](en/DEVELOPMENT.md)
+
+本文以本地 main 的 v1.8.5-pre7 构建流程为准。[pre7 发布说明](releases/v1.8.5-pre7.md)
 以下命令均从仓库根目录运行。模块关系见[架构说明](ARCHITECTURE.md)，文档入口见[索引](README.md)。
 
 ## 环境与依赖
@@ -29,6 +31,9 @@ Apple USB 支持和实机信任是运行有线功能的条件，不是离线协�
 | `src/DriverInstaller` | 独立驱动管理器与提权操作入口 |
 | `src/Shared` / `src/SharedUI` | 共享下载/提权安全逻辑、主题、控件、窗口行为 |
 | `tools/usb_touch_bridge.py` / `tools/iostouch` | 当前 Python 反控桥及 QuickTime 配置下的 USBMux 共存支持 |
+| `tools/coredevice_media.py` / `tools/coredevice_decoder.c` | 实验性 CoreDevice 视频及定制 HEVC 解码器；与普通 USB/AirPlay 媒体路径分开 |
+| `tools/device_hub.py` / `tools/ipa_signing.py` / `tools/ipaside_engine` | 设备管理与签名工作进程，复用桥接运行时 |
+| `sdk/python` | 本地 HTTP API 的 Python SDK 与 stdio MCP 服务 |
 | `src/App/Automation` / `docs/api` | 本地 HTTP Automation API、接入说明及 Python/curl 示例 |
 | `scripts` / `installer` / `.github/workflows` | 构建依赖、验证、打包、安装器与 CI |
 | `src/*.Tests` / `tests` | 托管、Python 及专项恢复测试；原生测试在各模块的 `tests` 下 |
@@ -41,9 +46,14 @@ Apple USB 支持和实机信任是运行有线功能的条件，不是离线协�
 `work/main-consolidation` 仅为历史恢复备份，不是开发或交付来源。
 
 当前主线交付目录为 `outputs/iPhoneMirror-main`。下方 `build.ps1` 的默认输出仍是
-`outputs/iPhoneMirror`，脚本没有自动改用主线交付目录；构建后将验证过的完整载荷整理到主线交付目录。
+`outputs/iPhoneMirror`。可以用 `-OutputRoot` 将构建直接写入主线交付目录下的新子目录。
 更新交付前检查程序是否运行，不覆盖运行中的程序；停止或更新运行实例需有相应任务授权。
 `-TestBuild` 会清理整个 `outputs`，也可能影响主线交付和历史验证产物，不应作为保留现有交付的日常构建方式。
+
+修改桥接源码时，同时同步到独立 iUsbBridge 仓库的 Python `main`，保留其独立构建与测试能力，按仓库 `AGENTS.md` 完成验证和提交。桥接构建来源选择不能代替源码同步。
+
+本地构建副本的占用检查和异盘归档见[工作区空间维护](WORKSPACE_STORAGE.md)。
+`scripts/archive_workspace_artifacts.ps1` 默认只生成报告；加 `-Archive -Compressed` 后分卷压缩、校验文件并释放本地副本，原目录保留恢复指针。
 
 ## 常用构建
 
@@ -64,6 +74,7 @@ Apple USB 支持和实机信任是运行有线功能的条件，不是离线协�
 | 参数 | 行为与限制 |
 |---|---|
 | `-SkipTests` | 跳过 `build.ps1` 的测试段；不能据此报告测试通过 |
+| `-OutputRoot` | 将常规构建产物放到工作区内的指定目录。用于验证和交付暂存，发布打包仍使用默认目录及其构建记录 |
 | `-OmitUxPlayRuntime` | 缺少 MSYS2 时可生成省略 UxPlay 的测试包；原始无线接收端仍保留 |
 | `-IncludeUxPlayRuntime` | 将默认独立下载的 UxPlay 组件也内置，适合离线包 |
 | `-OmitMediaOutputRuntime` | 省略内置 FFmpeg；应用仍校验候选 FFmpeg 的固定 SHA-256，任意系统 FFmpeg 不能替代 |
@@ -97,7 +108,11 @@ Automation 生命周期专项、VC Runtime 版本解析和 Apple 支持包验证
 也可单独执行 `App.Runtime.Tests --grid-layout-compatibility`。故障证据见
 [启动布局闪退分析](diagnostics/startup-grid-crash-20261116.md)。
 
-`build.ps1` 先编译托管测试，再直接执行测试程序集，并仅为测试子进程清除
+多显示器最大化与侧栏切换可单独运行 `App.Runtime.Tests --workspace-fullscreen`。
+该专项在创建窗口前启用与主程序一致的 PerMonitorV2，使用各屏实际 DPI，覆盖设备管理首次打开、
+重复切换、跨屏后尚未执行的窗口适配回调、投屏状态以及最大化/预览全屏/还原切换。
+
+`build.ps1` 和 `dotnet test` 先编译托管测试，再直接执行测试程序集，并仅为测试子进程清除
 SDK/CI 注入的 CLR/.NET 环境覆盖。`dotnet run` 会注入 `DOTNET_ROOT_X64`，
 触发更新器和驱动的提权环境保护；单独运行涉及提权的测试时，应使用干净环境下的
 `dotnet <测试程序集.dll>`。应用的安全检查和拒绝注入的回归测试保持启用。
@@ -175,6 +190,8 @@ UI smoke、`Test-WiredRecoveryDevice.ps1`、`Test-WiredControlUia.ps1` 和
 
 ## 打包与版本
 
+pre7 的主程序和驱动管理器使用产品版本 `1.8.5-pre7`，程序集和文件版本使用 `1.8.5.0`。原生核心在常规构建中读取同一个产品版本。用 Windows 文件属性核对交付目录内的三个组件。
+
 ```powershell
 # 默认从主程序项目读取版本，并要求驱动管理器版本一致
 ./scripts/package_release.ps1 -GenerateSbom
@@ -184,8 +201,7 @@ UI smoke、`Test-WiredRecoveryDevice.ps1`、`Test-WiredControlUia.ps1` 和
 标准包另附 UxPlay 可选组件 ZIP；应用首次选用时通过镜像下载并显示进度弹窗。
 安装包默认以 100,000,000 字节为优化目标，超出时只提醒，组件完整可用优先。
 需要强制限制的构建可显式传入 `-EnforceInstallerSizeLimit`。
-不指定旧的 `-Version 1.8.3`，可避免与当前源码版本冲突。`-SkipBuild` 仅适用于已有匹配
-载荷；它仍执行版本和完整性检查。构建与打包应使用一致的运行时省略选项。
+打包默认读取当前项目版本。`-SkipBuild` 仅适用于已有匹配载荷，仍执行版本和完整性检查。构建与打包应使用一致的运行时省略选项。
 
 ### ZIP 与安装包验收
 

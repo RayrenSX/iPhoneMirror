@@ -9,6 +9,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Input;
 using IPhoneMirror.App;
+using IPhoneMirror.App.Localization;
 using IPhoneMirror.App.Updater;
 
 namespace IPhoneMirror.App.Runtime.Tests;
@@ -139,6 +140,8 @@ internal static partial class Program
                                 SaveWindowRender(window, Path.Combine(output, name + ".png"));
                                 if (surface == "media-output")
                                     AssertMicrophoneReachable(window, Path.Combine(output, name + "-microphone.png"));
+                                if (ReviewCapture)
+                                    VerifyReviewedPage(window, surface, Path.Combine(output, name));
                                 if (surface is "reverse-control-prompt" or "reverse-control-prompt-long")
                                     AssertPromptActionsReachable(window, Path.Combine(output, name + "-scrolled.png"));
                                 ExerciseWorkAreaSizes(window, name, layoutFindings, Path.Combine(output, name));
@@ -177,6 +180,180 @@ internal static partial class Program
         foreach (var finding in layoutFindings) Console.Error.WriteLine(finding);
         Console.WriteLine($"UI audit: {results.Count} surfaces rendered, {failures.Count} failures, {layoutFindings.Count} layout findings, {bindingTrace.Messages.Count} binding diagnostics.");
         return failures.Count == 0 && bindingTrace.Messages.Count == 0 && layoutFindings.Count == 0 ? 0 : 1;
+    }
+
+    private static void VerifyReviewedPage(Window window, string surface, string screenshot)
+    {
+        switch (surface)
+        {
+            case "workspace-devices":
+                var vm = (IPhoneMirror.App.ViewModels.MainViewModel)window.DataContext;
+                if (vm.WirelessStatus == LocalizationService.Get("WirelessNotStarted"))
+                {
+                    var waitingStatus = (TextBlock)window.FindName("WaitingWirelessStatus");
+                    InteractionAssert(string.IsNullOrEmpty(vm.ActiveWirelessReceiverName) && waitingStatus.Visibility == Visibility.Collapsed,
+                        "The waiting screen must hide routine status for an inactive AirPlay receiver.");
+                    var starting = vm.GetType().GetProperty(nameof(vm.IsWirelessReceiverStarting))!;
+                    starting.SetValue(vm, true);
+                    window.UpdateLayout();
+                    InteractionAssert(waitingStatus.Visibility == Visibility.Visible, "Receiver startup progress must be visible.");
+                    starting.SetValue(vm, false);
+
+                    var tone = vm.GetType().GetProperty(nameof(vm.WirelessStatusTone))!;
+                    var originalTone = vm.WirelessStatusTone;
+                    tone.SetValue(vm, IPhoneMirror.UI.Controls.StatusTone.Error);
+                    window.UpdateLayout();
+                    InteractionAssert(waitingStatus.Visibility == Visibility.Visible, "Receiver startup errors must be visible.");
+                    tone.SetValue(vm, originalTone);
+
+                    var activeName = vm.GetType().GetProperty(nameof(vm.ActiveWirelessReceiverName))!;
+                    activeName.SetValue(vm, "iPhoneMirror AirPlay");
+                    window.UpdateLayout();
+                    var usbCard = (FrameworkElement)window.FindName("WaitingUsbCard");
+                    var guide = (FrameworkElement)window.FindName("WaitingAirPlayCard");
+                    foreach (var name in new[] { "WaitingUsbInstructions", "WaitingUsbTrust", "WaitingAirPlayInstructions", "WaitingAirPlaySelect" })
+                    {
+                        var instructions = (TextBlock)window.FindName(name);
+                        InteractionAssert(instructions.IsVisible && instructions.TextAlignment == TextAlignment.Center &&
+                            !string.IsNullOrWhiteSpace(instructions.Text) && !instructions.Text.Any(c => char.IsPunctuation(c) || c == '→'),
+                            "Each connection step must be centered and punctuation-free.");
+                    }
+                    var waiting = (FrameworkElement)window.FindName("WaitingForDeviceState");
+                    InteractionAssert(!FindVisualDescendants<TextBlock>(waiting).Any(text => text.IsVisible && text.Text == vm.ActiveWirelessReceiverName) &&
+                        waitingStatus.Visibility == Visibility.Collapsed,
+                        "A ready receiver must keep the waiting screen clear of receiver names and status messages.");
+                    InteractionAssert(Math.Abs(usbCard.ActualWidth - guide.ActualWidth) <= 1 &&
+                        (Grid.GetRow(guide) != 0 || Math.Abs(usbCard.ActualHeight - guide.ActualHeight) <= 1),
+                        "Side-by-side connection cards must align at equal widths and heights.");
+                    SaveWindowRender(window, screenshot + "-airplay-ready.png");
+                    var originalWidth = window.Width;
+                    try
+                    {
+                        window.Width = window.MinWidth;
+                        AdvanceDispatcher(TimeSpan.FromMilliseconds(100));
+                        window.UpdateLayout();
+                        InteractionAssert(Grid.GetRow(guide) == 1 && Math.Abs(usbCard.ActualWidth - guide.ActualWidth) < 1,
+                            "A narrow waiting screen must stack both connection options at equal widths.");
+                        SaveWindowRender(window, screenshot + "-airplay-ready-narrow.png");
+                    }
+                    finally { window.Width = originalWidth; }
+                    activeName.SetValue(vm, string.Empty);
+                }
+                break;
+            case "projection-settings":
+                var initialSize = window.RenderSize;
+                foreach (var category in new[] { "Control", "Application", "Projection" })
+                {
+                    var tab = (RadioButton)window.FindName(category + "SettingsTab");
+                    tab.IsChecked = true;
+                    window.UpdateLayout();
+                    InteractionAssert(window.RenderSize == initialSize &&
+                        new[] { "Control", "Application", "Projection" }.All(name =>
+                            ((ScrollViewer)window.FindName(name + "SettingsScrollViewer")).IsVisible == (name == category)),
+                        $"Floating settings must show only the {category} category and keep its window size.");
+                    SaveWindowRender(window, screenshot + "-" + category.ToLowerInvariant() + ".png");
+                }
+                break;
+            case "capture-error":
+                var actions = (WrapPanel)window.FindName("NoticeActions");
+                InteractionAssert(window.FindName("FailureDetails") is FrameworkElement { IsVisible: true } &&
+                    window.FindName("CopyDiagnosticsButton") is Button { IsVisible: true } copy && actions.Children.Contains(copy) &&
+                    window.FindName("CloseButton") is Button { IsVisible: true } close && actions.Children.Contains(close) &&
+                    window.FindName("RecoveryButton") is Button { IsVisible: true } recovery && actions.Children.Contains(recovery),
+                    "Capture error should show technical details and group copy, close and recovery in the fixed footer.");
+                break;
+            case "media-output":
+                var tabs = Visuals(window).OfType<TabControl>().First();
+                var originalTab = tabs.SelectedIndex;
+                tabs.SelectedIndex = 1;
+                AdvanceDispatcher(TimeSpan.FromMilliseconds(100));
+                window.UpdateLayout();
+                var protocol = (ComboBox)window.FindName("StreamProtocolBox");
+                var authorization = (FrameworkElement)window.FindName("WhipAuthorizationFields");
+                var primary = (Button)window.FindName("StartStreamingButton");
+                var address = (TextBlock)window.FindName("StreamAddressLabel");
+                var streamingScroll = Ancestors(address).OfType<ScrollViewer>().First();
+                protocol.SelectedIndex = 0;
+                window.UpdateLayout();
+                var streamingHeight = window.ActualHeight;
+                InteractionAssert(primary.IsVisible && !authorization.IsVisible &&
+                    !streamingScroll.IsAncestorOf(primary),
+                    $"Expected a fixed RTMP action with hidden authorization. Action: {primary.IsVisible}, authorization: {authorization.IsVisible}, tab: {tabs.SelectedIndex}.");
+                protocol.SelectedIndex = 2;
+                AdvanceDispatcher(TimeSpan.FromMilliseconds(100));
+                InteractionAssert(authorization.IsVisible &&
+                    address.Text == (string)Application.Current.FindResource("StreamWhipAddress"),
+                    "Switching to WHIP did not expose its endpoint and token fields.");
+                window.UpdateLayout();
+                AssertStreamingFieldAlignment(window);
+                SaveWindowRender(window, screenshot + "-whip.png");
+                protocol.SelectedIndex = 1;
+                InteractionAssert(!authorization.IsVisible &&
+                    address.Text == (string)Application.Current.FindResource("StreamSrtAddress"),
+                    "Switching to SRT did not hide the token and restore the correct address label.");
+                protocol.SelectedIndex = 0;
+                tabs.SelectedIndex = 0;
+                window.UpdateLayout();
+                var recordingHeight = window.ActualHeight;
+                var outputActions = (Panel)window.FindName("OutputActions");
+                InteractionAssert(window.FindName("StartRecordingButton") is Button { IsVisible: true } record &&
+                    outputActions.Children.Contains(record) && !primary.IsVisible,
+                    "Recording must expose its primary action in the fixed footer, separate from streaming.");
+                tabs.SelectedIndex = 2;
+                window.UpdateLayout();
+                InteractionAssert(Math.Abs(window.ActualHeight - streamingHeight) < 1 &&
+                    Math.Abs(recordingHeight - streamingHeight) < 1,
+                    "Switching output tabs must keep the window height stable.");
+                var outputVm = (IPhoneMirror.App.ViewModels.MainViewModel)window.DataContext;
+                var cameraCapabilities = typeof(IPhoneMirror.App.ViewModels.MainViewModel).GetField("_virtualCameraCapabilities", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                var originalCapabilities = cameraCapabilities.GetValue(outputVm);
+                var cameraStatus = outputVm.GetType().GetProperty(nameof(outputVm.VirtualCameraStatusText))!;
+                var originalStatus = outputVm.VirtualCameraStatusText;
+                try
+                {
+                    cameraCapabilities.SetValue(outputVm, new IPhoneMirror.App.Services.VirtualCameraCapabilities(true, true, false, false, false, ""));
+                    cameraStatus.SetValue(outputVm, LocalizationService.Get("VirtualCameraInstallRequired"));
+                    KeyboardCall(window, "UpdateStartButtons");
+                    window.UpdateLayout();
+                    InteractionAssert(window.FindName("InstallVirtualCameraButton") is Button { IsVisible: true } install &&
+                        outputActions.Children.Contains(install), "Virtual camera setup must expose install in the fixed footer.");
+                    SaveWindowRender(window, screenshot + "-camera-install.png");
+                }
+                finally
+                {
+                    cameraCapabilities.SetValue(outputVm, originalCapabilities);
+                    cameraStatus.SetValue(outputVm, originalStatus);
+                    tabs.SelectedIndex = originalTab;
+                }
+                break;
+            case "shortcut-settings":
+                var allShortcuts = (RadioButton)window.FindName("ShortcutFilterAll");
+                var boundShortcuts = (RadioButton)window.FindName("ShortcutFilterBound");
+                var sections = (ItemsControl)window.FindName("ShortcutSections");
+                var filterSurface = (FrameworkElement)window.FindName("ShortcutFilterSurface");
+                var save = (Button)window.FindName("SaveButton");
+                var cards = Visuals(sections).OfType<Border>().Where(card => card.Name == "ShortcutGroupCard").ToArray();
+                Rect Bounds(FrameworkElement element) => element.TransformToAncestor(window).TransformBounds(new Rect(element.RenderSize));
+                var editors = Visuals(sections).OfType<IPhoneMirror.UI.Controls.ResponsiveFieldRow>()
+                    .Select(row => Bounds((FrameworkElement)row.Children[1])).ToArray();
+                InteractionAssert(window.FindName("ShortcutJump") is null &&
+                    Math.Abs(allShortcuts.ActualWidth - boundShortcuts.ActualWidth) <= 1 &&
+                    cards.Length > 0 && cards.All(card => Math.Abs(Bounds(card).Left - Bounds(filterSurface).Left) <= 1 &&
+                        Math.Abs(Bounds(card).Right - Bounds(save).Right) <= 1) &&
+                    editors.Length > 1 && editors.All(editor => Math.Abs(editor.Left - editors[0].Left) <= 1 &&
+                        Math.Abs(editor.Right - editors[0].Right) <= 1),
+                    "Shortcut filter, category cards, editor column and footer must share aligned edges.");
+                boundShortcuts.IsChecked = true;
+                window.UpdateLayout();
+                var rows = Visuals(sections).OfType<IPhoneMirror.UI.Controls.ResponsiveFieldRow>()
+                    .Where(row => row.IsVisible).Select(row => row.DataContext).ToArray();
+                InteractionAssert(rows.Length > 0 && rows.All(row => row is IPhoneMirror.App.Windows.ShortcutBindingRow { IsBound: true }),
+                    "Bound-only filtering left unbound shortcuts visible.");
+                SaveWindowRender(window, screenshot + "-bound.png");
+                allShortcuts.IsChecked = true;
+                window.UpdateLayout();
+                break;
+        }
     }
 
     private static void ExerciseWorkAreaSizes(Window window, string name, HashSet<string> findings, string? renderPath = null)
@@ -240,10 +417,45 @@ internal static partial class Program
         var bounds = microphone.TransformToAncestor(scroll).TransformBounds(new Rect(microphone.RenderSize));
         if (bounds.Top < -2 || bounds.Bottom > scroll.ActualHeight + 2 || bounds.Right > scroll.ActualWidth + 2)
             throw new InvalidOperationException("Microphone selector cannot be reached by scrolling.");
+        AssertStreamingFieldAlignment(window);
         SaveWindowRender(window, renderPath);
         scroll.ScrollToHome();
         tabs.SelectedIndex = selected;
         window.UpdateLayout();
+    }
+
+    private static void AssertStreamingFieldAlignment(Window window)
+    {
+        Rect Bounds(string name)
+        {
+            var field = (FrameworkElement)window.FindName(name);
+            return field.TransformToAncestor(window).TransformBounds(new Rect(field.RenderSize));
+        }
+
+        var protocol = Bounds("StreamProtocolBox");
+        var address = Bounds("StreamDestinationBox");
+        var microphone = Bounds("MicrophoneBox");
+        var width = Bounds("StreamWidthBox");
+        var height = Bounds("StreamHeightBox");
+        var fps = Bounds("StreamFpsBox");
+        var bitrate = Bounds("StreamBitrateBox");
+        var refresh = Bounds("RefreshMicrophonesButton");
+        var authorization = window.FindName("StreamAuthorizationBox") is FrameworkElement { IsVisible: true }
+            ? Bounds("StreamAuthorizationBox") : Rect.Empty;
+        const double tolerance = 1;
+        bool SameEdges(Rect a, Rect b) => Math.Abs(a.Left - b.Left) <= tolerance && Math.Abs(a.Right - b.Right) <= tolerance;
+        InteractionAssert(SameEdges(protocol, address) &&
+            SameEdges(width, fps) && SameEdges(height, bitrate) &&
+            Math.Abs(width.Width - height.Width) <= tolerance &&
+            Math.Abs(width.Left - protocol.Left) <= tolerance && Math.Abs(height.Right - protocol.Right) <= tolerance &&
+            Math.Abs(refresh.Right - protocol.Right) <= tolerance && refresh.Left >= microphone.Right - tolerance &&
+            (authorization.IsEmpty || SameEdges(protocol, authorization)),
+            "Streaming fields must share equal columns and keep the microphone refresh action beside its field.");
+        var fields = new[] { address, microphone, width, height, fps, bitrate, authorization };
+        InteractionAssert(fields.Where(field => !field.IsEmpty)
+            .All(field => Math.Abs(field.Height - protocol.Height) <= tolerance),
+            $"The output fields must share the protocol picker's height ({protocol.Height:0.##}): " +
+            string.Join(", ", fields.Where(field => !field.IsEmpty).Select(field => field.Height.ToString("0.##"))));
     }
 
     private static void AssertEscapeCloses(Window window)

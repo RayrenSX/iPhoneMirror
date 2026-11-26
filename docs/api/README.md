@@ -1,7 +1,7 @@
 # Local Automation API
 
-Checked against the source tree on 2026-11-12 (project version `1.8.5-pre5`, source baseline `1eb833a`).
-See the [documentation index](../README.md) and [user guide](../USER_GUIDE.md#自动化控制与调试http-api).
+This reference describes the API shipped with the local v1.8.5-pre7 build. Check the OpenAPI document on your running app for the endpoints it exposes. [pre7 release notes](../en/RELEASE_NOTES.md)
+[English documentation](../en/README.md) · [简体中文 API 说明](../zh-CN/AUTOMATION.md)
 
 Click the version label on the About page **five times** to open **Developer tools**. In its **Automation API** section, enable the local API, choose a port (default 17890), click **Apply**, and copy the key. Closing Developer tools keeps the API running; exiting iPhoneMirror stops it. The API is disabled by default and listens only on `127.0.0.1`. The controls are no longer in the ordinary mirroring settings panel.
 
@@ -17,8 +17,8 @@ return ownership to manual control. Exiting the app stops the API; closing to tr
 - OpenAPI 3.1: `http://127.0.0.1:17890/api/v1/openapi.json`.
 - Examples: [Python](python-example.py), [curl / PowerShell](curl-example.md).
 
-This repository exposes an HTTP API and the examples above. It does not currently
-include a standalone stdio MCP server; MCP clients need a separate adapter to call this API.
+This repository includes a [Python SDK and stdio MCP server](../../sdk/python/README.md).
+Both call this authenticated HTTP API; they do not connect directly to the phone or start another HTTP listener.
 
 ## Authentication and permissions
 
@@ -34,7 +34,7 @@ Ordinary settings are saved in the existing `%LOCALAPPDATA%/iPhoneMirror/setting
 
 `GET /devices/{id}` returns details; `GET /devices/{id}/status` exposes `online`, `connection`, `capturing`, `control`, `capabilities`, and `geometry`. Paths in this document that start with `/devices` are relative to `/api/v1`.
 
-USB/wireless direct control can provide absolute touch, keys and clipboard/text when the appropriate existing service is ready. BLE provides the existing keyboard route through this API; the experimental absolute Bluetooth mouse in the preview UI does not extend the API touch capability. BLE does **not** promise absolute coordinate taps or arbitrary Unicode text/clipboard. A capture without reverse control can still provide screenshots. Missing metadata stays unknown. Aggregate video-app playback is not represented as a controllable phone.
+USB/wireless direct control requires iOS/iPadOS 17.4 or later, Developer Mode, a matching DDI and successful service validation. It can provide absolute touch, keys and clipboard/text when those services are ready. BLE provides the existing keyboard route through this API; the experimental absolute Bluetooth mouse in the preview UI does not extend the API touch capability. BLE does **not** promise absolute coordinate taps or arbitrary Unicode text/clipboard. A capture without reverse control can still provide screenshots. Missing metadata stays unknown. Aggregate video-app playback is not represented as a controllable phone.
 
 Clipboard RPC requires a bridge advertising `iphoneMirror.clipboard.rpc.v1`. Older bridges remain compatible with their existing commands but report this API capability as unavailable. Ship the app and rebuilt bridge together.
 
@@ -42,9 +42,9 @@ Clipboard RPC requires a bridge advertising `iphoneMirror.clipboard.rpc.v1`. Old
 
 `geometry.coordinateSpace` is **capturePixels**. Coordinates refer to the current native capture frame returned by the screenshot endpoint, with top-left origin, x rightwards and y downwards. Bounds are `0 <= x < width`, `0 <= y < height`. These are neither WPF preview coordinates nor iOS logical points nor a guessed device panel resolution. Preview window rotation, borders and DPI do not change this API space.
 
-The rotation test build can remove verified black padding from a square mirroring canvas after the same session establishes a matching rectangular screen reference. The screenshot pixels and reported geometry change together; encoded canvas dimensions remain diagnostic data. Refresh geometry and reacquire control after such a change. This conservative pixel fallback is not an authoritative iOS aperture or direction source; see the [rotation investigation and test boundaries](../diagnostics/original-quality-rotation-geometry-20261118.zh-CN.md).
+The rotation test build can remove verified black padding from a square mirroring canvas after the same session establishes a matching rectangular screen reference. The screenshot pixels and reported geometry change together; encoded canvas dimensions remain diagnostic data. Refresh geometry and reacquire control after such a change. This conservative pixel fallback is not an authoritative iOS aperture or direction source; see the [rotation investigation and test boundaries in Chinese](../diagnostics/original-quality-rotation-geometry-20261118.zh-CN.md).
 
-The application converts to normalized touch coordinates using its existing orientation/calibration mapper. The frame is not cropped to guess a device screen. Use only supported full-screen mirroring and the established control calibration. The current capture stack does not provide an independent authoritative iOS rotation angle; unsupported orientation/calibration configurations require correction in the existing UI, not guessed transforms.
+The application converts to normalized touch coordinates using its existing orientation/calibration mapper. Clients must use the returned capture frame and geometry rather than guess a device panel or crop. Some capture paths use internal system-direction observations, but the public geometry contract does not expose a separate iOS rotation angle. Correct unsupported orientation/calibration configurations in the existing UI, rather than applying guessed client-side transforms.
 
 Read geometry before input. Optionally include `geometryVersion` in the request. Resolution, session or calibration changes revoke the old geometry; refresh status and reacquire. A `202` response means dispatch through the existing transport, not confirmation that the iPhone UI performed the action. Never automatically retry input after timeout/disconnection.
 
@@ -136,7 +136,7 @@ Errors use `{ "error": { "code": "...", "message": "..." }, "requestId": "..." }
 
 Future event/frame WebSockets will reuse device identity, ownership, authentication and frame services. No WebSocket stream or script execution endpoint is exposed in v1.
 
-The dev branch adds `/devices/{id}/apps`, `/apps/launch`, and the shared device-management actions. App launch and other mutations require the existing exclusive control lease. Live CoreDevice capture and encoded-stream recording endpoints were removed after device testing; they are also absent from OpenAPI, SDK and MCP. See [Device Hub](../DEV_DEVICE_HUB.zh-CN.md) and the [Python SDK / stdio MCP](../../sdk/python/README.md).
+The v1.8.5-pre7 API includes `/devices/{id}/apps`, `/devices/{id}/apps/launch`, and the shared device-management actions. App launch and other mutations require the existing exclusive control lease. Experimental CoreDevice mirroring uses the desktop app’s local bridge and is not a public API capture-start endpoint. See [Device Hub](../en/USER_GUIDE.md#device-management) and the [Python SDK / stdio MCP](../../sdk/python/README.md).
 
 ## Validation and publishing
 
@@ -153,7 +153,7 @@ Check the device or mirrored picture to confirm the HUD is visible.
 Upload IPA/profile bytes to /api/v1/devices/{id}/apps/install or /profiles/install
 using application/octet-stream, Content-Length and X-File-Name.
 Host paths are never accepted by public actions. Renew the lease during long installs;
-the SDK handles streaming and renewal. See the [feature matrix](../RPLAYHUB_FEATURE_MATRIX.zh-CN.md).
+the SDK handles streaming and renewal. See [device-management capabilities and limits](../en/USER_GUIDE.md#device-management).
 
 Run `App.Runtime.Tests --automation-api`, Python `automation_clipboard_test.py`, the existing keyboard/router/mapping/clipboard/touch suites and localization verification. Real USB/wireless/BLE and multi-device coordinate effects still need device testing; simulation is not proof of an iPhone action.
 

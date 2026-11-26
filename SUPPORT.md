@@ -1,16 +1,12 @@
 # Support
 
-iPhoneMirror is a community-maintained public preview. Use the latest
-[published release](https://github.com/RayrenSX/iPhoneMirror/releases) or `main`
-build when reproducing a problem, and include the exact version from About.
-Source-tree test versions and published releases may differ.
+To report a problem, copy the full version from About and specify whether you used Setup, the portable ZIP, or a local build. The local `main` build is v1.8.5-pre7, the final preview before 1.8.5. [pre7 release notes](docs/en/RELEASE_NOTES.md)
 
-中文用户可先阅读[教程的常见问题](docs/USER_GUIDE.md#常见问题)。反馈时请说明具体安装版本、
-连接方式、操作步骤及失败时间；可直接填写下方模板，设备标识和日志请先脱敏。
+[简体中文问题反馈](docs/zh-CN/SUPPORT.md)
 
 ## Before requesting help
 
-1. Use the latest release and read the [README troubleshooting and driver notes](README.md).
+1. Reproduce with the latest [published release](https://github.com/RayrenSX/iPhoneMirror/releases) or the current `main` build. Check the [troubleshooting guide](docs/en/USER_GUIDE.md#troubleshooting).
 2. Unlock the iPhone, reconnect it and confirm “Trust This Computer”.
 3. For USB capture, open **Driver manager** from the main window and run the
    one-click repair or installation flow.
@@ -23,15 +19,21 @@ Source-tree test versions and published releases may differ.
    release contains `tools/ffmpeg/ffmpeg.exe` and include the output status and
    timestamp in the report. The virtual camera requires Windows 11 and a
    one-time administrator installation.
-6. For USB/wireless reverse control, check Developer Mode, the DDI/HID status
-   and device binding in the [user guide](docs/USER_GUIDE.md#有线与无线反向控制).
+6. For USB/wireless touch control, confirm iOS/iPadOS 17.4 or later, Developer Mode, the DDI/HID status
+   and device binding in the [user guide](docs/en/USER_GUIDE.md#usb-and-wi-fi-touch-control).
    Include the bridge error code; a media-stream `9021` response alone does not
    establish HID compatibility. Keep `iUsbBridge.exe`, `_internal`, and its runtime
    manifest together. Bluetooth control has separate BLE/AssistiveTouch requirements.
+7. Paired-wireless discovery does not mean capture has started. The local CoreDevice
+   video path requires iOS/iPadOS 27 or later and currently supplies video only;
+   ordinary AirPlay and the 17.4 touch-control requirement are separate.
+8. For app, file mapping or IPA problems, include the selected device, operation,
+   destination type and error. State whether the issue occurred in the device panel,
+   Windows Explorer or the signing/install window; omit credentials and private keys.
 
 Report Windows version, ProductType, iOS version, connection type, AirPlay backend
 (original/UxPlay), reproduction steps, expected/actual behavior, and the relevant timestamp.
-Start from the [documentation index](docs/README.md) for topic-specific guidance.
+Start from the [documentation index](docs/en/README.md) for topic-specific guidance.
 
 Attach the relevant files from `%LOCALAPPDATA%\iPhoneMirror\Logs` and, for
 driver issues, `%LOCALAPPDATA%\iPhoneMirror.Driver\Logs\driver-ui.log`.
@@ -54,7 +56,7 @@ App version / 软件版本（About / 关于）:
 Package / 安装方式: Setup / ZIP / local build
 Windows version and architecture / 系统版本与架构:
 Device ProductType and iOS / 设备型号标识与 iOS:
-Connection / 连接方式: USB / AirPlay
+Connection / 连接方式: USB / AirPlay / paired-wireless CoreDevice
 Receiver backend / 无线接收方案（如适用）: original / UxPlay
 Control transport / 反控方式（如适用）: Bluetooth / USB / wireless
 Steps / 复现步骤:

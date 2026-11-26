@@ -18,7 +18,7 @@ struct ServiceState {
 
 struct PhysicalAppleDevice {
     std::wstring description;
-    std::wstring hardware_id;
+    std::wstring instance_id;
 };
 
 struct AppleNormalUsbStackEvidence {

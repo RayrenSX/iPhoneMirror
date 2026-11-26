@@ -134,4 +134,4 @@ configuration_restore.run_now()
 | I/O 异常后直接重复写配置 | 通过状态机记录请求和目标设备状态，限制重复切换并等待设备恢复；见 [UsbConfigurationRestorePolicy](../../src/Core/src/Capture/UsbConfigurationRestorePolicy.h) |
 | 0x52 后继续操作可能失效的控制句柄 | 配置切换 helper 等待目标设备的移除、到达和稳定结果，并在提交请求后避免显式关闭可能失效的句柄；见 [UsbConfigurationSwitch](../../src/Core/tools/UsbConfigurationSwitch.cpp) |
 
-本次整理核对了历史源码及当前防护入口，未执行真实 USB 配置切换。上述旧版行为不能直接当作当前构建仍存在相同缺陷的结论；具体责任驱动也不能仅凭转储中的模块列表确定。#58 的 `0x1E / 0xC0000005` 仍只有报告摘要，具体内部故障链未确认，详见 [历史审查记录](../issues/audit-2026-10-15/58.zh-CN.md)。
+本次整理核对了历史源码及当前防护入口，未执行真实 USB 配置切换。上述旧版行为不能直接当作当前构建仍存在相同缺陷的结论；具体责任驱动也不能仅凭转储中的模块列表确定。#58 的 `0x1E / 0xC0000005` 仍只有报告摘要，具体内部故障链未确认，详见 [Issue #58 原始反馈](https://github.com/RayrenSX/iPhoneMirror/issues/58)。

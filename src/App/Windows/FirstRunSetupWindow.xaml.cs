@@ -58,7 +58,7 @@ public partial class FirstRunSetupWindow : IPhoneMirror.UI.Controls.RoundedWindo
             if (rememberFirstDisplay) Save();
         };
         Closing += OnClosing;
-        Closed += (_, _) => { _closed = true; StopDiscovery(); _lifetime.Cancel(); _operation?.Cancel(); StopAssessmentAnimations(); ReleaseSetupOwnership(); };
+        Closed += (_, _) => { _closed = true; StopNoticeCountdown(); StopDiscovery(); _lifetime.Cancel(); _operation?.Cancel(); StopAssessmentAnimations(); ReleaseSetupOwnership(); };
         LocalizationService.RefreshWhenLanguageChanges(this, () =>
         {
             if (_assessmentVisible) { if (_assessing) RefreshAssessmentLabels(); else RenderAssessment(); return; }
@@ -88,6 +88,7 @@ public partial class FirstRunSetupWindow : IPhoneMirror.UI.Controls.RoundedWindo
     }
     private void Enter(int direction = 1)
     {
+        StopNoticeCountdown();
         StopDiscovery();
         _verified = false;
         Render(); Scroller.ScrollToTop();
@@ -99,6 +100,7 @@ public partial class FirstRunSetupWindow : IPhoneMirror.UI.Controls.RoundedWindo
     private void RefreshLabels()
     {
         if (_assessmentVisible) { RefreshAssessmentLabels(); return; }
+        PageSymbol.Visibility = _state.Step == SetupStep.Environment ? Visibility.Collapsed : Visibility.Visible;
         var combinedBinding = _state.Step == SetupStep.Profile && _state.Usage == SetupUsage.MirrorAndControl;
         Heading.Text = L(combinedBinding ? "DeviceBindingTitle" : _state.Step == SetupStep.Completed && _state.HasSkippedSteps ? "SetupTitlePartial" : "SetupTitle" + _state.Step);
         Description.Text = L(combinedBinding ? "SetupToolsCombinedBindingHint" : _state.Step == SetupStep.Completed && _state.HasSkippedSteps ? "SetupHintPartial" : "SetupHint" + _state.Step);
@@ -106,6 +108,8 @@ public partial class FirstRunSetupWindow : IPhoneMirror.UI.Controls.RoundedWindo
         {
             SetupStep.Welcome or SetupStep.Usage or SetupStep.Display => "spark", SetupStep.MirrorConnection => "monitor",
             SetupStep.Preferences => "language", SetupStep.ApplicationMode => "monitor", SetupStep.Appearance => "sun",
+            SetupStep.FreeSoftwareNotice => "shield",
+            SetupStep.SupportAuthor => "heart",
             SetupStep.ControlIntroduction or SetupStep.WiredControl => "game",
             SetupStep.WirelessIntroduction or SetupStep.Wireless or SetupStep.WirelessControl or SetupStep.WirelessBackend => "wireless",
             SetupStep.BluetoothIntroduction or SetupStep.Bluetooth => "bluetooth", SetupStep.Environment or SetupStep.WiredDecoder => "settings",
@@ -125,6 +129,7 @@ public partial class FirstRunSetupWindow : IPhoneMirror.UI.Controls.RoundedWindo
     }
     private void Render()
     {
+        if (_state.Step != SetupStep.FreeSoftwareNotice) StopNoticeCountdown();
         if (_assessmentVisible) { RenderAssessment(); return; }
         Page.SetResourceReference(MaxWidthProperty, "SetupPageMaxWidth"); Scroller.VerticalContentAlignment = VerticalAlignment.Top;
         PageSymbol.Width = PageSymbol.Height = 30; PageSymbol.Margin = new(0, 0, 0, 10);
@@ -140,6 +145,8 @@ public partial class FirstRunSetupWindow : IPhoneMirror.UI.Controls.RoundedWindo
                 welcome.SetResourceReference(TextBlock.LineHeightProperty, "WelcomeLineHeight"); welcome.HorizontalAlignment = HorizontalAlignment.Center;
                 welcome.Margin = new(0, 20, 0, 0); Body.Children.Add(welcome); break;
             case SetupStep.Preferences: Preferences(); break;
+            case SetupStep.FreeSoftwareNotice: FreeSoftwareNotice(); break;
+            case SetupStep.SupportAuthor: SupportAuthor(); break;
             case SetupStep.ApplicationMode: ApplicationModeChoices(); break;
             case SetupStep.Appearance: AppearanceChoices(); break;
             case SetupStep.Usage:
@@ -247,6 +254,7 @@ public partial class FirstRunSetupWindow : IPhoneMirror.UI.Controls.RoundedWindo
             foreach (var action in _actions) action.IsEnabled = false;
             if (_refreshingTask) { CancelOperation.Visibility = Visibility.Visible; CancelOperation.IsEnabled = _assessmentCancellation?.IsCancellationRequested == false; }
         }
+        UpdateNoticeNavigation();
     }
     private bool Save()
     {
@@ -264,7 +272,7 @@ public partial class FirstRunSetupWindow : IPhoneMirror.UI.Controls.RoundedWindo
     private async Task AdvanceAsync()
     {
         if (_assessmentVisible) { await ContinueAssessmentAsync(); return; }
-        if (_advancing || _busy || _refreshingTask || _selectingTask || _closed) return;
+        if (_advancing || _busy || _refreshingTask || _selectingTask || _closed || !NoticeCanContinue) return;
         _advancing = true; UpdateNavigation();
         try
         {
@@ -335,6 +343,7 @@ public partial class FirstRunSetupWindow : IPhoneMirror.UI.Controls.RoundedWindo
     { if (_busy || _advancing || _refreshingTask || _selectingTask) return; Navigate(backwards: true); }
     private void SkipClick(object sender, RoutedEventArgs e)
     {
+        if (!NoticeCanContinue) return;
         if (_refreshingTask || _selectingTask) return;
         if (_assessmentVisible)
         {
@@ -369,6 +378,7 @@ public partial class FirstRunSetupWindow : IPhoneMirror.UI.Controls.RoundedWindo
     }
     private void SkipCurrentStep()
     {
+        if (!NoticeCanContinue) return;
         if (_smartSetup)
         {
             var snapshot = System.Text.Json.JsonSerializer.Serialize(_state);

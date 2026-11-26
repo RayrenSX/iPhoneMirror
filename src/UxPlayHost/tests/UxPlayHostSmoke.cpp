@@ -92,6 +92,7 @@ int wmain(int argc, wchar_t** argv) {
     const auto suffix = std::format(L"{}-{}", GetCurrentProcessId(), GetTickCount64());
     const auto pipe_name = L"\\\\.\\pipe\\iPhoneMirror-UxPlay-Smoke-" + suffix;
     const auto stop_name = L"Local\\iPhoneMirror-UxPlay-Smoke-Stop-" + suffix;
+    const auto acknowledgement_name = L"Local\\iPhoneMirror-UxPlay-Smoke-Ack-" + suffix;
     const auto pipe = CreateNamedPipeW(pipe_name.c_str(), PIPE_ACCESS_DUPLEX,
         PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
         1, 64U * 1024U, 8U * 1024U * 1024U, 0, nullptr);
@@ -101,9 +102,17 @@ int wmain(int argc, wchar_t** argv) {
         CloseHandle(pipe);
         return fail("could not create smoke stop event");
     }
+    const auto acknowledgement = CreateEventW(nullptr, FALSE, FALSE, acknowledgement_name.c_str());
+    if (!acknowledgement || !SetEnvironmentVariableW(L"IPHONE_MIRROR_UXPLAY_SMOKE_ACK", acknowledgement_name.c_str())) {
+        if (acknowledgement) CloseHandle(acknowledgement);
+        CloseHandle(stop_event);
+        CloseHandle(pipe);
+        return fail("could not create smoke acknowledgement event");
+    }
 
     PROCESS_INFORMATION host_process{};
     if (!launch(host, fixture, pipe_name, stop_name, host_process)) {
+        CloseHandle(acknowledgement);
         CloseHandle(stop_event);
         CloseHandle(pipe);
         return fail("could not launch UxPlay host");
@@ -114,6 +123,7 @@ int wmain(int argc, wchar_t** argv) {
     if (!connected) {
         TerminateProcess(host_process.hProcess, 1);
         CloseHandle(host_process.hProcess);
+        CloseHandle(acknowledgement);
         CloseHandle(stop_event);
         CloseHandle(pipe);
         return fail("UxPlay host did not connect to core IPC");
@@ -145,6 +155,7 @@ int wmain(int argc, wchar_t** argv) {
             SetEvent(stop_event);
             WaitForSingleObject(host_process.hProcess, 2000);
             CloseHandle(host_process.hProcess);
+            CloseHandle(acknowledgement);
             CloseHandle(stop_event);
             CloseHandle(pipe);
             return fail("UxPlay host emitted an invalid IPC header");
@@ -181,6 +192,7 @@ int wmain(int argc, wchar_t** argv) {
                     iPhoneMirror::wireless::ProductTypeBytes) == "iPhone14,2") {
                 device_info = true;
                 device_info_sequence = header.sequence;
+                SetEvent(acknowledgement);
             }
             break;
         case iPhoneMirror::wireless::MessageType::Video:
@@ -202,6 +214,7 @@ int wmain(int argc, wchar_t** argv) {
                 }
                 video = video && valid;
                 ++video_count;
+                SetEvent(acknowledgement);
             }
             break;
         case iPhoneMirror::wireless::MessageType::Audio:
@@ -209,6 +222,7 @@ int wmain(int argc, wchar_t** argv) {
             audio = header.sample_rate == 44100 && header.channels == 2 &&
                 header.bits_per_sample == 16 && payload.size() == 1764 &&
                 payload[0] == 0x34 && payload[1] == 0x12;
+            SetEvent(acknowledgement);
             break;
         default:
             break;
@@ -218,6 +232,7 @@ int wmain(int argc, wchar_t** argv) {
     SetEvent(stop_event);
     WaitForSingleObject(host_process.hProcess, 3000);
     CloseHandle(host_process.hProcess);
+    CloseHandle(acknowledgement);
     CloseHandle(stop_event);
     CloseHandle(pipe);
     if (!ready || (!startup_only &&
@@ -227,7 +242,10 @@ int wmain(int argc, wchar_t** argv) {
                 provisional_disconnected_sequence < connected_sequence &&
                 connected_sequence < device_info_sequence &&
                 first_audio_sequence != 0 && first_video_sequence != 0))))
-        return fail("UxPlay host did not relay every expected IPC message");
+        return fail(std::format("UxPlay IPC incomplete: ready={} provisional={}/{} connected={} "
+            "device_info={} video_count={} video_valid={} audio_valid={}", ready,
+            provisional_connected, provisional_disconnected, connected_device, device_info,
+            video_count, video, audio));
 
     return 0;
 }

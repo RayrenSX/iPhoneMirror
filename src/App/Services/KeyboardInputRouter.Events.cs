@@ -57,7 +57,7 @@ internal sealed partial class KeyboardInputRouter
         Func<MappedKey, bool, KeyboardPressRoute> resolve,
         Action<MappedKey, bool> replay, bool deferStandaloneModifier = false, bool bufferShortcutModifiers = true,
         Action<KeyboardRouteDecision>? diagnose = null, uint? hookTime = null,
-        PreviewWindowsHotkeyPolicy? windowsHotkeys = null)
+        PreviewWindowsHotkeyPolicy? windowsHotkeys = null, bool ignoreWindowsHotkeyMatch = false)
     {
         if (hookTime is { } observedTime) ObserveKeyMessageTime(key, observedTime, down);
         var id = PhysicalKey(key);
@@ -115,7 +115,8 @@ internal sealed partial class KeyboardInputRouter
         var modifier = KeyboardShortcutRecognizer.Modifier(key.VirtualKey);
         if (windowsHotkeys is not null)
         {
-            var disposition = modifier == 0 ? windowsHotkeys.Match(key.VirtualKey, modifiers) : WindowsHotkeyDisposition.Default;
+            var disposition = modifier == 0 && !ignoreWindowsHotkeyMatch
+                ? windowsHotkeys.Match(key.VirtualKey, modifiers) : WindowsHotkeyDisposition.Default;
             if (HotkeyRoute(disposition) is { } route)
                 return RouteWindowsHotkey(press, route, diagnose);
             if (modifier != 0 && _presses.Count == 1 && modifiers == modifier)

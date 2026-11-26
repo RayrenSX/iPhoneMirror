@@ -5,6 +5,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Media;
+using IPhoneMirror.App.Controls;
 using IPhoneMirror.App.Localization;
 using IPhoneMirror.App.Updater;
 using IPhoneMirror.App.ViewModels;
@@ -64,26 +65,34 @@ internal static partial class Program
             var header = (Grid)window.FindName("HeaderPanel");
             var heading = (FrameworkElement)window.FindName("WorkspaceHeading");
             var subtitle = (FrameworkElement)window.FindName("WorkspaceSubtitle");
+            var workArea = IPhoneMirror.SharedUI.Services.WindowWorkAreaController.GetAvailableSize(window);
+            var chromeWidth = window.ActualWidth - ((FrameworkElement)window.FindName("MainContentGrid")).ActualWidth;
+            const double leftSidebarWidth = WorkspaceRevealPanel.DefaultLeftContentWidth;
+            const double rightSidebarWidth = WorkspaceRevealPanel.DefaultRightContentWidth;
+            var fitsBothCards = workArea.Width - chromeWidth >= leftSidebarWidth + rightSidebarWidth + 36 + 319;
+            var largestRequest = workArea.Width - 24;
             double? referenceHeaderHeight = null;
             double? referenceContentTop = null;
             foreach (var (showLeft, showRight) in new[] { (false, false), (true, false), (false, true), (true, true) })
             {
-                window.Width = 1440; Layout();
+                window.Width = Math.Min(1440, largestRequest); Layout();
                 KeyboardCall(window, "SetLeftWorkspacePanel", Enum.Parse(panelType, showLeft ? "Devices" : "None"));
                 KeyboardCall(window, "SetSettingsPanelVisible", showRight);
                 FinishWorkspaceReveal(window); Layout();
+                var expectLeft = showLeft && (!showRight || fitsBothCards);
                 foreach (var width in showLeft || showRight ? new[] { 1100d, 960d, 800d, 960d, 1280d } : new[] { 1100d, 800d, 640d, 480d, 640d, 960d, 1280d })
                 {
+                    var request = Math.Min(width, largestRequest);
                     // Exercise the actual HWND resize, retaining production minimums.
-                    InteractionAssert(PerfSetWindowPos(hwnd, 0, 0, 0, (int)Math.Round(width * dpi),
+                    InteractionAssert(PerfSetWindowPos(hwnd, 0, 0, 0, (int)Math.Round(request * dpi),
                         (int)Math.Round(window.ActualHeight * dpi), 0x0016), "Native horizontal resize failed.");
                     Layout(); AdvanceDispatcher(TimeSpan.FromMilliseconds(30)); Layout();
-                    InteractionAssert(Math.Abs(window.ActualWidth - Math.Max(width, window.MinWidth)) < 2 && center.ActualWidth >= 319,
-                        $"Native width bounced back or squeezed the preview: request={width}, actual={window.ActualWidth}, minimum={window.MinWidth}, calculated={KeyboardCall(window, "GetCompleteWorkspaceMinimumWidth")}, preview={center.ActualWidth}, left={showLeft}, right={showRight}, constrained={KeyboardField(window, "_isWindowMaximized")}, available={IPhoneMirror.SharedUI.Services.WindowWorkAreaController.GetAvailableSize(window).Width}.");
-                    InteractionAssert(left.IsVisible == showLeft && right.IsVisible == showRight,
+                    InteractionAssert(Math.Abs(window.ActualWidth - Math.Max(request, window.MinWidth)) < 2 && center.ActualWidth >= 319,
+                        $"Native width bounced back or squeezed the preview: request={request}, actual={window.ActualWidth}, minimum={window.MinWidth}, calculated={KeyboardCall(window, "GetCompleteWorkspaceMinimumWidth")}, preview={center.ActualWidth}, left={showLeft}, right={showRight}, constrained={KeyboardField(window, "_isWindowMaximized")}, available={workArea.Width}.");
+                    InteractionAssert(left.IsVisible == expectLeft && right.IsVisible == showRight,
                         "Horizontal resizing unexpectedly hid an open workspace card.");
-                    InteractionAssert((!showLeft || Math.Abs(left.ActualWidth - 300) < 1) &&
-                        (!showRight || Math.Abs(right.ActualWidth - 362) < 1),
+                    InteractionAssert((!expectLeft || Math.Abs(left.ActualWidth - leftSidebarWidth) < 1) &&
+                        (!showRight || Math.Abs(right.ActualWidth - rightSidebarWidth) < 1),
                         $"Narrowing compressed the side cards: {left.ActualWidth:F1}/{right.ActualWidth:F1}.");
                     var actions = (FrameworkElement)window.FindName("WindowActions");
                     var capture = (FrameworkElement)window.FindName("CaptureActionButton");
@@ -122,24 +131,26 @@ internal static partial class Program
                 "Closing both cards did not release the complete-mode sidebar minimum.");
             KeyboardCall(window, "SetLeftWorkspacePanel", Enum.Parse(panelType, "Devices"));
             KeyboardCall(window, "SetSettingsPanelVisible", true); FinishWorkspaceReveal(window); Layout();
-            InteractionAssert(window.ActualWidth >= window.MinWidth - 1 && Math.Abs(left.ActualWidth - 300) < 1 &&
-                Math.Abs(right.ActualWidth - 362) < 1 && center.ActualWidth >= 319,
+            InteractionAssert(window.ActualWidth >= window.MinWidth - 1 && left.IsVisible == fitsBothCards &&
+                (!fitsBothCards || Math.Abs(left.ActualWidth - leftSidebarWidth) < 1) &&
+                Math.Abs(right.ActualWidth - rightSidebarWidth) < 1 && center.ActualWidth >= 319,
                 "Opening both cards from 480 DIP squeezed a card or the preview instead of growing the window.");
             SaveWindowRender(window, Path.Combine(output, "expanded-from-480.png"));
             // Reapplying the mode, full screen and a lightweight roundtrip must
             // retain the relaxed complete-mode limit and prior manual width.
             KeyboardCall(window, "SetLeftWorkspacePanel", Enum.Parse(panelType, "None"));
             KeyboardCall(window, "SetSettingsPanelVisible", false); FinishWorkspaceReveal(window);
-            window.Width = 900; Layout();
+            var roundtripWidth = Math.Min(900, largestRequest);
+            window.Width = roundtripWidth; Layout();
             KeyboardCall(window, "ApplyApplicationDisplayMode"); Layout();
             InteractionAssert(window.ActualWidth < 910 && window.MinWidth <= 800, "Applying complete mode restored the old 1280 DIP minimum.");
             vm.SelectedApplicationDisplayMode = ApplicationDisplayMode.Lightweight; Layout();
             vm.SelectedApplicationDisplayMode = ApplicationDisplayMode.Complete; Layout();
-            InteractionAssert(Math.Abs(window.ActualWidth - 900) < 2 && window.MinWidth <= 800,
+            InteractionAssert(Math.Abs(window.ActualWidth - roundtripWidth) < 2 && window.MinWidth <= 800,
                 "A display-mode roundtrip lost the user's narrow complete-mode width.");
             KeyboardCall(window, "ToggleFullScreen"); Layout();
             KeyboardCall(window, "ToggleFullScreen"); Layout();
-            InteractionAssert(Math.Abs(window.ActualWidth - 900) < 2 && window.MinWidth <= 800,
+            InteractionAssert(Math.Abs(window.ActualWidth - roundtripWidth) < 2 && window.MinWidth <= 800,
                 "Full-screen exit restored the old complete-mode minimum.");
             foreach (var language in new[] { "zh-CN", "en-US", "ja-JP", "zh-TW", "zh-HK" })
             foreach (var scale in new[] { 1d, 1.5 })
@@ -148,8 +159,10 @@ internal static partial class Program
                 IPhoneMirror.UI.Services.AccessibilityAppearance.Apply(app, scale, false);
                 window.Width = 800; Layout();
                 KeyboardCall(window, "SetSettingsPanelVisible", true); FinishWorkspaceReveal(window); Layout();
-                InteractionAssert(Math.Abs(right.ActualWidth - 362 * (1 + .5 * (scale - 1))) <= 1 &&
-                    center.ActualWidth >= 320 * (1 + .35 * (scale - 1)) - 1,
+                var rightWidth = rightSidebarWidth * (1 + .5 * (scale - 1));
+                var availablePreviewWidth = workArea.Width - chromeWidth - rightWidth - 18;
+                InteractionAssert(Math.Abs(right.ActualWidth - rightWidth) <= 1 &&
+                    center.ActualWidth >= Math.Min(320 * (1 + .35 * (scale - 1)), availablePreviewWidth) - 1,
                     $"Text scaling squeezed the settings card or preview: {language}/{scale}.");
                 foreach (var category in new[] { "Application", "Projection", "Control" })
                 {

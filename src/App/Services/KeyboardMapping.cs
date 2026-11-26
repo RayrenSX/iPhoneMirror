@@ -79,6 +79,7 @@ internal sealed class KeyboardMappingSettings
     public bool SuppressOriginalKey { get; set; }
     public List<KeyboardMappingEntry> Mappings { get; set; } = [];
     [JsonIgnore] public bool HadInvalidEntries { get; set; }
+    internal bool HasActiveMappings => Enabled && Mappings.Any(entry => entry.Enabled);
 
     internal KeyboardMappingSettings Clone() => new()
     {

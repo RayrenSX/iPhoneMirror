@@ -669,7 +669,9 @@ class MediaSessionTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.rsd = SimpleNamespace(service=SimpleNamespace(address=('phone', 1)))
         self.display = SimpleNamespace(__aenter__=AsyncMock(), __aexit__=AsyncMock(),
-            start_video_stream=AsyncMock(), stop_media_stream=AsyncMock())
+            connect=AsyncMock(), close=AsyncMock(),
+            start_video_stream=AsyncMock(), invoke=AsyncMock(), get_media_stream_server_status=AsyncMock(
+                return_value={'running': False, 'sessions': []}))
         self.hid = SimpleNamespace(__aenter__=AsyncMock(), __aexit__=AsyncMock())
         self.closed = []
         first_packet = True
@@ -710,16 +712,20 @@ class MediaSessionTests(unittest.IsolatedAsyncioTestCase):
     async def test_stalled_stop_and_close_cannot_hide_original_error(self):
         self.display.start_video_stream.return_value = {'connection': {'options': {
             'avcMediaStreamOptionClientSessionID': {'uuid': '00000000-0000-0000-0000-000000000001'}}}}
-        async def stalled(*_): await asyncio.Event().wait()
-        self.display.stop_media_stream.side_effect = stalled
+        async def stalled(*_, **__): await asyncio.Event().wait()
+        self.display.invoke.side_effect = stalled
         self.display.__aexit__.side_effect = stalled
         self.hid.__aexit__.side_effect = stalled
+        fresh = SimpleNamespace(connect=AsyncMock(), close=AsyncMock(), invoke=AsyncMock(),
+            get_media_stream_server_status=AsyncMock(return_value={'running': False, 'sessions': []}))
         timeout = asyncio.timeout
-        with patch.object(b.asyncio, 'timeout', side_effect=lambda _: timeout(.01)):
+        with patch.object(b.asyncio, 'timeout', side_effect=lambda _: timeout(.01)), \
+             patch.object(b, 'DisplayService', side_effect=[self.display, fresh, self.display, fresh, fresh, fresh]):
             with self.assertRaisesRegex(RuntimeError, 'original failure'):
                 async with b.touch_session(self.rsd): raise RuntimeError('original failure')
         self.assertEqual(self.closed, [True])
-        self.display.stop_media_stream.assert_awaited_once()
+        self.display.invoke.assert_awaited_once()
+        fresh.invoke.assert_awaited_once()
         self.display.__aexit__.assert_awaited_once()
         self.hid.__aexit__.assert_awaited_once()
 
@@ -734,4 +740,6 @@ class MediaSessionTests(unittest.IsolatedAsyncioTestCase):
                 async with b.touch_session(self.rsd): pass
         self.assertTrue(b.TouchSession._can_fallback_to_direct_hid(raised.exception))
         self.assertEqual(self.closed, [True])
+        self.display.invoke.assert_awaited_once_with('com.apple.coredevice.feature.stopmediastream',
+            {'stopAll': True}, action_identifier='com.apple.coredevice.action.mediastreamstop')
         self.display.__aexit__.assert_awaited_once()

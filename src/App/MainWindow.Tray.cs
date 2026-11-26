@@ -60,6 +60,7 @@ public partial class MainWindow
         {
             if (_trayIcon is null) return;
             DisposeTray();
+            EnsurePreviewInteractionRecovery();
             _compactPreviewActive = false;
             _secondaryMirrors.PreviewClosed -= OnCompactPreviewClosed;
             ShowInTaskbar = true;
@@ -76,10 +77,13 @@ public partial class MainWindow
             _trayIcon = new TrayIconService(ShowTrayPanel);
             _trayPanel = new TrayPanelWindow(_viewModel, StartTrayProjectionAsync,
                 ShowTraySettings, ExitApplication);
+            _trayPanel.PreviewInteractionRestoreRequested += RestorePreviewInteraction;
+            UpdatePreviewInteractionRecovery();
         }
         catch (Exception error)
         {
             DisposeTray();
+            EnsurePreviewInteractionRecovery();
             if ((Application.Current as App)?.AutomationBackground == true) return;
             if (_viewModel.CanRestoreMainWindowFromTray) _viewModel.RestoreMainWindowFromTray();
             else _viewModel.SelectedApplicationDisplayMode = ApplicationDisplayMode.Complete;

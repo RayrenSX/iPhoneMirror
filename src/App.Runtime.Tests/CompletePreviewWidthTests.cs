@@ -26,6 +26,9 @@ internal static partial class Program
         var vm = (MainViewModel)KeyboardField(window, "_viewModel");
         var panelType = typeof(MainWindow).GetNestedType("LeftWorkspacePanel", BindingFlags.NonPublic)!;
         var preview = (Border)window.FindName("PreviewPanel");
+        var content = (Grid)window.FindName("RootLayout");
+        var sourceCard = (FrameworkElement)window.FindName("LeftPanelHost");
+        var settingsCard = (FrameworkElement)window.FindName("ControlPanel");
         var hwnd = new WindowInteropHelper(window).Handle;
         var scale = RepairGetDpiForWindow(hwnd) / 96d;
         void Layout() { DrainDispatcher(); window.UpdateLayout(); }
@@ -56,18 +59,29 @@ internal static partial class Program
                 SetKeyboardField(vm, "_sourceVideoHeight", sourceHeight);
                 SetKeyboardField(vm, "_isCapturing", true);
                 KeyboardCall(window, "ApplyApplicationDisplayMode"); Layout();
+                var sourceLeft = sourceCard.TranslatePoint(new Point(), content).X;
+                var settingsRight = settingsCard.TranslatePoint(new Point(settingsCard.ActualWidth, 0), content).X;
+                InteractionAssert(sourceCard.IsVisible == left && settingsCard.IsVisible == right &&
+                    (!left || Math.Abs(sourceLeft) <= 1) &&
+                    (!right || Math.Abs(content.ActualWidth - settingsRight) <= 1),
+                    $"The complete layout displaced a side card at {sourceWidth}×{sourceHeight}: left={sourceLeft:F1}, right={settingsRight:F1}, available={content.ActualWidth:F1}.");
                 var initial = Bounds();
                 var originalPicture = PictureWidth();
-                var expected = Math.Max(window.MinWidth, window.ActualWidth - preview.ActualWidth + originalPicture + 2);
-                expected = Math.Min(expected, IPhoneMirror.SharedUI.Services.WindowWorkAreaController.GetAvailableSize(window).Width);
-                var minimumPixels = (int)Math.Ceiling(expected * scale - .001);
+                var pictureMinimum = Math.Max(window.MinWidth, window.ActualWidth - preview.ActualWidth + originalPicture + 2);
+                pictureMinimum = Math.Min(pictureMinimum, IPhoneMirror.SharedUI.Services.WindowWorkAreaController.GetAvailableSize(window).Width);
+                var pictureMinimumPixels = (int)Math.Ceiling(pictureMinimum * scale - .001);
+                var workspaceMinimumPixels = (int)Math.Ceiling(window.MinWidth * scale - .001);
+                var preservePictureOnHorizontalResize = sourceWidth <= sourceHeight;
+                var minimumPixels = preservePictureOnHorizontalResize ? pictureMinimumPixels : workspaceMinimumPixels;
                 foreach (var edge in new[] { 1, 2, 4, 5, 7, 8 })
                 {
                     // Submit a proposal beyond the picture, on each horizontal
                     // and corner grip. The opposite edge must stay anchored.
+                    var edgeMinimumPixels = !preservePictureOnHorizontalResize && edge is 1 or 2
+                        ? workspaceMinimumPixels : pictureMinimumPixels;
                     var rect = (int[])initial.Clone();
-                    if (edge is 1 or 4 or 7) rect[0] = rect[2] - minimumPixels + 100;
-                    else rect[2] = rect[0] + minimumPixels - 100;
+                    if (edge is 1 or 4 or 7) rect[0] = rect[2] - edgeMinimumPixels + 100;
+                    else rect[2] = rect[0] + edgeMinimumPixels - 100;
                     var memory = Marshal.AllocHGlobal(16);
                     try
                     {
@@ -75,7 +89,7 @@ internal static partial class Program
                         InteractionAssert(ResizeSendMessage(hwnd, 0x0214, edge, memory) == 1,
                             "The native sizing hook did not stop at the picture boundary.");
                         Marshal.Copy(memory, rect, 0, 4);
-                        InteractionAssert(Math.Abs(rect[2] - rect[0] - minimumPixels) <= 1 &&
+                        InteractionAssert(Math.Abs(rect[2] - rect[0] - edgeMinimumPixels) <= 1 &&
                             (edge is 1 or 4 or 7 ? rect[2] == initial[2] : rect[0] == initial[0]) &&
                             rect[1] == initial[1] && rect[3] == initial[3],
                             $"The picture boundary or anchored edge moved for grip {edge}.");
@@ -90,9 +104,11 @@ internal static partial class Program
                     // window's horizontal resize to squeeze the picture.
                     var expectedPicture = Math.Min(originalPicture,
                         (preview.ActualHeight - 2) * sourceWidth / sourceHeight);
-                    InteractionAssert(PictureWidth() >= expectedPicture - 2 &&
+                    InteractionAssert((!preservePictureOnHorizontalResize || PictureWidth() >= expectedPicture - 2) &&
                         Math.Abs(window.ActualWidth * scale - minimumPixels) <= 2,
                         $"Repeated shrinking compressed the picture or drifted: {sourceWidth}x{sourceHeight}, left={left}, right={right}, attempt={attempt}, picture={PictureWidth():F2}/{originalPicture:F2}, window={window.ActualWidth * scale:F2}/{minimumPixels}, preview={preview.ActualWidth:F2}x{preview.ActualHeight:F2}, reserve={KeyboardField(window, "_completeResizePreviewWidth")}.");
+                    InteractionAssert(!preservePictureOnHorizontalResize || (preview.ActualWidth - 2 - PictureWidth()) * scale <= 1.01,
+                        $"The minimum-width preview still has side gutters: {preview.ActualWidth:F2} DIP for a {PictureWidth():F2} DIP picture.");
                 }
                 // Grow and remove the new black space again, without shrinking
                 // the original picture or changing the preview height.
@@ -100,8 +116,9 @@ internal static partial class Program
                 ApplyWidth(minimumPixels + 80);
                 var grownPicture = PictureWidth();
                 ApplyWidth(minimumPixels - 80);
-                var expectedAfterShrink = Math.Min(grownPicture,
-                    (preview.ActualHeight - 2) * sourceWidth / sourceHeight);
+                var expectedAfterShrink = preservePictureOnHorizontalResize
+                    ? Math.Min(grownPicture, (preview.ActualHeight - 2) * sourceWidth / sourceHeight)
+                    : Math.Min(grownPicture, preview.ActualWidth - 2);
                 InteractionAssert(PictureWidth() >= expectedAfterShrink - 2 &&
                     Math.Abs(preview.ActualHeight - originalHeight) < 1,
                     $"Growing/shrinking compressed the displayed picture: {PictureWidth():F2}/{grownPicture:F2}, height={preview.ActualHeight:F2}/{originalHeight:F2}.");

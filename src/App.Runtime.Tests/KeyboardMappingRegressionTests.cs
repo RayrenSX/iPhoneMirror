@@ -16,6 +16,7 @@ internal static partial class Program
         try
         {
             AwaitMapping(TestMappingFrameCancellationAsync());
+            AwaitMapping(TestTouchDisplayPreviewUpdatesAsync());
             TestMappingPickPreservesDuration();
             AwaitMapping(TestPasteFrameLimitsAsync());
             Console.WriteLine("PASS paste frames remain valid at the IPC size limit.");
@@ -89,6 +90,29 @@ internal static partial class Program
         }
         catch (InvalidOperationException error) when (error.Message != "Input followed a partial frame.") { }
         Console.WriteLine("PASS touch frame stays complete when held key releases during IPC write.");
+    }
+
+    private static async Task TestTouchDisplayPreviewUpdatesAsync()
+    {
+        using var stream = new MemoryStream();
+        using var writer = new StreamWriter(stream, leaveOpen: true);
+        var bridge = new DirectUsbInputBridge();
+        SetKeyboardField(bridge, "_stdin", writer);
+        SetKeyboardField(bridge, "<IsReady>k__BackingField", true);
+        SetKeyboardField(bridge, "_wireGeneration", 2L);
+        SetKeyboardField(bridge, "_readyGeneration", 2L);
+        await bridge.UpdateTouchDisplayPreviewAsync(1432, 2034, default);
+        MappingAssert(stream.Length == 0, "A bridge without display capability received a display update.");
+        SetKeyboardField(bridge, "<SupportsTouchDisplayPreview>k__BackingField", true);
+        await bridge.UpdateTouchDisplayPreviewAsync(1432, 2034, default);
+        await bridge.UpdateTouchDisplayPreviewAsync(2034, 1432, default);
+        await bridge.UpdateTouchDisplayPreviewAsync(1170, 2532, default);
+        var frames = MappingFrames(stream);
+        MappingAssert(frames.Count == 2 && frames.All(frame => frame.GetProperty("generation").GetInt64() == 2 &&
+            frame.GetProperty("kind").GetString() == "touch_display_preview") &&
+            frames[1].GetProperty("width").GetUInt32() == 1170,
+            "Display changes must reach the current bridge without repeating for a 90-degree rotation.");
+        Console.WriteLine("PASS preview dimensions follow the current bridge generation.");
     }
 
     private static void TestMappingPickPreservesDuration()

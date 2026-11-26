@@ -24,7 +24,13 @@ public partial class MainWindow
         _keyboardRouter.InvalidateWindowShortcutMessages(unchecked((uint)Environment.TickCount));
         ++_keyboardShortcutGeneration;
         _keyboardRouter.ReleaseAllPressedKeys();
-        var bindings = new List<RoutedShortcut>();
+        var bindings = new List<RoutedShortcut>
+        {
+            // A second, interactive preview can hold the modifier keys for
+            // phone control. Route recovery before configured app shortcuts.
+            new(PreviewInteractionHotkey, "RestorePreviewInteraction",
+                () => CanUsePreviewInteractionHotkey, QueuePreviewInteractionRestore),
+        };
         foreach (var (action, shortcut) in shortcuts)
         {
             if (action == BluetoothShortcutAction.ReverseControl) continue;
@@ -41,11 +47,14 @@ public partial class MainWindow
         bindings.Add(new(new(KeyboardShortcut.Control, 0x56), "PasteToDevice",
             IsDeviceClipboardShortcutAvailable, () => QueueDeviceClipboardShortcut(copy: false)));
         void Local(int vk, uint modifiers, string name, Action execute, Func<bool>? condition = null, bool anyPreview = false,
-            bool fullScreenKey = false)
+            bool fullScreenKey = false, bool mediaPreview = false)
         {
             bool Available() => !_mappingClosing && _mappingWindow?.IsEditing != true && !_bossKeyHidden && _shortcutSettingsWindow is null &&
                 !_mappingCapture.Waiting && ((fullScreenKey ? IsFullScreenShortcutForeground : IsLocalShortcutForeground) ||
-                    (anyPreview && _secondaryMirrors.ContainsWindow(_keyboardForegroundWindow()))) && condition?.Invoke() != false;
+                    (anyPreview && _secondaryMirrors.ContainsWindow(_keyboardForegroundWindow())) ||
+                    (mediaPreview && _mediaCastPreviewWindow is { Handle: var mediaWindow } &&
+                        mediaWindow == _keyboardForegroundWindow())) &&
+                condition?.Invoke() != false;
             bindings.Add(new(new(modifiers, (uint)vk), name, Available,
                 () => QueueKeyboardShortcut(execute, Available)));
         }
@@ -63,6 +72,8 @@ public partial class MainWindow
         });
         Local(0x4D, KeyboardShortcut.Control, "Audio", () => _viewModel.PlayAudio = !_viewModel.PlayAudio);
         Local(0x53, KeyboardShortcut.Control, "Screenshot", () => _ = CaptureScreenshotAsync());
+        Local(0x43, KeyboardShortcut.Alt, "SelectScreenText", SelectFocusedScreenText,
+            () => GetScreenTextSource(_keyboardForegroundWindow()) is not null, anyPreview: true, mediaPreview: true);
         _keyboardRouter.Shortcuts.Configure(bindings);
         ReconcileSettingMouseHook();
     }
@@ -174,7 +185,7 @@ public partial class MainWindow
         }
         var generation = _keyboardRouter.Generation;
         var sourceForeground = _keyboardForegroundWindow();
-        var mappingAllowed = IsKeyboardMappingInputModeActive && _mappingSettings.Enabled && MappingFocusAllows();
+        var mappingAllowed = IsKeyboardMappingInputModeActive && _mappingSettings.HasActiveMappings && MappingFocusAllows();
         KeyboardPressRoute Resolve(MappedKey physical, bool chord)
         {
             if (_mappingClosing || generation != _keyboardRouter.Generation || sourceForeground != _keyboardForegroundWindow())
@@ -200,9 +211,13 @@ public partial class MainWindow
         }
         var defer = mappingAllowed && (key.IsModifier || key.IsWindows) &&
             _mappingSettings.Mappings.Any(m => m.Enabled && m.Key!.SamePhysicalKey(key));
+        var windowsHotkeys = PreviewWindowsHotkeysFor(sourceForeground);
+        var recoveryChord = CanUsePreviewInteractionHotkey && key.VirtualKey == PreviewInteractionHotkey.VirtualKey &&
+            _keyboardRouter.PressedModifiers == PreviewInteractionHotkey.Modifiers;
         return _keyboardRouter.RouteEvent(key, down, Resolve, ReplayKeyboardEvent, defer,
             bufferShortcutModifiers: CanForwardControlKeyboard(target, window) && _keyboardRouter.Mode != KeyboardInputMode.None,
-            diagnose: diagnose, hookTime: hookTime, windowsHotkeys: PreviewWindowsHotkeysFor(sourceForeground));
+            diagnose: diagnose, hookTime: hookTime, windowsHotkeys: windowsHotkeys,
+            ignoreWindowsHotkeyMatch: recoveryChord);
     }
 
     private bool RecoverShortcutPressFromWindow(PreviewKeyboardEventArgs e, string? target, nint window)

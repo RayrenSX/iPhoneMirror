@@ -536,6 +536,7 @@ Run("driver bootstrap verifies the bundle and isolates all runtime loading", () 
     True(script.Contains("$directoryInfo.Create($security)"));
     True(script.Contains("$algorithm.ComputeHash($source)"));
     True(script.Contains("$start.EnvironmentVariables.Clear()"));
+    True(script.Contains("$start.EnvironmentVariables['PATHEXT'] = '.EXE'"));
     True(script.Contains("DOTNET_BUNDLE_EXTRACT_BASE_DIR"));
     False(script.Contains("ConvertFrom-Json"));
     True(script.IndexOf("$actualHash.Equals", StringComparison.Ordinal) <

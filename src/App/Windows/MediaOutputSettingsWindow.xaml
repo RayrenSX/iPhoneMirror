@@ -4,12 +4,17 @@
         xmlns:animations="clr-namespace:IPhoneMirror.UI.Animations"
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
         Title="{DynamicResource MediaOutputTitle}"
-        Width="742" Height="742" MinWidth="522" MinHeight="582"
+        Width="680" Height="560" MinWidth="522" MinHeight="440"
         WindowStartupLocation="CenterOwner" ResizeMode="CanResize"
         Foreground="{DynamicResource TextBrush}"
         xmlns:chrome="clr-namespace:IPhoneMirror.UI.Controls"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent">
     <chrome:RoundedWindow.Resources>
+        <Style x:Key="OutputTextField" TargetType="TextBox" BasedOn="{StaticResource ReceiverTextBox}">
+            <Setter Property="Height" Value="Auto"/>
+            <Setter Property="MinHeight" Value="{StaticResource ControlMinHeight}"/>
+            <Setter Property="Padding" Value="{StaticResource InputPadding}"/>
+        </Style>
         <Style x:Key="SectionCard" TargetType="Border">
             <Setter Property="VerticalAlignment" Value="Top"/>
             <Setter Property="Background" Value="{DynamicResource CardBrush}"/>
@@ -18,6 +23,10 @@
             <Setter Property="CornerRadius" Value="16"/>
             <Setter Property="Padding" Value="{DynamicResource CardPadding}"/>
             <Setter Property="Margin" Value="0,12,0,0"/>
+        </Style>
+        <Style x:Key="OutputSectionHeading" TargetType="TextBlock" BasedOn="{StaticResource BodyText}">
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Margin" Value="0,0,0,4"/>
         </Style>
     </chrome:RoundedWindow.Resources>
 
@@ -35,24 +44,32 @@
             <StackPanel Margin="0,0,48,0">
                 <TextBlock Text="{DynamicResource MediaOutputTitle}"
                            Style="{StaticResource SubWindowTitle}"/>
-                <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{Binding SelectedName}"
-                           Style="{StaticResource SubWindowSubtitle}"/>
-                <TextBlock Text="{Binding MediaOutputCapabilitiesText}" FontSize="{DynamicResource CaptionFontSize}"
-                           Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" Margin="0,5,0,0"/>
+                <TextBlock Text="{Binding SelectedName}">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock" BasedOn="{StaticResource SubWindowSubtitle}">
+                            <Setter Property="Visibility" Value="{DynamicResource InterfaceDescriptionsVisibility}"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding SelectedDevice}" Value="{x:Null}">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
             </StackPanel>
             <Button Style="{StaticResource SubWindowCloseButton}" Click="OnCloseClick">
                 <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Dismiss20" FontSize="18"/>
             </Button>
         </Grid>
 
-        <TabControl Grid.Row="2" Style="{StaticResource SubWindowTabControl}">
-            <TabItem Header="{DynamicResource RecordTab}">
+        <TabControl x:Name="OutputTabs" Grid.Row="2" Style="{StaticResource SubWindowTabControl}"
+                    SelectionChanged="OnOutputTabChanged">
+            <TabItem x:Name="RecordingTab" Header="{DynamicResource RecordTab}">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <Border Style="{StaticResource SectionCard}">
-                        <StackPanel>
-                            <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource RecordDescription}" TextWrapping="Wrap"
-                                       Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource SecondaryFontSize}"/>
-                            <Grid Margin="0,12,0,0">
+                        <StackPanel Grid.IsSharedSizeScope="True">
+                            <TextBlock Text="{DynamicResource StreamPictureSection}" Style="{StaticResource OutputSectionHeading}"/>
+                            <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="8"/>
@@ -60,11 +77,17 @@
                                 </Grid.ColumnDefinitions>
                                 <StackPanel>
                                     <TextBlock Text="{DynamicResource OutputWidth}" Style="{StaticResource DetailLabel}"/>
-                                    <TextBox AutomationProperties.Name="{DynamicResource OutputWidth}" x:Name="RecordWidthBox" Style="{StaticResource RoundedTextBox}" MinHeight="40"/>
+                                    <Grid>
+                                        <Grid.RowDefinitions><RowDefinition Height="Auto" SharedSizeGroup="OutputFieldHeight"/></Grid.RowDefinitions>
+                                        <TextBox AutomationProperties.Name="{DynamicResource OutputWidth}" x:Name="RecordWidthBox" Style="{StaticResource OutputTextField}"/>
+                                    </Grid>
                                 </StackPanel>
                                 <StackPanel Grid.Column="2">
                                     <TextBlock Text="{DynamicResource OutputHeight}" Style="{StaticResource DetailLabel}"/>
-                                    <TextBox AutomationProperties.Name="{DynamicResource OutputHeight}" x:Name="RecordHeightBox" Style="{StaticResource RoundedTextBox}" MinHeight="40"/>
+                                    <Grid>
+                                        <Grid.RowDefinitions><RowDefinition Height="Auto" SharedSizeGroup="OutputFieldHeight"/></Grid.RowDefinitions>
+                                        <TextBox AutomationProperties.Name="{DynamicResource OutputHeight}" x:Name="RecordHeightBox" Style="{StaticResource OutputTextField}"/>
+                                    </Grid>
                                 </StackPanel>
                             </Grid>
                             <Grid>
@@ -75,45 +98,75 @@
                                 </Grid.ColumnDefinitions>
                                 <StackPanel>
                                     <TextBlock Text="{DynamicResource OutputFps}" Style="{StaticResource DetailLabel}"/>
-                                    <TextBox AutomationProperties.Name="{DynamicResource OutputFps}" x:Name="RecordFpsBox" Style="{StaticResource RoundedTextBox}" MinHeight="40"/>
+                                    <Grid>
+                                        <Grid.RowDefinitions><RowDefinition Height="Auto" SharedSizeGroup="OutputFieldHeight"/></Grid.RowDefinitions>
+                                        <TextBox AutomationProperties.Name="{DynamicResource OutputFps}" x:Name="RecordFpsBox" Style="{StaticResource OutputTextField}"/>
+                                    </Grid>
                                 </StackPanel>
                                 <StackPanel Grid.Column="2">
                                     <TextBlock Text="{DynamicResource OutputBitrate}" Style="{StaticResource DetailLabel}"/>
-                                    <TextBox AutomationProperties.Name="{DynamicResource OutputBitrate}" x:Name="RecordBitrateBox" Style="{StaticResource RoundedTextBox}" MinHeight="40"/>
+                                    <Grid>
+                                        <Grid.RowDefinitions><RowDefinition Height="Auto" SharedSizeGroup="OutputFieldHeight"/></Grid.RowDefinitions>
+                                        <TextBox AutomationProperties.Name="{DynamicResource OutputBitrate}" x:Name="RecordBitrateBox" Style="{StaticResource OutputTextField}"/>
+                                    </Grid>
                                 </StackPanel>
                             </Grid>
-                            <Button x:Name="StartRecordingButton"
-                                    Content="{DynamicResource StartRecording}" Click="OnStartRecordingClick"
-                                    IsEnabled="False"
-                                    Style="{StaticResource PrimaryButton}" Margin="0,18,0,0"/>
-                            <Button x:Name="DiscardRecordingButton" Content="{DynamicResource DiscardRecording}"
-                                    Click="OnDiscardClick" Style="{StaticResource ToolButton}"
-                                    IsEnabled="{Binding CanDiscardRecording}" Visibility="Collapsed" Margin="0,10,0,0"/>
+                            <TextBlock Text="{DynamicResource RecordingSaveHint}" Style="{StaticResource SecondaryText}" Margin="0,12,0,0"/>
                         </StackPanel>
                     </Border>
                 </ScrollViewer>
             </TabItem>
 
-            <TabItem Header="{DynamicResource StreamTab}">
+            <TabItem x:Name="StreamingTab" Header="{DynamicResource StreamTab}">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <Border Style="{StaticResource SectionCard}">
-                        <StackPanel>
-                            <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource StreamDescription}" TextWrapping="Wrap"
-                                       Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource SecondaryFontSize}"/>
-                            <TextBlock Text="{DynamicResource StreamProtocol}" Style="{StaticResource DetailLabel}"/>
-                            <ComboBox AutomationProperties.Name="{DynamicResource StreamProtocol}" x:Name="StreamProtocolBox" SelectedIndex="0"
-                                      SelectionChanged="OnStreamProtocolChanged">
-                                <ComboBoxItem x:Name="RtmpProtocolItem" Content="RTMP"
-                                              IsEnabled="{Binding DataContext.CanStreamRtmp, RelativeSource={RelativeSource AncestorType=Window}}"/>
-                                <ComboBoxItem x:Name="SrtProtocolItem" Content="SRT"
-                                              IsEnabled="{Binding DataContext.CanStreamSrt, RelativeSource={RelativeSource AncestorType=Window}}"/>
-                                <ComboBoxItem x:Name="WhipProtocolItem" Content="WebRTC / WHIP"
-                                              IsEnabled="{Binding DataContext.CanStreamWhip, RelativeSource={RelativeSource AncestorType=Window}}"/>
-                            </ComboBox>
-                            <TextBlock Text="{DynamicResource StreamDestination}" Style="{StaticResource DetailLabel}"/>
-                            <TextBox AutomationProperties.Name="{DynamicResource StreamDestination}" x:Name="StreamDestinationBox" Style="{StaticResource RoundedTextBox}" MinHeight="40"/>
-                            <TextBlock Text="{DynamicResource StreamAuthorization}" Style="{StaticResource DetailLabel}"/>
-                            <TextBox AutomationProperties.Name="{DynamicResource StreamAuthorization}" x:Name="StreamAuthorizationBox" Style="{StaticResource RoundedTextBox}" MinHeight="40"/>
+                        <StackPanel Grid.IsSharedSizeScope="True">
+                            <TextBlock Text="{DynamicResource StreamConnectionSection}" Style="{StaticResource OutputSectionHeading}"/>
+                            <TextBlock Text="{DynamicResource StreamProtocol}" Style="{StaticResource DetailLabel}" Margin="0,0,0,4"/>
+                            <Grid>
+                                <Grid.RowDefinitions><RowDefinition Height="Auto" SharedSizeGroup="OutputFieldHeight"/></Grid.RowDefinitions>
+                                <ComboBox AutomationProperties.Name="{DynamicResource StreamProtocol}" x:Name="StreamProtocolBox" SelectedIndex="0"
+                                          SelectionChanged="OnStreamProtocolChanged">
+                                    <ComboBoxItem x:Name="RtmpProtocolItem" Content="RTMP"
+                                                  IsEnabled="{Binding DataContext.CanStreamRtmp, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                    <ComboBoxItem x:Name="SrtProtocolItem" Content="SRT"
+                                                  IsEnabled="{Binding DataContext.CanStreamSrt, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                    <ComboBoxItem x:Name="WhipProtocolItem" Content="WebRTC / WHIP"
+                                                  IsEnabled="{Binding DataContext.CanStreamWhip, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                </ComboBox>
+                            </Grid>
+                            <TextBlock x:Name="StreamAddressLabel" Text="{DynamicResource StreamRtmpAddress}" Style="{StaticResource DetailLabel}"/>
+                            <Grid>
+                                <Grid.RowDefinitions><RowDefinition Height="Auto" SharedSizeGroup="OutputFieldHeight"/></Grid.RowDefinitions>
+                                <TextBox AutomationProperties.Name="{DynamicResource StreamDestination}" x:Name="StreamDestinationBox" Style="{StaticResource OutputTextField}"/>
+                                <TextBlock x:Name="StreamAddressHint" Foreground="{DynamicResource MutedTextBrush}"
+                                           Margin="12,0,12,0" VerticalAlignment="Center" IsHitTestVisible="False"
+                                           TextTrimming="CharacterEllipsis">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                            <Style.Triggers>
+                                                <MultiDataTrigger>
+                                                    <MultiDataTrigger.Conditions>
+                                                        <Condition Binding="{Binding Text, ElementName=StreamDestinationBox}" Value=""/>
+                                                        <Condition Binding="{Binding IsKeyboardFocusWithin, ElementName=StreamDestinationBox}" Value="False"/>
+                                                    </MultiDataTrigger.Conditions>
+                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                </MultiDataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </Grid>
+                            <StackPanel x:Name="WhipAuthorizationFields" Visibility="Collapsed">
+                                <TextBlock Text="{DynamicResource StreamAuthorization}" Style="{StaticResource DetailLabel}"/>
+                                <Grid>
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto" SharedSizeGroup="OutputFieldHeight"/></Grid.RowDefinitions>
+                                    <TextBox AutomationProperties.Name="{DynamicResource StreamAuthorization}" x:Name="StreamAuthorizationBox" Style="{StaticResource OutputTextField}"/>
+                                </Grid>
+                            </StackPanel>
+                            <Border BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,1,0,0" Margin="0,10,0,8"/>
+                            <TextBlock Text="{DynamicResource StreamPictureSection}" Style="{StaticResource OutputSectionHeading}"/>
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
@@ -122,11 +175,17 @@
                                 </Grid.ColumnDefinitions>
                                 <StackPanel>
                                     <TextBlock Text="{DynamicResource OutputWidth}" Style="{StaticResource DetailLabel}"/>
-                                    <TextBox AutomationProperties.Name="{DynamicResource OutputWidth}" x:Name="StreamWidthBox" Style="{StaticResource RoundedTextBox}" MinHeight="40"/>
+                                    <Grid>
+                                        <Grid.RowDefinitions><RowDefinition Height="Auto" SharedSizeGroup="OutputFieldHeight"/></Grid.RowDefinitions>
+                                        <TextBox AutomationProperties.Name="{DynamicResource OutputWidth}" x:Name="StreamWidthBox" Style="{StaticResource OutputTextField}"/>
+                                    </Grid>
                                 </StackPanel>
                                 <StackPanel Grid.Column="2">
                                     <TextBlock Text="{DynamicResource OutputHeight}" Style="{StaticResource DetailLabel}"/>
-                                    <TextBox AutomationProperties.Name="{DynamicResource OutputHeight}" x:Name="StreamHeightBox" Style="{StaticResource RoundedTextBox}" MinHeight="40"/>
+                                    <Grid>
+                                        <Grid.RowDefinitions><RowDefinition Height="Auto" SharedSizeGroup="OutputFieldHeight"/></Grid.RowDefinitions>
+                                        <TextBox AutomationProperties.Name="{DynamicResource OutputHeight}" x:Name="StreamHeightBox" Style="{StaticResource OutputTextField}"/>
+                                    </Grid>
                                 </StackPanel>
                             </Grid>
                             <Grid>
@@ -137,21 +196,31 @@
                                 </Grid.ColumnDefinitions>
                                 <StackPanel>
                                     <TextBlock Text="{DynamicResource OutputFps}" Style="{StaticResource DetailLabel}"/>
-                                    <TextBox AutomationProperties.Name="{DynamicResource OutputFps}" x:Name="StreamFpsBox" Style="{StaticResource RoundedTextBox}" MinHeight="40"/>
+                                    <Grid>
+                                        <Grid.RowDefinitions><RowDefinition Height="Auto" SharedSizeGroup="OutputFieldHeight"/></Grid.RowDefinitions>
+                                        <TextBox AutomationProperties.Name="{DynamicResource OutputFps}" x:Name="StreamFpsBox" Style="{StaticResource OutputTextField}"/>
+                                    </Grid>
                                 </StackPanel>
                                 <StackPanel Grid.Column="2">
                                     <TextBlock Text="{DynamicResource OutputBitrate}" Style="{StaticResource DetailLabel}"/>
-                                    <TextBox AutomationProperties.Name="{DynamicResource OutputBitrate}" x:Name="StreamBitrateBox" Style="{StaticResource RoundedTextBox}" MinHeight="40"/>
+                                    <Grid>
+                                        <Grid.RowDefinitions><RowDefinition Height="Auto" SharedSizeGroup="OutputFieldHeight"/></Grid.RowDefinitions>
+                                        <TextBox AutomationProperties.Name="{DynamicResource OutputBitrate}" x:Name="StreamBitrateBox" Style="{StaticResource OutputTextField}"/>
+                                    </Grid>
                                 </StackPanel>
                             </Grid>
-                            <TextBlock Text="{DynamicResource StreamMicrophone}" Style="{StaticResource DetailLabel}" Margin="0,14,0,4"/>
+                            <Border BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,1,0,0" Margin="0,10,0,8"/>
+                            <TextBlock Text="{DynamicResource StreamMicrophone}" Style="{StaticResource OutputSectionHeading}"/>
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
-                                <ComboBox AutomationProperties.Name="{DynamicResource StreamMicrophone}" x:Name="MicrophoneBox" DisplayMemberPath="Name" SelectedValuePath="Id"
-                                          IsEnabled="{Binding CanStartStreaming}"/>
+                                <Grid>
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto" SharedSizeGroup="OutputFieldHeight"/></Grid.RowDefinitions>
+                                    <ComboBox AutomationProperties.Name="{DynamicResource StreamMicrophone}" x:Name="MicrophoneBox" DisplayMemberPath="Name" SelectedValuePath="Id"
+                                              IsEnabled="{Binding CanStartStreaming}"/>
+                                </Grid>
                                 <Button x:Name="RefreshMicrophonesButton" Grid.Column="1" Margin="8,0,0,0"
                                         Style="{StaticResource IconButton}" ToolTip="{DynamicResource RefreshMicrophones}"
                                         AutomationProperties.Name="{DynamicResource RefreshMicrophones}" Click="OnRefreshMicrophonesClick">
@@ -160,22 +229,19 @@
                             </Grid>
                             <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource StreamMicrophoneHint}" TextWrapping="Wrap"
                                        Foreground="{DynamicResource MutedTextBrush}" Margin="0,6,0,0"/>
-                            <Button x:Name="StartStreamingButton"
-                                    Content="{DynamicResource StartStreaming}" Click="OnStartStreamingClick"
-                                    IsEnabled="False"
-                                    Style="{StaticResource PrimaryButton}" Margin="0,18,0,0"/>
                         </StackPanel>
                     </Border>
                 </ScrollViewer>
             </TabItem>
 
-            <TabItem Header="{DynamicResource VirtualCameraTab}">
+            <TabItem x:Name="CameraTab" Header="{DynamicResource VirtualCameraTab}">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                 <Border Style="{StaticResource SectionCard}">
-                    <StackPanel>
-                        <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource VirtualCameraDescription}" TextWrapping="Wrap"
-                                   Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource SecondaryFontSize}"/>
-                        <Grid Margin="0,4,0,0">
+                    <StackPanel Grid.IsSharedSizeScope="True">
+                        <TextBlock Text="{DynamicResource VirtualCameraTab}" Style="{StaticResource OutputSectionHeading}"/>
+                        <TextBlock Text="{Binding VirtualCameraStatusText}" Style="{StaticResource SecondaryText}"
+                                   AutomationProperties.LiveSetting="Polite"/>
+                        <Grid Margin="0,8,0,0">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="8"/>
@@ -184,37 +250,31 @@
                             <StackPanel>
                                 <TextBlock Text="{DynamicResource ResolutionLabel}"
                                            Style="{StaticResource DetailLabel}"/>
-                                <ComboBox AutomationProperties.Name="{DynamicResource ResolutionLabel}" x:Name="VirtualCameraResolutionBox">
-                                    <ComboBoxItem x:Name="VirtualCameraCurrentResolutionItem"
-                                                  Visibility="Collapsed"/>
-                                    <ComboBoxItem Content="1280 x 720" Tag="1280x720"/>
-                                    <ComboBoxItem Content="1920 x 1080" Tag="1920x1080"/>
-                                    <ComboBoxItem Content="720 x 1280" Tag="720x1280"/>
-                                    <ComboBoxItem Content="1088 x 1920" Tag="1088x1920"/>
-                                </ComboBox>
+                                <Grid>
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto" SharedSizeGroup="OutputFieldHeight"/></Grid.RowDefinitions>
+                                    <ComboBox AutomationProperties.Name="{DynamicResource ResolutionLabel}" x:Name="VirtualCameraResolutionBox">
+                                        <ComboBoxItem x:Name="VirtualCameraCurrentResolutionItem"
+                                                      Visibility="Collapsed"/>
+                                        <ComboBoxItem Content="1280 x 720" Tag="1280x720"/>
+                                        <ComboBoxItem Content="1920 x 1080" Tag="1920x1080"/>
+                                        <ComboBoxItem Content="720 x 1280" Tag="720x1280"/>
+                                        <ComboBoxItem Content="1088 x 1920" Tag="1088x1920"/>
+                                    </ComboBox>
+                                </Grid>
                             </StackPanel>
                             <StackPanel Grid.Column="2">
                                 <TextBlock Text="{DynamicResource OutputFps}"
                                            Style="{StaticResource DetailLabel}"/>
-                                <ComboBox AutomationProperties.Name="{DynamicResource OutputFps}" x:Name="VirtualCameraFpsBox">
-                                    <ComboBoxItem Content="30 fps" Tag="30"/>
-                                    <ComboBoxItem Content="60 fps" Tag="60"/>
-                                </ComboBox>
+                                <Grid>
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto" SharedSizeGroup="OutputFieldHeight"/></Grid.RowDefinitions>
+                                    <ComboBox AutomationProperties.Name="{DynamicResource OutputFps}" x:Name="VirtualCameraFpsBox">
+                                        <ComboBoxItem Content="30 fps" Tag="30"/>
+                                        <ComboBoxItem Content="60 fps" Tag="60"/>
+                                    </ComboBox>
+                                </Grid>
                             </StackPanel>
                         </Grid>
-                        <Button Content="{Binding VirtualCameraInstallActionText}"
-                                Click="OnInstallVirtualCameraClick"
-                                IsEnabled="{Binding CanInstallVirtualCamera}"
-                                Visibility="{Binding VirtualCameraInstallVisibility}"
-                                Style="{StaticResource PrimaryButton}" Margin="0,18,0,0"/>
-                        <Button x:Name="StartVirtualCameraButton" Content="{DynamicResource StartVirtualCamera}"
-                                Click="OnStartVirtualCameraClick"
-                                IsEnabled="False"
-                                Visibility="{Binding VirtualCameraStartVisibility}"
-                                Style="{StaticResource PrimaryButton}" Margin="0,18,0,0"/>
-                        <TextBlock Text="{Binding VirtualCameraStatusText}" TextWrapping="Wrap"
-                                   Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource SecondaryFontSize}"
-                                   Margin="0,14,0,0"/>
+                        <TextBlock Text="{DynamicResource VirtualCameraUseHint}" Style="{StaticResource SecondaryText}" Margin="0,12,0,0"/>
                         <Button Content="{DynamicResource UninstallVirtualCamera}"
                                 Click="OnUninstallVirtualCameraClick"
                                 IsEnabled="{Binding CanUninstallVirtualCamera}"
@@ -226,19 +286,79 @@
             </TabItem>
         </TabControl>
 
-        <Grid Grid.Row="3" Margin="0,14,0,0">
+        <Border Grid.Row="3" Margin="0,12,0,0" Padding="0,12,0,0"
+                BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,1,0,0">
+            <Grid x:Name="OutputFooter" SizeChanged="OnFooterSizeChanged">
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-            <Button x:Name="StopAllOutputsButton" Grid.Column="1" Content="{DynamicResource StopMediaOutput}" Click="OnStopAllClick"
-                    IsEnabled="False" Margin="12,0,0,0"/>
-            <StackPanel VerticalAlignment="Center">
+            <WrapPanel x:Name="OutputActions" Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="12,0,0,0">
+                <Button x:Name="StopAllOutputsButton" Content="{DynamicResource StopMediaOutput}" Click="OnStopAllClick"
+                        IsEnabled="False">
+                    <Button.Style>
+                        <Style TargetType="Button" BasedOn="{StaticResource SecondaryButton}">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsMediaOutputRunning}" Value="True">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                </Button>
+                <Button x:Name="DiscardRecordingButton" Content="{DynamicResource DiscardRecording}" Margin="8,0,0,0"
+                        Click="OnDiscardClick" IsEnabled="{Binding CanDiscardRecording}" Visibility="Collapsed"/>
+                <Button x:Name="StartRecordingButton" Content="{DynamicResource StartRecording}" Click="OnStartRecordingClick"
+                        IsEnabled="False" MinWidth="136" Margin="8,0,0,0" ToolTipService.ShowOnDisabled="True">
+                    <Button.Style>
+                        <Style TargetType="Button" BasedOn="{StaticResource PrimaryButton}">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsSelected, ElementName=RecordingTab}" Value="True">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                </Button>
+                <Button x:Name="StartStreamingButton" Content="{DynamicResource StartStreaming}" Click="OnStartStreamingClick"
+                        IsEnabled="False" MinWidth="136" Margin="8,0,0,0" ToolTipService.ShowOnDisabled="True">
+                    <Button.Style>
+                        <Style TargetType="Button" BasedOn="{StaticResource PrimaryButton}">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsSelected, ElementName=StreamingTab}" Value="True">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                </Button>
+                <Button x:Name="InstallVirtualCameraButton" Content="{Binding VirtualCameraInstallActionText}"
+                        Click="OnInstallVirtualCameraClick" IsEnabled="{Binding CanInstallVirtualCamera}"
+                        Style="{StaticResource PrimaryButton}" Visibility="Collapsed" Margin="8,0,0,0"/>
+                <Button x:Name="StartVirtualCameraButton" Content="{DynamicResource StartVirtualCamera}"
+                        Click="OnStartVirtualCameraClick" IsEnabled="False" Visibility="Collapsed" MinWidth="136"
+                        Style="{StaticResource PrimaryButton}" Margin="8,0,0,0" ToolTipService.ShowOnDisabled="True"/>
+            </WrapPanel>
+            <StackPanel x:Name="OutputFeedback" VerticalAlignment="Center">
+                <TextBlock x:Name="OutputSourceHint" Visibility="Collapsed" Style="{StaticResource SecondaryText}"/>
                 <TextBlock x:Name="OutputStatusText" Text="{Binding MediaOutputStatus}" TextWrapping="Wrap"
                            AutomationProperties.LiveSetting="Polite"
                            Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"/>
                 <TextBlock x:Name="FeedbackText" TextWrapping="Wrap"
-                           AutomationProperties.LiveSetting="Polite"
-                           Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"/>
+                           AutomationProperties.LiveSetting="Polite" Foreground="{DynamicResource MutedTextBrush}">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock" BasedOn="{StaticResource CaptionText}">
+                            <Style.Triggers>
+                                <Trigger Property="Text" Value=""><Setter Property="Visibility" Value="Collapsed"/></Trigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+                <TextBlock x:Name="OutputCapabilityHint" Text="{Binding MediaOutputCapabilitiesText}"
+                           Visibility="Collapsed" Style="{StaticResource SecondaryText}"/>
             </StackPanel>
-        </Grid>
+            </Grid>
+        </Border>
     </Grid>
 </chrome:RoundedWindow>

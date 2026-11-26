@@ -3,93 +3,104 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
         xmlns:animations="clr-namespace:IPhoneMirror.UI.Animations"
-        Title="{DynamicResource FailureTitle}" Width="620" Height="558"
+        xmlns:chrome="clr-namespace:IPhoneMirror.UI.Controls"
+        Title="{DynamicResource FailureTitle}" Width="570" SizeToContent="Height" MaxHeight="650"
         WindowStartupLocation="CenterOwner" ResizeMode="NoResize"
         Foreground="{DynamicResource TextBrush}" ShowInTaskbar="False"
-        xmlns:chrome="clr-namespace:IPhoneMirror.UI.Controls"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent">
-    <Border Style="{StaticResource RoundedWindowContent}">
-    <Grid animations:PageTransition.IsEnabled="True">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="16"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="16"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="18"/>
-            <RowDefinition Height="Auto"/>
-        </Grid.RowDefinitions>
-        <Grid Style="{StaticResource SubWindowHeader}"
-              MouseLeftButtonDown="OnHeaderMouseLeftButtonDown">
-            <TextBlock Text="{DynamicResource FailureHeading}"
-                       Style="{StaticResource SubWindowTitle}" Margin="0,0,48,0"/>
-            <Button Style="{StaticResource SubWindowCloseButton}"
-                    ToolTip="{DynamicResource Close}"
-                    Click="OnCloseClick">
-                <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Dismiss20" FontSize="18"/>
-            </Button>
+    <chrome:RoundedWindow.Resources>
+        <Style x:Key="RecoveryRow" TargetType="Border">
+            <Setter Property="BorderThickness" Value="0,1,0,0"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderSoftBrush}"/>
+            <Setter Property="Padding" Value="0,9"/>
+        </Style>
+    </chrome:RoundedWindow.Resources>
+    <Border Padding="24" Style="{StaticResource RoundedWindowContent}">
+        <Grid animations:PageTransition.IsEnabled="True">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <Grid x:Name="NoticeHeader" Style="{StaticResource SubWindowHeader}"
+                  MouseLeftButtonDown="OnHeaderMouseLeftButtonDown">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <Border x:Name="HeaderIcon" Style="{StaticResource NoticeHeaderIcon}"
+                        Background="{DynamicResource ErrorSurfaceBrush}">
+                    <ui:SymbolIcon Symbol="ErrorCircle20" Foreground="{DynamicResource ErrorBrush}"
+                                   FontSize="20" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+                <TextBlock x:Name="HeaderTitle" Grid.Column="1" Text="{DynamicResource FailureHeading}"
+                           Style="{StaticResource NoticeHeaderTitle}"/>
+                <Button x:Name="HeaderClose" Grid.Column="2" Style="{StaticResource NoticeHeaderCloseButton}" Click="OnCloseClick">
+                    <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Dismiss20" FontSize="18"/>
+                </Button>
+            </Grid>
+
+            <ScrollViewer Grid.Row="1" Margin="0,16,0,0" VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled">
+                <StackPanel>
+                    <TextBlock Text="{Binding ErrorMessage}" Style="{StaticResource BodyText}"/>
+                    <StackPanel Margin="0,14,0,0" Grid.IsSharedSizeScope="True">
+                        <Border Style="{StaticResource RecoveryRow}">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto" SharedSizeGroup="RecoveryAction"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Margin="0,0,12,0">
+                                    <TextBlock Text="{DynamicResource HelpTitle}" Style="{StaticResource SubWindowSectionTitle}"/>
+                                    <TextBlock Text="{DynamicResource HelpBody}" Style="{StaticResource SecondaryText}" Margin="0,4,0,0"/>
+                                </StackPanel>
+                                <Button Grid.Column="1" AutomationProperties.AutomationId="FailureCopyGroup" Content="{DynamicResource CopyGroup}" Click="OnCopyGroupClick"
+                                        MinWidth="96" MaxWidth="150" VerticalAlignment="Center"/>
+                            </Grid>
+                        </Border>
+                        <Border Style="{StaticResource RecoveryRow}">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto" SharedSizeGroup="RecoveryAction"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Margin="0,0,12,0">
+                                    <TextBlock Text="{DynamicResource AisiTitle}" Style="{StaticResource SubWindowSectionTitle}"/>
+                                    <TextBlock Text="{DynamicResource AisiBody}" Style="{StaticResource SecondaryText}" Margin="0,4,0,0"/>
+                                </StackPanel>
+                                <Button Grid.Column="1" AutomationProperties.AutomationId="FailureOpenWebsite" Content="{DynamicResource OpenWebsite}" Click="OnOpenAisiClick"
+                                        MinWidth="96" MaxWidth="150" VerticalAlignment="Center"/>
+                            </Grid>
+                        </Border>
+                        <Border Style="{StaticResource RecoveryRow}">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto" SharedSizeGroup="RecoveryAction"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Margin="0,0,12,0">
+                                    <TextBlock Text="{DynamicResource DriverCleanupTitle}" Style="{StaticResource SubWindowSectionTitle}"/>
+                                    <TextBlock Text="{DynamicResource DriverCleanupBody}" Style="{StaticResource SecondaryText}" Margin="0,4,0,0"/>
+                                </StackPanel>
+                                <Button Grid.Column="1" AutomationProperties.AutomationId="FailureCleanup" Content="{DynamicResource RunDriverCleanup}" Click="OnRunDriverCleanupClick"
+                                        MinWidth="96" MaxWidth="150" VerticalAlignment="Center"/>
+                            </Grid>
+                        </Border>
+                    </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
+
+            <WrapPanel Grid.Row="2" Style="{StaticResource DialogActions}" Margin="-4,16,-4,-4">
+                <Button Content="{DynamicResource FailureOpenLog}" Click="OnOpenLogClick" AutomationProperties.AutomationId="FailureOpenLog" Visibility="{Binding LogVisibility}"
+                        Margin="{StaticResource DialogActionMargin}"/>
+                <Button Content="{DynamicResource Close}" Click="OnCloseClick" MinWidth="88"
+                        Margin="{StaticResource DialogActionMargin}"/>
+                <Button Content="{DynamicResource Retry}" Style="{StaticResource PrimaryButton}"
+                        Click="OnRetryClick" IsDefault="True" MinWidth="104" Margin="{StaticResource DialogActionMargin}"/>
+            </WrapPanel>
         </Grid>
-        <Border Grid.Row="2" Background="{DynamicResource ErrorSurfaceBrush}"
-                BorderBrush="{DynamicResource ErrorBrush}"
-                BorderThickness="1" CornerRadius="12" Padding="13">
-            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" MaxHeight="90"><TextBlock Text="{Binding ErrorMessage}" Foreground="{DynamicResource ErrorBrush}"
-                       Style="{StaticResource BodyText}"/></ScrollViewer>
-        </Border>
-        <ScrollViewer Grid.Row="4" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"><StackPanel>
-            <TextBlock Text="{DynamicResource FailureMethods}" FontWeight="SemiBold" Margin="0,0,0,10"/>
-            <Border Style="{StaticResource SettingsSection}" Margin="0,0,0,8" Padding="14">
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <StackPanel>
-                        <TextBlock Text="{DynamicResource HelpTitle}" TextWrapping="Wrap" FontWeight="SemiBold"/>
-                        <TextBlock Text="{DynamicResource HelpBody}" TextWrapping="Wrap"
-                                   Foreground="{DynamicResource MutedTextBrush}" Margin="0,4,0,0"/>
-                    </StackPanel>
-                    <Button Grid.Column="1" Content="{DynamicResource CopyGroup}" Click="OnCopyGroupClick"
-                            MinWidth="104" Margin="12,0,0,0"/>
-                </Grid>
-            </Border>
-            <Border Style="{StaticResource SettingsSection}" Padding="14">
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <StackPanel>
-                        <TextBlock Text="{DynamicResource AisiTitle}" TextWrapping="Wrap" FontWeight="SemiBold"/>
-                        <TextBlock Text="{DynamicResource AisiBody}"
-                                   Foreground="{DynamicResource MutedTextBrush}" Margin="0,4,0,0"
-                                   TextWrapping="Wrap"/>
-                    </StackPanel>
-                    <Button Grid.Column="1" Content="{DynamicResource OpenWebsite}" Click="OnOpenAisiClick"
-                            MinWidth="104" Margin="12,0,0,0"/>
-                </Grid>
-            </Border>
-            <Border Style="{StaticResource SettingsSection}" Margin="0,8,0,0" Padding="14">
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <StackPanel>
-                        <TextBlock Text="{DynamicResource DriverCleanupTitle}" TextWrapping="Wrap" FontWeight="SemiBold"/>
-                        <TextBlock Text="{DynamicResource DriverCleanupBody}"
-                                   Foreground="{DynamicResource MutedTextBrush}" Margin="0,4,0,0"
-                                   TextWrapping="Wrap"/>
-                    </StackPanel>
-                    <Button Grid.Column="1" Content="{DynamicResource RunDriverCleanup}"
-                            Click="OnRunDriverCleanupClick" MinWidth="104" Margin="12,0,0,0"/>
-                </Grid>
-            </Border>
-        </StackPanel></ScrollViewer>
-        <StackPanel Grid.Row="6" Orientation="Horizontal" HorizontalAlignment="Right">
-            <Button Content="{DynamicResource Close}" Click="OnCloseClick" MinWidth="88" Margin="0,0,8,0"/>
-            <Button Content="{DynamicResource Retry}" Style="{StaticResource PrimaryButton}"
-                    Click="OnRetryClick" MinWidth="112"/>
-        </StackPanel>
-    </Grid>
     </Border>
 </chrome:RoundedWindow>

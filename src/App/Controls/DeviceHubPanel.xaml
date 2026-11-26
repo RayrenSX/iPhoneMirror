@@ -42,31 +42,6 @@
             <Setter Property="MinWidth" Value="48"/>
             <Setter Property="MinHeight" Value="32"/>
             <Setter Property="Padding" Value="0"/>
-            <Setter Property="Template"><Setter.Value>
-                <ControlTemplate TargetType="CheckBox">
-                    <Grid Background="Transparent">
-                        <Border x:Name="Track" Width="40" Height="22" CornerRadius="11"
-                                BorderThickness="1" BorderBrush="{DynamicResource ComboBorderHoverBrush}"
-                                Background="{DynamicResource ComboBackgroundBrush}">
-                            <Ellipse x:Name="Thumb" Width="14" Height="14" HorizontalAlignment="Left" Margin="3,0,3,0"
-                                     Fill="{DynamicResource MutedTextBrush}"/>
-                        </Border>
-                    </Grid>
-                    <ControlTemplate.Triggers>
-                        <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="Track" Property="Background" Value="{DynamicResource AccentBrush}"/>
-                            <Setter TargetName="Track" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
-                            <Setter TargetName="Thumb" Property="HorizontalAlignment" Value="Right"/>
-                            <Setter TargetName="Thumb" Property="Fill" Value="{DynamicResource OnAccentBrush}"/>
-                        </Trigger>
-                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Track" Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}"/></Trigger>
-                        <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Track" Property="BorderBrush" Value="{DynamicResource FocusStrokeBrush}"/></Trigger>
-                        <Trigger Property="IsEnabled" Value="False">
-                            <Setter TargetName="Track" Property="Opacity" Value="0.45"/>
-                        </Trigger>
-                    </ControlTemplate.Triggers>
-                </ControlTemplate>
-            </Setter.Value></Setter>
         </Style>
         <Style x:Key="HubHeading" TargetType="TextBlock">
             <Setter Property="FontWeight" Value="SemiBold"/>
@@ -155,34 +130,39 @@
             </Border>
         </DataTemplate>
     </UserControl.Resources>
-    <Border Style="{StaticResource WorkspaceCardBorder}" Padding="16" ClipToBounds="True">
+    <Border x:Name="HubSurface" Style="{StaticResource WorkspaceCardBorder}" Padding="16" ClipToBounds="True">
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/><RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
             <Grid>
-                <TextBlock Text="{DynamicResource DeviceHubPanelTitle}" FontSize="{DynamicResource FontSize16}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,106,0"/>
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                    <Button x:Name="HeaderRefresh" Style="{StaticResource IconButton}" Width="32" Height="32" MinHeight="32" ToolTip="{DynamicResource DeviceHubRefresh}" Tag="refresh" Click="OnActionClick" AutomationProperties.AutomationId="DeviceHubRefreshButton">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <TextBlock x:Name="HubTitle" Text="{DynamicResource DeviceHubPanelTitle}" Style="{StaticResource WorkspacePanelTitle}"/>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button x:Name="HeaderRefresh" Style="{StaticResource WorkspacePanelHeaderButton}" ToolTip="{DynamicResource DeviceHubRefresh}" Tag="refresh" Click="OnActionClick" AutomationProperties.AutomationId="DeviceHubRefreshButton">
                         <ui:SymbolIcon Symbol="ArrowClockwise20" FontSize="16"/>
                     </Button>
-                    <Button x:Name="HeaderMore" Style="{StaticResource IconButton}" Width="32" Height="32" MinHeight="32" ToolTip="{DynamicResource DeviceHubPanelMore}" Click="OnMoreClick" AutomationProperties.AutomationId="DeviceHubMoreButton">
+                    <Button x:Name="HeaderMore" Style="{StaticResource WorkspacePanelHeaderButton}" ToolTip="{DynamicResource DeviceHubPanelMore}" Click="OnMoreClick" AutomationProperties.AutomationId="DeviceHubMoreButton">
                         <ui:SymbolIcon Symbol="MoreHorizontal20" FontSize="16"/>
                     </Button>
-                    <Button Style="{StaticResource IconButton}" Width="32" Height="32" MinHeight="32" ToolTip="{DynamicResource Close}" Click="OnCloseClick" AutomationProperties.AutomationId="CloseDeviceHubButton">
+                    <Button x:Name="CloseHubButton" Style="{StaticResource WorkspacePanelHeaderButton}" ToolTip="{DynamicResource Close}"
+                            Click="OnCloseClick" AutomationProperties.Name="{DynamicResource Close}" AutomationProperties.AutomationId="CloseDeviceHubButton">
                         <ui:SymbolIcon Symbol="Dismiss20" FontSize="16"/>
                     </Button>
                 </StackPanel>
             </Grid>
-            <DockPanel Grid.Row="1" Margin="0,12,0,12">
-                <TextBlock x:Name="ConnectionText" DockPanel.Dock="Right" Style="{StaticResource HubCaption}" TextWrapping="NoWrap" VerticalAlignment="Top" FontSize="11" Margin="6,2,0,0" SizeChanged="OnConnectionTextSizeChanged"/>
-                <StackPanel>
-                    <TextBlock x:Name="DeviceNameText" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-                    <TextBlock x:Name="DeviceDetailText" Style="{StaticResource HubCaption}" FontSize="11" Margin="0,4,8,0"/>
-                    <TextBlock x:Name="RecoveryHint" Text="{DynamicResource DeviceHubPanelRecoveryShort}" Style="{StaticResource HubCaption}" FontSize="11" Visibility="Collapsed" Margin="0,7,8,0" AutomationProperties.LiveSetting="Polite"/>
-                </StackPanel>
-            </DockPanel>
+            <StackPanel x:Name="DeviceSummary" Grid.Row="1" Margin="0,12,0,12">
+                <DockPanel LastChildFill="False">
+                    <TextBlock x:Name="ConnectionText" DockPanel.Dock="Right" Style="{StaticResource HubCaption}" TextWrapping="NoWrap" VerticalAlignment="Top" FontSize="{DynamicResource CaptionFontSize}" Margin="6,2,0,0" SizeChanged="OnConnectionTextSizeChanged"/>
+                    <StackPanel x:Name="DeviceIdentitySummary" DockPanel.Dock="Left" Visibility="Collapsed">
+                        <TextBlock x:Name="DeviceNameText" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
+                                   ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
+                        <TextBlock x:Name="DeviceDetailText" Style="{StaticResource HubCaption}" FontSize="{DynamicResource CaptionFontSize}" Margin="0,3,8,0"/>
+                    </StackPanel>
+                </DockPanel>
+                <TextBlock x:Name="RecoveryHint" Text="{DynamicResource DeviceHubPanelRecoveryShort}" Style="{StaticResource HubCaption}" FontSize="{DynamicResource CaptionFontSize}" Visibility="Collapsed" Margin="0,5,0,0" AutomationProperties.LiveSetting="Polite"/>
+            </StackPanel>
             <UniformGrid x:Name="PageTabs" Grid.Row="2" Columns="6" Margin="0,0,0,12" KeyboardNavigation.DirectionalNavigation="Cycle">
                 <RadioButton x:Name="InfoTab" Content="{DynamicResource DeviceHubPanelInfoTab}" Tag="0" GroupName="DeviceHubPages" Style="{StaticResource HubPageTab}" Checked="OnTabChecked" AutomationProperties.AutomationId="DeviceHubInfoTab"/>
                 <RadioButton x:Name="AppsTab" Content="{DynamicResource DeviceHubApplications}" Tag="1" GroupName="DeviceHubPages" Style="{StaticResource HubPageTab}" Checked="OnTabChecked" AutomationProperties.AutomationId="DeviceHubAppsTab"/>
@@ -334,15 +314,29 @@
                         <StackPanel x:Name="ControlGroups"/>
                     </ScrollViewer>
                 </Grid>
-                <StackPanel x:Name="ConnectionPrompt" Grid.Row="2" VerticalAlignment="Center" Margin="16,0">
-                    <ui:SymbolIcon Symbol="PhoneDesktop24" FontSize="36" Foreground="{DynamicResource MutedTextBrush}" HorizontalAlignment="Center" Margin="0,0,0,16"/>
-                    <TextBlock x:Name="PromptTitle" TextAlignment="Center" FontWeight="SemiBold" TextWrapping="Wrap"/>
-                    <TextBlock x:Name="PromptDetail" Style="{StaticResource HubCaption}" TextAlignment="Center" Margin="0,8,0,16"/>
-                    <Button x:Name="PrepareButton" Tag="prepare" Click="OnActionClick" HorizontalAlignment="Center" Style="{StaticResource HubAction}" AutomationProperties.AutomationId="PrepareDeviceHubButton"/>
-                </StackPanel>
+                <ScrollViewer x:Name="ConnectionPrompt" Grid.Row="2" VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled">
+                    <Border x:Name="ConnectionPromptCard" Style="{StaticResource SettingsSection}"
+                            Margin="0,4,0,0" Padding="14,12" VerticalAlignment="Top">
+                        <StackPanel>
+                            <DockPanel>
+                                <ui:SymbolIcon DockPanel.Dock="Left" Symbol="PhoneDesktop24" FontSize="18"
+                                               Foreground="{DynamicResource AccentBrush}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                <TextBlock x:Name="PromptTitle" FontWeight="SemiBold" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                            </DockPanel>
+                            <TextBlock x:Name="PromptDetail" Style="{StaticResource HubCaption}" Margin="0,6,0,0"/>
+                            <Button x:Name="PrepareButton" Tag="prepare" Click="OnActionClick" Margin="0,12,0,0" HorizontalAlignment="Stretch"
+                                    Style="{StaticResource PrimaryButton}" AutomationProperties.AutomationId="PrepareDeviceHubButton">
+                                <Button.ContentTemplate>
+                                    <DataTemplate><TextBlock Text="{Binding}" TextAlignment="Center" TextWrapping="Wrap"/></DataTemplate>
+                                </Button.ContentTemplate>
+                            </Button>
+                        </StackPanel>
+                    </Border>
+                </ScrollViewer>
             </Grid>
-            <StackPanel Grid.Row="4" Margin="0,10,0,0">
-                <TextBlock x:Name="StatusText" FontSize="11" Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" MaxHeight="64" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" AutomationProperties.LiveSetting="Polite">
+            <StackPanel Grid.Row="4">
+                <TextBlock x:Name="StatusText" Margin="0,10,0,0" FontSize="11" Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" MaxHeight="64" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" AutomationProperties.LiveSetting="Polite">
                     <TextBlock.Style><Style TargetType="TextBlock"><Style.Triggers><Trigger Property="Text" Value=""><Setter Property="Visibility" Value="Collapsed"/></Trigger></Style.Triggers></Style></TextBlock.Style>
                 </TextBlock>
             </StackPanel>

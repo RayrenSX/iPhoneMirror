@@ -28,6 +28,19 @@ internal static partial class Program
     {
         try
         {
+            if (args is ["--windows-hotkey-capture", var hotkeyCaptureOutput]) return RunWindowsHotkeyCaptureTests(hotkeyCaptureOutput);
+            if (args is ["--workspace-fullscreen"]) return RunWorkspaceFullScreenTests();
+            if (args is ["--main-preview-composition"]) return RunMainPreviewCompositionTests();
+            if (args is ["--main-preview-composition-high-dpi"]) return RunMainPreviewCompositionTests(highDpi: true);
+            if (args is ["--main-preview-composition-live-12-mini"]) return RunMainPreviewCompositionTests(highDpi: true, livePhone: true);
+            if (args is ["--setup-notice-countdown", var noticeCountdownOutput]) return RunSetupNoticeCountdownTests(noticeCountdownOutput);
+            if (args is ["--unified-device-cards", var unifiedCardsOutput])
+                return RunUnifiedDeviceCardTests(unifiedCardsOutput);
+            if (args is ["--paired-wireless-review", var pairedWirelessOutput])
+                return RunPairedWirelessDiscoveryReview(pairedWirelessOutput);
+            if (args is ["--wired-readiness-review", var wiredReadinessOutput])
+                return RunWiredReadinessReview(wiredReadinessOutput);
+            if (args is ["--projection-audio", var audioOutput]) return RunProjectionAudioTests(audioOutput);
             // Native hub fixture: capture the real child command line without
             // opening a network receiver, enumerating devices or sending input.
             if (args.FirstOrDefault() == "--pipe" && args.Contains("RAOP port test") &&
@@ -41,6 +54,7 @@ internal static partial class Program
                 return RunGridLayoutEntryProbe(layoutAssembly, layoutApplication);
             if (args is ["--grid-layout-compatibility"]) return RunGridLayoutCompatibilityTests();
             if (args is ["--explorer-mapping-lifecycle", var explorerLifecycleOutput]) return RunExplorerMappingLifecycleTests(explorerLifecycleOutput);
+            if (args is ["--explorer-unified-drive"]) return RunExplorerUnifiedDriveTests();
             if (args is ["--rounded-window-review", var roundedReviewOutput]) return RunRoundedWindowCatalogReview(roundedReviewOutput);
             if (args is ["--rounded-driver-review", var roundedDriverAssembly, var roundedDriverOutput]) return RunRoundedWindowCatalogReview(roundedDriverOutput, roundedDriverAssembly);
             if (args is ["--rounded-window-recovery", var roundedRecoveryOutput]) return RunRoundedWindowRecoveryTests(roundedRecoveryOutput);
@@ -51,8 +65,17 @@ internal static partial class Program
             if (args is ["--independent-corner-profiles", var independentCornersOutput]) return RunIndependentCornerProfileTests(independentCornersOutput);
             if (args is ["--wireless-raop-ports", var portOutput]) return RunWirelessRaopPortTests(portOutput);
             if (args is ["--device-context-menu", var deviceMenuOutput]) return RunDeviceContextMenuTests(deviceMenuOutput);
+            if (args is ["--source-card-persistence-step", var sourceSettingsPath, var sourceSettingsStep])
+                return RunSourceCardPersistenceStep(sourceSettingsPath, sourceSettingsStep);
             if (args is ["--toolbar-customization", var customizeToolbarOutput]) return RunPreviewToolbarCustomizationTests(customizeToolbarOutput);
             if (args is ["--toolbar-drag", var toolbarDragOutput]) return RunToolbarDragTests(toolbarDragOutput);
+            if (args is ["--preview-tools"]) return RunPreviewToolsTests();
+            if (args is ["--preview-files-control", var previewFilesOutput]) return RunPreviewFilesControlTests(previewFilesOutput);
+            if (args is ["--preview-ipa-install", var previewIpaOutput]) return RunPreviewIpaInstallTests(previewIpaOutput);
+            if (args is ["--preview-ipa-worker", var previewIpaWorkerOutput]) return RunPreviewIpaWorkerTests(previewIpaWorkerOutput);
+            if (args is ["--preview-tools-review", var previewToolsOutput]) return RunPreviewToolsReview(previewToolsOutput);
+            if (args is ["--preview-click-through", var clickThroughOutput]) return RunPreviewClickThroughTests(clickThroughOutput);
+            if (args is ["--preview-click-target", var clickTargetPath]) return RunPreviewClickTarget(clickTargetPath);
             if (args is ["--toolbar-motion", var toolbarMotionOutput]) return RunToolbarMotionTests(toolbarMotionOutput);
             if (args is ["--toolbar-motion-default", var toolbarDefaultMotionOutput]) return RunToolbarMotionTests(toolbarDefaultMotionOutput, softwareOnly: false);
             if (args is ["--toolbar-hidden-motion", var hiddenToolbarOutput]) return RunHiddenToolbarMotionTests(hiddenToolbarOutput);
@@ -110,6 +133,12 @@ internal static partial class Program
             if (args is ["--independent-window-review", var independentReviewOutput])
                 return RunIndependentWindowReview(independentReviewOutput);
             if (args is ["--device-control-settings", var controlSettingsOutput]) return RunDeviceControlPreferencesTests(controlSettingsOutput);
+            if (args is ["--device-settings-recovery", var deviceSettingsRecoveryOutput])
+            {
+                Directory.CreateDirectory(deviceSettingsRecoveryOutput);
+                TestDeviceSettingsRecovery(deviceSettingsRecoveryOutput);
+                return 0;
+            }
             if (args is ["--settings-categories", var settingsOutput])
                 return RunSettingsCategoryTests(settingsOutput);
             if (args is ["--proxy-settings", var proxySettingsOutput]) return RunProxySettingsTests(proxySettingsOutput);
@@ -159,6 +188,11 @@ internal static partial class Program
                 return RunScreenshotBenchmark(screenshotFixture);
             if (args is ["--coredevice-replay", var mediaRecording])
                 return RunCoreDeviceReplayTest(mediaRecording);
+            if (args is ["--coredevice-pipe"])
+            {
+                TestCoreDevicePipe();
+                return 0;
+            }
             if (args is ["--device-hub-sidebar", var deviceHubSidebarOutput])
                 return RunDeviceHubSidebarTests(deviceHubSidebarOutput);
             if (args is ["--metal-hud-restart", var metalHudRestartOutput])
@@ -506,6 +540,7 @@ internal static partial class Program
                 throw new ArgumentException("Unknown runtime test arguments: " + string.Join(" ", args));
             TestGridStarSizeBoundaries();
             TestGridMixedDefinitions();
+            TestCoreDevicePipe();
             RunAutomationApiTests();
             RunInteractionRegressionTests();
             TestWheelCancellationState();
@@ -1576,7 +1611,7 @@ internal static partial class Program
         }
     }
 
-    private static MainWindow CreateWorkspaceTestWindow(Application application,
+    internal static MainWindow CreateWorkspaceTestWindow(Application application,
         bool includeNativePreview = true, bool initializeHiddenHandle = false)
     {
         var window = new MainWindow
@@ -1618,7 +1653,7 @@ internal static partial class Program
         return window;
     }
 
-    private static void CloseWorkspaceTestWindow(MainWindow window)
+    internal static void CloseWorkspaceTestWindow(MainWindow window, TimeSpan? shutdownWait = null)
     {
         var allowClose = typeof(MainWindow).GetField("_allowClose",
             BindingFlags.Instance | BindingFlags.NonPublic) ??
@@ -1638,7 +1673,7 @@ internal static partial class Program
             var viewModel = (IPhoneMirror.App.ViewModels.MainViewModel)KeyboardField(window, "_viewModel");
             var previousContext = SynchronizationContext.Current;
             SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext(window.Dispatcher));
-            try { WaitReviewTask(viewModel.ShutdownAsync()); }
+            try { WaitReviewTask(viewModel.ShutdownAsync(), shutdownWait); }
             finally { SynchronizationContext.SetSynchronizationContext(previousContext); }
         }
         InteractionAssert(!IPhoneMirror.App.Interop.NativeCore.ForcePreviewRefresh(),
@@ -1860,15 +1895,7 @@ internal static partial class Program
             throw new InvalidOperationException("Full-screen preview panel was not found.");
         var navigation = window.FindName("RootNavigation") as System.Windows.Controls.Control ??
             throw new InvalidOperationException("Full-screen navigation surface was not found.");
-        var host = window.FindName("MainPreviewHost") ??
-            throw new InvalidOperationException("Full-screen native preview host was not found.");
-        var hostProperty = host.GetType().GetProperty("IsFullScreenPresentation",
-            BindingFlags.Instance | BindingFlags.NonPublic) ??
-            throw new MissingMemberException(host.GetType().FullName,
-                "IsFullScreenPresentation");
-
         setFullScreenBackground.Invoke(window, [true]);
-        hostProperty.SetValue(host, true);
         window.UpdateLayout();
         if (window.Background is not SolidColorBrush windowBrush ||
             windowBrush.Color != Colors.Black ||
@@ -1877,17 +1904,14 @@ internal static partial class Program
             navigation.Background is not SolidColorBrush navigationBrush ||
             navigationBrush.Color != Colors.Black ||
             panels.Any(panel => panel.Background is not SolidColorBrush brush ||
-                                brush.Color != Colors.Black) ||
-            hostProperty.GetValue(host) is not true)
+                                brush.Color != Colors.Black))
             throw new InvalidOperationException(
                 "Main full-screen preview did not apply black fill to every preview surface.");
 
         setFullScreenBackground.Invoke(window, [false]);
-        hostProperty.SetValue(host, false);
         window.UpdateLayout();
         if (previewPanel.Background is not SolidColorBrush restoredPreview ||
-            restoredPreview.Color != Color.FromRgb(0xF1, 0xF1, 0xF3) ||
-            hostProperty.GetValue(host) is not false)
+            restoredPreview.Color != Color.FromRgb(0xF1, 0xF1, 0xF3))
             throw new InvalidOperationException(
                 "Main preview did not restore the light theme after leaving full screen.");
     }

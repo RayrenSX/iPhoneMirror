@@ -108,16 +108,18 @@ internal static partial class Program
             Key(0x75, false);
 
             Key(0x76, true);
+            var topmostMenu = (System.Windows.Controls.MenuItem)KeyboardField(first, "_topMostItem");
             var nativeStyles = (nint)typeof(NativePreviewWindow).GetMethod("GetWindowLongPtrW",
                 System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!
                 .Invoke(null, [first.Handle, -20])!;
-            InteractionAssert((nativeStyles.ToInt64() & 8) != 0,
-                "Temporary topmost must set the native WS_EX_TOPMOST style.");
+            InteractionAssert((nativeStyles.ToInt64() & 8) != 0 && topmostMenu.IsChecked && !topmostMenu.IsEnabled,
+                "Temporary topmost must set the native style and update the menu state.");
             Key(0x76, false);
             nativeStyles = (nint)typeof(NativePreviewWindow).GetMethod("GetWindowLongPtrW",
                 System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!
                 .Invoke(null, [first.Handle, -20])!;
-            InteractionAssert((nativeStyles.ToInt64() & 8) == 0, "Release must remove temporary topmost from the HWND.");
+            InteractionAssert((nativeStyles.ToInt64() & 8) == 0 && !topmostMenu.IsChecked && topmostMenu.IsEnabled,
+                "Release must restore both the HWND and the menu state.");
             InteractionAssert(!(bool)KeyboardField(first, "_isTopMost"), "Temporary topmost must not overwrite the baseline.");
 
             foreground = second.Handle;

@@ -4,7 +4,7 @@
         xmlns:animations="clr-namespace:IPhoneMirror.UI.Animations"
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
         Title="{DynamicResource MoreImageSettingsTitle}"
-        Width="582" Height="672" MinWidth="542" MinHeight="622"
+        Width="560" Height="480" MinWidth="522" MinHeight="462"
         WindowStartupLocation="CenterOwner" ResizeMode="CanResize"
         PreviewKeyDown="OnPreviewKeyDown"
         Closing="OnWindowClosing"
@@ -23,6 +23,8 @@
             <Setter Property="FontSize" Value="{DynamicResource FontSize12}"/>
             <Setter Property="HorizontalAlignment" Value="Right"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="MinWidth" Value="48"/>
+            <Setter Property="TextAlignment" Value="Right"/>
         </Style>
     </chrome:RoundedWindow.Resources>
 
@@ -31,8 +33,6 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="16"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="12"/>
             <RowDefinition Height="*" MinHeight="{StaticResource DialogContentMinHeight}"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
@@ -43,24 +43,17 @@
             <StackPanel Margin="0,0,48,0">
                 <TextBlock Text="{DynamicResource MoreImageSettingsTitle}"
                            Style="{StaticResource SubWindowTitle}"/>
-                <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource MoreImageSettingsSubtitle}"
-                           Style="{StaticResource SubWindowSubtitle}"/>
+                <TextBlock Text="{DynamicResource ImageAdjustmentsLiveHint}" Style="{StaticResource SubWindowSubtitle}"
+                           ToolTip="{DynamicResource ImageAdjustmentsPreviewOnlyNotice}"
+                           AutomationProperties.HelpText="{DynamicResource ImageAdjustmentsPreviewOnlyNotice}"/>
             </StackPanel>
             <Button Style="{StaticResource SubWindowCloseButton}" Click="OnBackClick">
                 <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Dismiss20" FontSize="18"/>
             </Button>
         </Grid>
 
-        <Border Grid.Row="2" Background="{DynamicResource WarningSurfaceBrush}"
-                BorderBrush="{DynamicResource WarningBrush}" BorderThickness="1"
-                CornerRadius="12" Padding="14,11">
-            <TextBlock Text="{DynamicResource ImageAdjustmentsPreviewOnlyNotice}"
-                       Foreground="{DynamicResource WarningBrush}" FontSize="{DynamicResource SecondaryFontSize}"
-                       TextWrapping="Wrap"/>
-        </Border>
-
-        <Border x:Name="AdjustmentPanel" Grid.Row="4"
-                Style="{StaticResource SettingsSection}" Padding="20,16">
+        <Border x:Name="AdjustmentPanel" Grid.Row="2"
+                Style="{StaticResource SettingsSection}" Padding="16,14" VerticalAlignment="Top">
             <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"><StackPanel>
                 <Grid>
                     <TextBlock Text="{DynamicResource BrightnessLabel}" Style="{StaticResource AdjustmentLabel}"/>
@@ -68,60 +61,63 @@
                                Style="{StaticResource AdjustmentValue}"/>
                 </Grid>
                 <Slider x:Name="BrightnessSlider" AutomationProperties.Name="{DynamicResource BrightnessLabel}" Minimum="-100" Maximum="100"
-                        TickFrequency="1" IsSnapToTickEnabled="True" Margin="0,8,0,0"
+                        TickFrequency="1" IsSnapToTickEnabled="True" Margin="0,6,0,0"
                         ValueChanged="OnAdjustmentValueChanged"/>
 
-                <Border Height="1" Background="{DynamicResource BorderSoftBrush}" Margin="0,16"/>
+                <Border Height="1" Background="{DynamicResource BorderSoftBrush}" Margin="0,10"/>
                 <Grid>
                     <TextBlock Text="{DynamicResource ContrastLabel}" Style="{StaticResource AdjustmentLabel}"/>
                     <TextBlock Text="{Binding ElementName=ContrastSlider, Path=Value, StringFormat={}{0:F0}%}"
                                Style="{StaticResource AdjustmentValue}"/>
                 </Grid>
                 <Slider x:Name="ContrastSlider" AutomationProperties.Name="{DynamicResource ContrastLabel}" Minimum="0" Maximum="200"
-                        TickFrequency="1" IsSnapToTickEnabled="True" Margin="0,8,0,0"
+                        TickFrequency="1" IsSnapToTickEnabled="True" Margin="0,6,0,0"
                         ValueChanged="OnAdjustmentValueChanged"/>
 
-                <Border Height="1" Background="{DynamicResource BorderSoftBrush}" Margin="0,16"/>
+                <Border Height="1" Background="{DynamicResource BorderSoftBrush}" Margin="0,10"/>
                 <Grid>
                     <TextBlock Text="{DynamicResource SaturationLabel}" Style="{StaticResource AdjustmentLabel}"/>
                     <TextBlock Text="{Binding ElementName=SaturationSlider, Path=Value, StringFormat={}{0:F0}%}"
                                Style="{StaticResource AdjustmentValue}"/>
                 </Grid>
                 <Slider x:Name="SaturationSlider" AutomationProperties.Name="{DynamicResource SaturationLabel}" Minimum="0" Maximum="200"
-                        TickFrequency="1" IsSnapToTickEnabled="True" Margin="0,8,0,0"
+                        TickFrequency="1" IsSnapToTickEnabled="True" Margin="0,6,0,0"
                         ValueChanged="OnAdjustmentValueChanged"/>
 
-                <Border Height="1" Background="{DynamicResource BorderSoftBrush}" Margin="0,16"/>
+                <Border Height="1" Background="{DynamicResource BorderSoftBrush}" Margin="0,10"/>
                 <Grid>
                     <TextBlock Text="{DynamicResource GammaLabel}" Style="{StaticResource AdjustmentLabel}"/>
                     <TextBlock Text="{Binding ElementName=GammaSlider, Path=Value, StringFormat={}{0:F0}%}"
                                Style="{StaticResource AdjustmentValue}"/>
                 </Grid>
                 <Slider x:Name="GammaSlider" AutomationProperties.Name="{DynamicResource GammaLabel}" Minimum="50" Maximum="200"
-                        TickFrequency="1" IsSnapToTickEnabled="True" Margin="0,8,0,0"
+                        TickFrequency="1" IsSnapToTickEnabled="True" Margin="0,6,0,0"
                         ValueChanged="OnAdjustmentValueChanged"/>
             </StackPanel></ScrollViewer>
         </Border>
 
-        <TextBlock x:Name="FeedbackText" Grid.Row="5"
+        <TextBlock x:Name="FeedbackText" Grid.Row="3"
                    Foreground="{DynamicResource WarningBrush}" FontSize="{DynamicResource CaptionFontSize}"
-                   TextWrapping="Wrap" Margin="0,8,0,10"/>
+                   TextWrapping="Wrap" Margin="0,8,0,0" AutomationProperties.LiveSetting="Polite">
+            <TextBlock.Style>
+                <Style TargetType="TextBlock">
+                    <Style.Triggers>
+                        <Trigger Property="Text" Value=""><Setter Property="Visibility" Value="Collapsed"/></Trigger>
+                    </Style.Triggers>
+                </Style>
+            </TextBlock.Style>
+        </TextBlock>
 
-        <Grid Grid.Row="6">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="10"/>
-                <ColumnDefinition Width="Auto"/>
-            </Grid.ColumnDefinitions>
-            <Button x:Name="ResetButton" Content="{DynamicResource ResetImageSettings}" MinWidth="108"
-                    Click="OnResetClick"/>
-            <Button Grid.Column="2" Content="{DynamicResource BackImageSettings}" MinWidth="96"
-                    Click="OnBackClick"/>
-            <Button x:Name="SaveButton" Grid.Column="4" Content="{DynamicResource Save}" MinWidth="108"
-                    Style="{StaticResource PrimaryButton}" IsDefault="True"
-                    Click="OnSaveClick"/>
-        </Grid>
+        <Border Grid.Row="4" Margin="0,12,0,0" Padding="0,12,0,0"
+                BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,1,0,0">
+            <WrapPanel HorizontalAlignment="Right">
+                <Button x:Name="ResetButton" Content="{DynamicResource ResetImageSettings}" Margin="0,0,8,0"
+                        Click="OnResetClick"/>
+                <Button Content="{DynamicResource BackImageSettings}" Margin="0,0,8,0"
+                        Click="OnBackClick"/>
+                <Button x:Name="SaveButton" Content="{DynamicResource Save}" MinWidth="96"
+                        Style="{StaticResource PrimaryButton}" IsDefault="True" Click="OnSaveClick"/>
+            </WrapPanel>
+        </Border>
     </Grid>
 </chrome:RoundedWindow>

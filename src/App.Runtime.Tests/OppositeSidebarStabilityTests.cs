@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
+using IPhoneMirror.App.Controls;
 using IPhoneMirror.App.Updater;
 
 namespace IPhoneMirror.App.Runtime.Tests;
@@ -16,7 +17,7 @@ internal static partial class Program
             foreach (var fromRight in new[] { false, true })
             {
                 var card = new Border();
-                var viewport = new IPhoneMirror.App.Controls.WorkspaceRevealPanel
+                var viewport = new WorkspaceRevealPanel
                 {
                     ContentWidth = 362, Width = 362,
                     HorizontalAlignment = fromRight ? HorizontalAlignment.Right : HorizontalAlignment.Left,
@@ -132,7 +133,8 @@ internal static partial class Program
                         {
                             if (existingLeft) Settings(true); else Left(true);
                             var opening = (IPhoneMirror.App.Controls.WorkspaceRevealPanel)window.FindName(existingLeft ? "ControlPanel" : "LeftPanelHost");
-                            InteractionAssert(Math.Abs(opening.ContentWidth - (existingLeft ? 362 : 300)) < 1,
+                            var expectedWidth = existingLeft ? WorkspaceRevealPanel.DefaultRightContentWidth : WorkspaceRevealPanel.DefaultLeftContentWidth;
+                            InteractionAssert(Math.Abs(opening.ContentWidth - expectedWidth) < 1,
                                 "A newly opening card retained the old window's leftover width instead of preparing its final content width.");
                             FinishWorkspaceReveal(window); AdvanceDispatcher(TimeSpan.FromMilliseconds(150));
                             if (existingLeft) Settings(false); else Left(false);

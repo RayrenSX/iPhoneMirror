@@ -21,7 +21,7 @@ body:
     id: environment
     attributes:
       label: 使用环境（如适用）｜Environment (if relevant)
-      description: 可填写软件版本、Windows 版本、设备型号与系统版本、USB 或无线连接方式。无需填写 UDID 或序列号。Include the app version, Windows version, device model and OS, and connection mode when relevant. Do not include UDIDs or serial numbers.
+      description: 可从「关于」复制完整版本号，并注明安装版、便携版或本地构建，再补充 Windows 版本、设备型号、系统版本和连接方式。Copy the full version from About, specify Setup, portable ZIP, or local build, and include the Windows version, device model, device OS, and connection method when relevant. Omit UDIDs and serial numbers.
   - type: textarea
     id: attempted
     attributes:

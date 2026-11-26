@@ -34,6 +34,7 @@ internal sealed partial class MainViewModel
         control.WiredFinalRetryInProgress = true;
         try
         {
+            await StopDuoWiredShortcutsAsync(control);
             control.ControlStatus.Report(ControlStatusMode.Usb, ControlStage.Recovering,
                 device.Name, LocalizationService.Get("ControlAutoReconnectingChannel"));
             control.Status = LocalizationService.Get("ReverseControlUsbConnecting");

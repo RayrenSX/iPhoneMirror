@@ -196,10 +196,34 @@ internal static partial class Program
             nint Message(int message, nint point = 0) =>
                 (nint)KeyboardCall(preview, "WindowProcedure", preview.Handle, message, (nint)0, point, false)!;
             enabled = true;
+            var rectArgs = new object?[] { preview.Handle, null };
+            type.GetMethod("GetWindowRect", BindingFlags.NonPublic | BindingFlags.Static)!.Invoke(null, rectArgs);
+            var rect = rectArgs[1]!;
+            var left = (int)KeyboardField(rect, "Left");
+            var top = (int)KeyboardField(rect, "Top");
+            var right = (int)KeyboardField(rect, "Right") - 2;
+            var x = (left + right) / 2;
+            var y = (top + (int)KeyboardField(rect, "Bottom")) / 2;
+            static nint Point(int x, int y) => (nint)((y << 16) | (x & 0xffff));
+            InteractionAssert(Message(0x84, Point(x, y)) == 1 && preview.AllowsControlInput,
+                "a newly opened preview must admit an existing control route without a fixation request");
+            Message(0x201); Message(0x202);
+            InteractionAssert(pointers.Any(p => p.Kind == Controls.PreviewPointerKind.ButtonDown),
+                "a newly opened preview must forward a click in its interior");
+            InteractionAssert(Message(0x84, Point(x, top + 2)) == 2 &&
+                Message(0x84, Point(right, y)) == 11 && Message(0x84, Point(left + 2, top + 2)) == 13,
+                "automatic touch control must leave caption movement and edge/corner sizing available");
+            object[] cursor = [preview.Handle, 0x20, preview.Handle, (nint)11, false];
+            type.GetMethod("WindowProcedure", InteractionMembers)!.Invoke(preview, cursor);
+            InteractionAssert(!(bool)cursor[4], "touch control must leave the resize cursor to Windows");
             if (absolute) preview.PrepareForBluetoothControl();
             else preview.PrepareForUsbControl();
-            InteractionAssert(Message(0x84) == 1 && preview.AllowsControlInput,
-                "fixed touch window must admit phone input");
+            Message(0x231);
+            pointers.Clear(); keys.Clear();
+            Message(0x201);
+            InteractionAssert(!preview.AllowsControlInput && pointers.Count == 0 && keys.Count == 0,
+                "The native move/resize loop must not forward phone input.");
+            Message(0x232);
             Message(0x201);
             InteractionAssert(pointers.Any(p => p.Kind == Controls.PreviewPointerKind.ButtonDown),
                 "fixed touch window must forward the initial press");
@@ -224,15 +248,9 @@ internal static partial class Program
                 keys.Any(k => k.Kind == Controls.PreviewKeyboardKind.Reset) &&
                 (byte)KeyboardField(preview, "_capturedMouseButtons") == 0,
                 "unfix must revoke input and release held touch/keyboard state");
-            var rectArgs = new object?[] { preview.Handle, null };
-            type.GetMethod("GetWindowRect", BindingFlags.NonPublic | BindingFlags.Static)!.Invoke(null, rectArgs);
-            var rect = rectArgs[1]!;
-            var x = ((int)KeyboardField(rect, "Left") + (int)KeyboardField(rect, "Right")) / 2;
-            var y = ((int)KeyboardField(rect, "Top") + (int)KeyboardField(rect, "Bottom")) / 2;
-            InteractionAssert(Message(0x84, (nint)((y << 16) | (x & 0xffff))) == 2,
+            InteractionAssert(Message(0x84, Point(x, y)) == 2,
                 "unfix must restore caption dragging while transport stays enabled");
-            var right = (int)KeyboardField(rect, "Right") - 2;
-            InteractionAssert(Message(0x84, (nint)((y << 16) | (right & 0xffff))) == 11,
+            InteractionAssert(Message(0x84, Point(right, y)) == 11,
                 "unfix must restore edge resizing while transport stays enabled");
             pointers.Clear(); keys.Clear();
             foreach (var message in new[] { 0x200, 0x201, 0x202, 0x20a, 0x100, 0x101 }) Message(message);

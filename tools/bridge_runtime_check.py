@@ -46,11 +46,15 @@ def check_runtime_functionality(build_touchscreen_report, contact, release, buil
     receiver = HevcReceiver()
     if receiver.push(RtpPacket(1, 0, 123, True, 96, b'\x02\x01delta')) is not None or not receiver.wait_key:
         raise RuntimeError('CoreDevice keyframe admission failed')
-    if len(Feedback(789, 123).rctl(1)) != 32 or DeviceHub is None:
+    if len(Feedback(789, 123).rctl()) != 32 or DeviceHub is None:
         raise RuntimeError('CoreDevice feedback/bridge import failed')
     checks.append('replay_codec_and_hid_feedback')
     mapped_actions = ('stat_file', 'write_mapped_file', 'make_directory', 'move_file', 'delete_mapped_file', 'set_mapped_file_time')
-    if (len(ACTIONS) != 36 or
+    if (len(ACTIONS) != 40 or
+            ACTIONS.get('explorer_roots') != {'readOnly': True, 'public': False, 'timeout': 60} or
+            ACTIONS.get('close_app') != {'readOnly': False, 'public': False, 'timeout': 35} or
+            ACTIONS.get('mirror_start') != {'readOnly': False, 'public': False, 'timeout': 45} or
+            ACTIONS.get('mirror_stop') != {'readOnly': False, 'public': False, 'timeout': 12} or
             ACTIONS.get('restart_with_metal_hud') != {'readOnly': False, 'public': True, 'timeout': 35} or
             ACTIONS['upload_file']['public'] or ACTIONS['upload_file']['readOnly'] or
             ACTIONS['delete_file']['public'] or ACTIONS['delete_file']['readOnly'] or

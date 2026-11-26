@@ -29,7 +29,7 @@ public partial class TrayPanelWindow : IPhoneMirror.UI.Controls.RoundedWindow
         LocalizationService.RefreshWhenLanguageChanges(this, () =>
             FeedbackText.Text = LocalizationService.RefreshText(FeedbackText.Text));
         DataContext = viewModel;
-        DeviceList.ItemsSource = viewModel.Devices;
+        DeviceList.ItemsSource = viewModel.DeviceCards;
         viewModel.PropertyChanged += OnViewModelChanged;
         Deactivated += (_, _) => QueueDismissIfInactive();
         ModeSelector.DropDownClosed += (_, _) => QueueDismissIfInactive();
@@ -72,6 +72,11 @@ public partial class TrayPanelWindow : IPhoneMirror.UI.Controls.RoundedWindow
         FeedbackText.Visibility = Visibility.Visible;
     }
 
+    internal void SetPreviewInteractionRestoreVisible(bool visible) =>
+        RestorePreviewInteractionButton.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+
+    internal event Action? PreviewInteractionRestoreRequested;
+
     private async void OnStartClick(object sender, RoutedEventArgs e)
     {
         if (_busy || DeviceList.SelectedItem is not DeviceViewModel device) return;
@@ -99,7 +104,13 @@ public partial class TrayPanelWindow : IPhoneMirror.UI.Controls.RoundedWindow
         if (_busy) return;
         _busy = true;
         UpdateActions();
-        try { await _viewModel.RefreshAsync(forceDeviceEnumeration: true); }
+        FeedbackText.SetResourceReference(System.Windows.Controls.TextBlock.TextProperty, "UiRefreshing");
+        FeedbackText.Visibility = Visibility.Visible;
+        try
+        {
+            await _viewModel.RefreshAsync(forceDeviceEnumeration: true);
+            if (!_closingPermanently) FeedbackText.Visibility = Visibility.Collapsed;
+        }
         catch (Exception error)
         {
             DiagnosticLogger.Exception("tray", "refresh_failed", error);
@@ -110,8 +121,20 @@ public partial class TrayPanelWindow : IPhoneMirror.UI.Controls.RoundedWindow
 
     private void OnSettingsClick(object sender, RoutedEventArgs e) { Hide(); _settings(); }
     private void OnRestoreClick(object sender, RoutedEventArgs e) => _viewModel.RestoreMainWindowFromTray();
+    private void OnRestorePreviewInteractionClick(object sender, RoutedEventArgs e)
+    {
+        Hide();
+        PreviewInteractionRestoreRequested?.Invoke();
+    }
     private void OnExitClick(object sender, RoutedEventArgs e) => _exit();
     private void OnHideClick(object sender, RoutedEventArgs e) => Hide();
+
+    private void OnModeSelectorPreviewMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        // Scrolling the panel must never switch application modes inadvertently.
+        if (!ModeSelector.IsDropDownOpen) e.Handled = true;
+    }
+
     private void OnPreviewKeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key != Key.Escape || ModeSelector.IsDropDownOpen) return;

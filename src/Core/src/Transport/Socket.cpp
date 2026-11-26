@@ -68,10 +68,16 @@ Socket Socket::connect_loopback(std::uint16_t port, int timeout_ms) {
         fd_set write_set;
         FD_ZERO(&write_set);
         FD_SET(handle, &write_set);
+        // Winsock reports a refused nonblocking connect in exceptfds, not
+        // writefds. Ignoring it turns connection refusal into a timeout and
+        // can prolong idle device/environment polls for an absent service.
+        fd_set error_set;
+        FD_ZERO(&error_set);
+        FD_SET(handle, &error_set);
         // select's timeval fields are unsigned; the entry-point check above
         // guarantees timeout_ms is positive so tv_sec/tv_usec are well-defined.
         timeval timeout{ timeout_ms / 1000, (timeout_ms % 1000) * 1000 };
-        status = select(0, nullptr, &write_set, nullptr, &timeout);
+        status = select(0, nullptr, &write_set, &error_set, &timeout);
         if (status == 0) throw SocketError("connect timeout", WSAETIMEDOUT);
         if (status == SOCKET_ERROR) throw SocketError("select", WSAGetLastError());
         int socket_error{};

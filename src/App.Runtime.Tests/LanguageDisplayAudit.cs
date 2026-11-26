@@ -363,8 +363,8 @@ internal static partial class Program
         foreach (var language in new[] { "zh-CN", "zh-HK", "zh-TW", "en-US", "ja-JP" })
         {
             DisplayLanguage(language);
-            var labels = new[] { ("HeadingText", "StartupErrorHeading"), ("LogLabelText", "StartupErrorLogLabel"),
-                ("DetailsExpander", "StartupErrorDetails"), ("OpenLogButton", "StartupErrorOpenLog"), ("CloseButton", "StartupErrorClose") }
+            var labels = new[] { ("HeadingText", "StartupErrorHeading"), ("DetailsTextBox", "StartupErrorDetails"),
+                ("OpenLogButton", "StartupErrorOpenLog"), ("CloseButton", "StartupErrorClose") }
                 .Select(x => (x.Item1, Text: DisplayL(x.Item2))).ToArray();
             var dictionary = app.Resources.MergedDictionaries.Single(d => d.Source?.OriginalString.Contains("Localization/Strings.") == true);
             var index = app.Resources.MergedDictionaries.IndexOf(dictionary);
@@ -377,7 +377,13 @@ internal static partial class Program
                 foreach (var (name, expected) in labels)
                 {
                     var control = window.FindName(name);
-                    var text = control is TextBlock tb ? tb.Text : control is Expander ex ? ex.Header : ((ContentControl)control).Content;
+                    var text = control switch
+                    {
+                        TextBlock block => block.Text,
+                        TextBox box => System.Windows.Automation.AutomationProperties.GetName(box),
+                        ContentControl content => content.Content,
+                        _ => null,
+                    };
                     verify(Equals(text, expected), language + ": missing startup dictionary leaked a key: " + name);
                 }
                 verify(((TextBox)window.FindName("DetailsTextBox")).Text.Contains("RAW native failure"), "Startup raw exception lost");

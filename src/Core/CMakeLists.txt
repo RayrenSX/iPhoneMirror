@@ -113,12 +113,33 @@ target_link_libraries(iPhoneMirror.UsbConfigurationSwitch PRIVATE
 
 if(IPHONEMIRROR_BUILD_TESTS)
     enable_testing()
+    add_executable(iPhoneMirror.IdleEnvironment.Tests tests/IdleEnvironmentTests.cpp)
+    target_include_directories(iPhoneMirror.IdleEnvironment.Tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_compile_definitions(iPhoneMirror.IdleEnvironment.Tests PRIVATE
+        UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_compile_options(iPhoneMirror.IdleEnvironment.Tests PRIVATE
+        /W4 /permissive- /utf-8 /EHsc)
+    target_link_libraries(iPhoneMirror.IdleEnvironment.Tests PRIVATE iPhoneMirror.Core)
+    add_test(NAME IdleEnvironmentTests COMMAND iPhoneMirror.IdleEnvironment.Tests)
+    set_tests_properties(IdleEnvironmentTests PROPERTIES TIMEOUT 40)
+    add_executable(iPhoneMirror.SocketConnection.Tests
+        tests/SocketConnectionTests.cpp src/Transport/Socket.cpp)
+    target_include_directories(iPhoneMirror.SocketConnection.Tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_compile_definitions(iPhoneMirror.SocketConnection.Tests PRIVATE
+        UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_compile_options(iPhoneMirror.SocketConnection.Tests PRIVATE
+        /W4 /permissive- /utf-8 /EHsc)
+    target_link_libraries(iPhoneMirror.SocketConnection.Tests PRIVATE ws2_32)
+    add_test(NAME SocketConnectionTests COMMAND iPhoneMirror.SocketConnection.Tests)
+    set_tests_properties(SocketConnectionTests PROPERTIES TIMEOUT 15)
     add_executable(iPhoneMirror.LoggingRotation.Tests
         tests/LoggingRotationTests.cpp src/Logging.cpp)
     target_include_directories(iPhoneMirror.LoggingRotation.Tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_compile_definitions(iPhoneMirror.LoggingRotation.Tests PRIVATE
-        UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+        UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX IPHONEMIRROR_TEST_LOG_CLOCK)
     target_compile_options(iPhoneMirror.LoggingRotation.Tests PRIVATE
         /W4 /permissive- /utf-8 /EHsc)
     target_link_libraries(iPhoneMirror.LoggingRotation.Tests PRIVATE bcrypt)
@@ -164,6 +185,7 @@ if(IPHONEMIRROR_BUILD_TESTS)
         src/Transport/QtUsbTransport.cpp
         src/Transport/LibUsb0Transport.cpp
         src/Device/AppleUsbDiscovery.cpp
+        src/Device/DeviceManager.cpp
         src/Capture/CaptureSession.cpp
         src/Capture/UsbOrientationMonitor.cpp
         src/Capture/WirelessReceiverHub.cpp

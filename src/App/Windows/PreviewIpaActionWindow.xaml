@@ -1,0 +1,41 @@
+<chrome:RoundedWindow x:Class="IPhoneMirror.App.Windows.PreviewIpaActionWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:chrome="clr-namespace:IPhoneMirror.UI.Controls"
+    xmlns:animations="clr-namespace:IPhoneMirror.UI.Animations"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    Title="{DynamicResource IpaDropTitle}" Width="510" SizeToContent="Height"
+    WindowStartupLocation="CenterOwner" ResizeMode="NoResize" ShowInTaskbar="False"
+    Foreground="{DynamicResource TextBrush}" WindowStyle="None" AllowsTransparency="True" Background="Transparent">
+    <Grid Style="{StaticResource SubWindowPageRoot}" animations:PageTransition.IsEnabled="True">
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+        <Grid Style="{StaticResource SubWindowHeader}" animations:WindowDragBehavior.IsEnabled="True">
+            <TextBlock Text="{DynamicResource IpaDropTitle}" Style="{StaticResource SubWindowTitle}" Margin="0,0,48,0"/>
+            <Button Style="{StaticResource SubWindowCloseButton}" Click="CancelClick" ToolTip="{DynamicResource Cancel}"
+                    AutomationProperties.Name="{DynamicResource Cancel}">
+                <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Dismiss20" FontSize="18"/>
+            </Button>
+        </Grid>
+        <StackPanel Grid.Row="1" Margin="0,16,0,6">
+            <TextBlock x:Name="TargetText" TextWrapping="Wrap" FontWeight="SemiBold"/>
+            <TextBlock x:Name="FilesText" TextWrapping="Wrap" Foreground="{DynamicResource MutedTextBrush}" Margin="0,6,0,16"/>
+            <Button x:Name="TransferButton" HorizontalContentAlignment="Left" Padding="16,12" Click="TransferClick"
+                    AutomationProperties.Name="{DynamicResource IpaDropTransfer}">
+                <StackPanel>
+                    <TextBlock Text="{DynamicResource IpaDropTransfer}" FontWeight="SemiBold"/>
+                    <TextBlock Text="{DynamicResource IpaDropTransferHint}" TextWrapping="Wrap" Margin="0,4,0,0"
+                               Foreground="{DynamicResource MutedTextBrush}"/>
+                </StackPanel>
+            </Button>
+            <Button x:Name="InstallButton" HorizontalContentAlignment="Left" Padding="16,12" Margin="0,10,0,0" Click="InstallClick"
+                    AutomationProperties.Name="{DynamicResource IpaDropInstall}">
+                <StackPanel>
+                    <TextBlock Text="{DynamicResource IpaDropInstall}" FontWeight="SemiBold"/>
+                    <TextBlock Text="{DynamicResource IpaDropInstallHint}" TextWrapping="Wrap" Margin="0,4,0,0"
+                               Foreground="{DynamicResource MutedTextBrush}"/>
+                </StackPanel>
+            </Button>
+            <TextBlock x:Name="MixedFilesText" TextWrapping="Wrap" Foreground="{DynamicResource MutedTextBrush}" Margin="0,12,0,0"/>
+        </StackPanel>
+    </Grid>
+</chrome:RoundedWindow>

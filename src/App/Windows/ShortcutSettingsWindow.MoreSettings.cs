@@ -23,6 +23,7 @@ public partial class ShortcutSettingsWindow
     {
         if ((sender as FrameworkElement)?.DataContext is SettingShortcutRow row) SettingRows.Remove(row);
         OnPropertyChanged(nameof(CanAddSettingShortcut));
+        OnPropertyChanged(nameof(ShowSettingShortcutSection));
         StatusText = string.Empty;
     }
 
@@ -40,6 +41,7 @@ public partial class ShortcutSettingsWindow
             return false;
         }
         row.SetShortcut(shortcut);
+        OnPropertyChanged(nameof(ShowSettingShortcutSection));
         StatusText = string.Empty;
         return true;
     }

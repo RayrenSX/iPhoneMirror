@@ -6,7 +6,9 @@ using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using System.Windows.Threading;
 using IPhoneMirror.App.Services;
+using IPhoneMirror.App.Updater;
 using IPhoneMirror.App.Windows;
 using Button = System.Windows.Controls.Button;
 using Image = System.Windows.Controls.Image;
@@ -21,8 +23,12 @@ internal static partial class Program
         RenderOptions.ProcessRenderMode = softwareOnly ? System.Windows.Interop.RenderMode.SoftwareOnly : System.Windows.Interop.RenderMode.Default;
         var app = new App { IsUiPreviewMode = true, ShutdownMode = ShutdownMode.OnExplicitShutdown };
         app.InitializeComponent();
+        SetApplicationDisplayMode(app, ApplicationDisplayMode.Complete);
+        app.UpdateSettings.HidePreviewToolbar = false;
         var main = CreateWorkspaceTestWindow(app, includeNativePreview: false);
         var toolbar = (FrameworkElement)main.FindName("EnvironmentPanel");
+        InteractionAssert(toolbar.IsVisible && !main.ToolbarFocusRegion().IsEmpty,
+            "The zoom fixture requires a visible toolbar in the complete workspace.");
         var original = ((Panel)main.FindName("PreviewQuickActions")).Children.OfType<Button>().ToArray();
         var catalog = original.Select(b => new ToolbarAction(AutomationProperties.GetAutomationId(b), AutomationProperties.GetName(b),
             ((StackPanel)b.Content).Children.OfType<IPhoneMirror.App.Controls.ThemedSymbolIcon>().First().Symbol)).ToArray();
@@ -118,13 +124,22 @@ internal static partial class Program
             try
             {
                 var scene = (Image)early.FindName("SceneImage"); var before = scene.RenderTransform.Value;
+                InteractionAssert(early.IsFocusMoving && early.FocusProgress is > 0 and < 1,
+                    "The early-close fixture must reach an intermediate entrance frame.");
                 early.Close();
+                // A title-bar close defers the reverse until WPF leaves Closing.
+                // Run through that dispatcher turn before checking the new clock.
+                early.Dispatcher.Invoke(() => { }, DispatcherPriority.Normal);
                 var after = scene.RenderTransform.Value;
-                InteractionAssert(early.IsFocusMoving && Math.Abs(before.M11 - after.M11) < .01 &&
+                InteractionAssert((bool)KeyboardField(early, "_focusExiting") && early.IsFocusMoving &&
+                    Math.Abs(before.M11 - after.M11) < .01 &&
                     early.SceneCaptureCount == 1 && early.ToolbarCaptureCount == 1,
                     "Early cancellation restarted or recaptured the transition.");
-                AdvanceDispatcher(TimeSpan.FromMilliseconds(340));
-                InteractionAssert(!early.IsVisible, "Early reverse waited for the original entrance to complete.");
+                var closeWait = Stopwatch.StartNew();
+                while (early.IsVisible && closeWait.ElapsedMilliseconds < 1000)
+                    AdvanceDispatcher(TimeSpan.FromMilliseconds(15));
+                InteractionAssert(!early.IsVisible && scene.Source is null && scene.RenderTransform.Value.IsIdentity,
+                    "Early reverse did not close or release its scene and transforms.");
             }
             finally { SetKeyboardField(early, "_focusCanClose", true); early.Close(); }
 

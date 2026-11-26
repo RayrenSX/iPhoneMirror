@@ -3,6 +3,7 @@ using IPhoneMirror.App.Models;
 using IPhoneMirror.App.ViewModels;
 using IPhoneMirror.App.Windows;
 using IPhoneMirror.App.Controls;
+using IPhoneMirror.App.Updater;
 using System.Windows.Threading;
 
 namespace IPhoneMirror.App.Services;
@@ -13,6 +14,7 @@ internal sealed class MultiDevicePreviewManager : IDisposable
     private readonly MainViewModel viewModel;
     private readonly Dispatcher _dispatcher = Dispatcher.CurrentDispatcher;
     private readonly Func<string, nint, bool> _isReverseControlEnabledForWindow;
+    private readonly Func<nint, PreviewWindowsHotkeyPolicy?>? _windowsHotkeysFor;
     private readonly Dictionary<string, NativePreviewWindow> _windows =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Task<(bool Success, string Message)>> _opening =
@@ -30,14 +32,19 @@ internal sealed class MultiDevicePreviewManager : IDisposable
     internal event Action<string, nint>? UsbControlRequested;
     internal event Action<string, nint>? WirelessControlRequested;
     internal event Action<string>? PreviewClosed;
+    internal event Action<NativePreviewWindow>? PreviewCreated;
     internal event Action<string, PreviewPointerEventArgs>? PointerInput;
     internal event Action<string, PreviewKeyboardEventArgs>? KeyboardInput;
+    internal event Action<string, NativePreviewWindow>? SelectScreenTextRequested;
+    internal event Action<DeviceViewModel, nint, string[]>? FilesDropped;
     internal event Action<string, nint, bool>? KeyboardFocusChanged;
 
     internal MultiDevicePreviewManager(MainViewModel viewModel,
-        Func<string, nint, bool>? isReverseControlEnabledForWindow = null)
+        Func<string, nint, bool>? isReverseControlEnabledForWindow = null,
+        Func<nint, PreviewWindowsHotkeyPolicy?>? windowsHotkeysFor = null)
     {
         this.viewModel = viewModel;
+        _windowsHotkeysFor = windowsHotkeysFor;
         _isReverseControlEnabledForWindow = isReverseControlEnabledForWindow ??
             ((udid, _) => viewModel.BluetoothControlIsInputEnabled &&
                 viewModel.IsBluetoothControlTarget(udid));
@@ -56,15 +63,41 @@ internal sealed class MultiDevicePreviewManager : IDisposable
 
     internal static IndependentWindowLayout? GetSavedLayout(string udid) =>
         (System.Windows.Application.Current as App)?.UpdateSettings.IndependentWindowLayouts
-            .GetValueOrDefault(udid) is { IsValid: true } layout ? layout : null;
+            .GetValueOrDefault(udid) is { IsValid: true, IsEmpty: false } layout ? layout : null;
+
+    internal static IndependentWindowLayoutMode GetLayoutMode() =>
+        (System.Windows.Application.Current as App)?.UpdateSettings.IndependentWindowStartupMode
+            ?? IndependentWindowLayoutMode.Last;
 
     internal static IndependentWindowLayout? GetStartupLayout(string udid)
     {
-        if ((System.Windows.Application.Current as App)?.UpdateSettings.IndependentWindowLayoutHistoryByDevice
-            .GetValueOrDefault(udid) is { UseLastLayout: true } history)
-            return history.LastLayout is { IsValid: true, HasPosition: true, HasSize: true } last ? last : null;
-        return GetSavedLayout(udid);
+        var layout = GetModeLayout(udid, GetLayoutMode());
+        // Locking belongs to the actual window history, not a separate startup
+        // override. A later manual unlock must survive closing and reopening.
+        var fixedWindow = GetLayoutHistory(udid)?.LastLayout?.Fixed ?? layout?.Fixed ?? false;
+        return layout is null ? fixedWindow ? new(Fixed: true) : null : layout with { Fixed = fixedWindow };
     }
+
+    internal static IndependentWindowLayoutHistory? GetLayoutHistory(string udid) =>
+        (System.Windows.Application.Current as App)?.UpdateSettings
+            .IndependentWindowLayoutHistoryByDevice.GetValueOrDefault(udid);
+
+    internal static IndependentWindowLayout? GetModeLayout(string udid, IndependentWindowLayoutMode mode)
+    {
+        var history = GetLayoutHistory(udid);
+        return mode switch
+        {
+            IndependentWindowLayoutMode.Last when history?.LastLayout is
+                { IsValid: true, HasPosition: true, HasSize: true } last => last,
+            IndependentWindowLayoutMode.Preset => GetSavedLayout(udid),
+            IndependentWindowLayoutMode.Custom when history?.CustomLayout is
+                { IsValid: true, IsEmpty: false } custom => custom,
+            _ => null,
+        };
+    }
+
+    internal IndependentWindowLayout? GetCurrentLayout(string udid) =>
+        _windows.GetValueOrDefault(udid)?.GetCurrentLayout();
 
     internal static void TrackLayoutHistory(string udid, NativePreviewWindow window)
     {
@@ -85,7 +118,7 @@ internal sealed class MultiDevicePreviewManager : IDisposable
     internal bool CanSelectFrameColor => viewModel.SelectedDevice is { IsMediaCast: false } device &&
         DeviceFrameCatalog.Find(device.ProductType) is not null;
 
-    private DeviceAppearance FrameAppearance(DeviceViewModel device)
+    internal DeviceAppearance FrameAppearance(DeviceViewModel device)
     {
         var colors = (System.Windows.Application.Current as App)?.UpdateSettings.DeviceFrameColors;
         var selected = colors?.FirstOrDefault(pair => DeviceViewModel.UdidEquals(pair.Key, device.Udid)).Value;
@@ -98,7 +131,7 @@ internal sealed class MultiDevicePreviewManager : IDisposable
         if (viewModel.SelectedDevice is not { } device || System.Windows.Application.Current is not App app) return false;
         if (color.Length != 0 && !(DeviceFrameCatalog.Find(device.ProductType)?.Colors ?? []).Any(c => c.Id == color)) return false;
         var previous = app.UpdateSettings.DeviceFrameColors ?? new(StringComparer.OrdinalIgnoreCase);
-        var changed = new Dictionary<string, string>(previous, StringComparer.OrdinalIgnoreCase);
+        var changed = UpdateSettings.CopyDeviceSettings(previous);
         if (color.Length == 0) changed.Remove(device.Udid); else changed[device.Udid] = color;
         var oldAppearance = FrameAppearance(device);
         var appearance = oldAppearance with { SelectedColorId = color };
@@ -349,6 +382,7 @@ internal sealed class MultiDevicePreviewManager : IDisposable
     private async Task<(bool Success, string Message)> ShowCoreAsync(DeviceViewModel device,
         CancellationToken cancellation)
     {
+        var startupMonitor = NativePreviewWindow.CaptureStartupMonitor();
         var started = await viewModel.StartBackgroundSessionAsync(device, cancellation);
         if (cancellation.IsCancellationRequested)
         {
@@ -378,11 +412,18 @@ internal sealed class MultiDevicePreviewManager : IDisposable
             }
             return (false, LocalizationService.Get("CaptureStopped"));
         }
-        var profile = DeviceCornerProfileResolver.Resolve(device.ProductType, 1206, 2622);
+        var (width, height) = viewModel.GetIndependentSourceGeometry(device.Udid, started.Handle);
+        var haveSourceGeometry = width != 0 && height != 0;
+        if (!haveSourceGeometry)
+        {
+            var display = AppleDisplayCatalog.Find(device.ProductType);
+            (width, height) = (display?.Width ?? 1206, display?.Height ?? 2622);
+        }
+        var profile = DeviceCornerProfileResolver.Resolve(device.ProductType, width, height);
         var cornerRadius = profile.IsRounded ? profile.RadiusRatio : 0;
         _ = Interop.NativeCore.SetDeviceCornerProfile(started.Handle,
             cornerRadius, profile.CurveExponent);
-        if (!NativePreviewWindow.TryCreateAndShowForSession(started.Handle, 1206, 2622,
+        if (!NativePreviewWindow.TryCreateAndShowForSession(started.Handle, width, height,
                 $"iPhoneMirror — {device.DisplayName}", cornerRadius, profile.CurveExponent,
                 () => viewModel.IsDeviceAudioEnabled(device.Udid),
                  () => viewModel.ActiveDeviceSessionCount,
@@ -403,9 +444,13 @@ internal sealed class MultiDevicePreviewManager : IDisposable
                  hwnd => WirelessControlRequested?.Invoke(device.Udid, hwnd),
                  beforeShow: preview =>
                  {
+                     preview.SetPreviewTools(() => SelectScreenTextRequested?.Invoke(device.Udid, preview),
+                         paths => FilesDropped?.Invoke(device, preview.Handle, paths));
+                     preview.WindowsHotkeysFor = _windowsHotkeysFor;
                      _ = preview.UpdateDeviceAppearance(device.ProductType, FrameAppearance(device));
                      ApplySavedPhoneFramePreference(preview);
-                 }, layout: GetStartupLayout(device.Udid)) || window is null)
+                 }, layout: GetStartupLayout(device.Udid), startupMonitor: startupMonitor,
+                 sourceDimensionsKnown: haveSourceGeometry) || window is null)
         {
             if (started.Created)
                 await viewModel.StopDeviceSessionAsync(
@@ -418,6 +463,7 @@ internal sealed class MultiDevicePreviewManager : IDisposable
         window.PhoneFrameChanged += () => { if (!_updatingPhoneFrame) PhoneFrameChanged?.Invoke(); };
         window.BluetoothWindowMouseEnabled = viewModel.BluetoothWindowMouseEnabled;
         _windows[device.Udid] = window;
+        PreviewCreated?.Invoke(window);
         window.ActivationChanged += active =>
             KeyboardFocusChanged?.Invoke(device.Udid, window.Handle, active);
         KeyboardFocusChanged?.Invoke(device.Udid, window.Handle, true);
@@ -479,13 +525,15 @@ internal sealed class MultiDevicePreviewManager : IDisposable
             return;
         }
 
-        if (handle != 0 && _sessionRecoveries.Contains(udid) &&
-            window.RebindSession(handle))
+        if (handle != 0 && _sessionRecoveries.Contains(udid))
         {
-            ApplySavedPhoneFramePreference(window);
-            return;
+            if (window.RebindSession(handle))
+            {
+                ApplySavedPhoneFramePreference(window);
+                return;
+            }
         }
-        if (window.SessionHandle == handle) return;
+        else if (window.SessionHandle == handle) return;
 
         _windows.Remove(udid);
         PhoneFrameChanged?.Invoke();

@@ -12,13 +12,12 @@ internal sealed record SetupSettingsEvidence(UpdateSettings? Settings, Exception
 internal sealed record SetupBluetoothEvidence(SetupState State, string? DetailKey, string[]? PairedIds);
 internal sealed class SetupCheckRuntime
 {
-    internal Func<CancellationToken, Task<SetupSettingsEvidence>> ReadSettingsAsync { get; init; } = token => Task.Run(() =>
+    internal Func<CancellationToken, Task<SetupSettingsEvidence>> ReadSettingsAsync { get; init; } = token => Task.Run<SetupSettingsEvidence>(() =>
     {
         try {
             var path = Path.Combine(UpdateSettingsStore.UserDataDirectory, "settings.json");
-            return !File.Exists(path) ? new SetupSettingsEvidence(null) :
-                new(JsonSerializer.Deserialize<UpdateSettings>(File.ReadAllText(path), new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
-                    ?? throw new InvalidDataException("Empty settings document."));
+            var json = UpdateSettingsStore.ReadSettingsJson(path);
+            return new SetupSettingsEvidence(json is null ? null : UpdateSettingsStore.DeserializeSettings(json));
         }
         catch (Exception e) { return new(null, e); }
     }, token);

@@ -52,7 +52,6 @@ enum class FailureStage : std::int32_t {
 enum class UsbProjectionMode : std::uint32_t {
     Demo = 0,
     AirPlay = 1,
-    Aisi = 2,
 };
 
 struct Snapshot {
@@ -87,7 +86,7 @@ struct CapturePreferences {
     float audio_volume{1.0F};
     std::uint32_t usb_requested_width{};
     std::uint32_t usb_requested_height{};
-    UsbProjectionMode usb_projection_mode{UsbProjectionMode::Demo};
+    UsbProjectionMode usb_projection_mode{UsbProjectionMode::AirPlay};
     media::DecoderPreference decoder_preference{media::DecoderPreference::Auto};
     media::ColorOutputPreference color_output_preference{
         media::ColorOutputPreference::ForceSdrToneMap};
@@ -131,6 +130,7 @@ public:
         std::uint64_t after_sequence) const = 0;
     virtual void set_audio_enabled(bool enabled) noexcept = 0;
     virtual void set_audio_volume(float volume) noexcept = 0;
+    virtual void set_audio_playback_preferences(std::uint32_t buffer, bool sync) = 0;
     virtual void set_target_fps(std::uint32_t target_fps) noexcept = 0;
     [[nodiscard]] virtual std::uint32_t target_fps() const noexcept = 0;
     virtual void set_decoder_preference(media::DecoderPreference preference) noexcept = 0;

@@ -29,6 +29,12 @@ internal static partial class Program
         var language = LocalizationService.SelectedLanguage;
         var theme = ThemeService.Preference;
         var window = CreateWorkspaceTestWindow(app, includeNativePreview: false);
+        // This comparison requires room for both sidebars at enlarged text
+        // sizes. The separate fullscreen matrix exercises the narrow secondary
+        // display with its actual DPI instead of inheriting the pointer's screen.
+        window.Left = SystemParameters.WorkArea.Left + 40;
+        window.Top = SystemParameters.WorkArea.Top + 40;
+        DrainDispatcher(); window.UpdateLayout();
         var vm = (MainViewModel)KeyboardField(window, "_viewModel");
         var calls = new List<(string Device, string Action)>();
         Task<JsonElement> Request(DeviceViewModel device, string action, object? args, CancellationToken token)
@@ -44,11 +50,11 @@ internal static partial class Program
                 _ => JsonSerializer.SerializeToElement(new { })
             });
         }
-        DeviceHubPanel Panel(bool developer) => new(vm, Request, _ => true, Path.Combine(output, "icons"),
+        var ready = false;
+        DeviceHubPanel Panel(bool developer) => new(vm, Request, _ => ready, Path.Combine(output, "icons"),
             (_, _) => Task.CompletedTask, developerMode: developer);
         using var basic = Panel(false);
-        SetKeyboardField(window, "_deviceHubPanel", basic);
-        ((ContentControl)window.FindName("DeviceHubPanelHost")).Content = basic;
+        var hubHost = (ContentControl)window.FindName("DeviceHubPanelHost");
         DeviceViewModel Device(string id) => DeviceViewModel.FromNative(new NativeDeviceInfo
         { Udid = id, Name = id, ProductType = "iPhone13,1", OsVersion = "18.7.8", ConnectionType = "USB", State = ConnectionState.Ready });
         var first = Device("Ray's iPhone"); var second = Device("Second iPhone");
@@ -65,11 +71,47 @@ internal static partial class Program
         }
         try
         {
+            VerifyHubClosesWithoutShowingSettings();
+            SetKeyboardField(window, "_deviceHubPanel", basic);
+            hubHost.Content = basic;
             var guidance = (HashSet<string>)KeyboardField(window, "_deviceProfileGuidanceShown");
             guidance.Add(first.Udid); guidance.Add(second.Udid); vm.Devices.Add(first); vm.Devices.Add(second); vm.SelectedDevice = first;
             KeyboardCall(window, "SetDeviceHubPanelVisible", true); Finish();
+            VerifySidebarSwitching();
+            if (ReviewCapture)
+            {
+                LocalizationService.SetLanguage("zh-CN");
+                ThemeService.Apply(AppTheme.Dark);
+                Finish();
+                SaveWindowRender(window, Path.Combine(output, "main-connect-zh-CN-dark.png"));
+                var origin = basic.TranslatePoint(new Point(), window);
+                File.WriteAllText(Path.Combine(output, "main-connect-bounds.json"), JsonSerializer.Serialize(new
+                {
+                    origin.X, origin.Y, Width = basic.ActualWidth, Height = basic.ActualHeight
+                }));
+            }
+            var connectButton = (Button)basic.FindName("PrepareButton");
+            Verify(connectButton.IsVisible && connectButton.IsEnabled && calls.Count == 0,
+                "The pending device panel must expose the connect action before initiating management.");
+            var surface = (FrameworkElement)basic.FindName("HubSurface");
+            var workspace = (FrameworkElement)window.FindName("CenterPanel");
+            Verify(Math.Abs(surface.ActualHeight - workspace.ActualHeight) < 1 && basic.ActualWidth < 400,
+                "The device management sidebar must fill the workspace while waiting for a connection.");
+            var promptCard = (FrameworkElement)basic.FindName("ConnectionPromptCard");
+            Verify(promptCard.ActualHeight < surface.ActualHeight / 2,
+                "Connection guidance must size to its content inside the full-height sidebar.");
+            var waitingHeight = surface.ActualHeight;
+            Verify(((FrameworkElement)basic.FindName("DeviceSummary")).Visibility == Visibility.Collapsed,
+                "The main inspector must not reserve a summary row before it has a connection status.");
+            ready = true; basic.SetDevice(first, true); Finish();
+            Verify(!connectButton.IsVisible && Math.Abs(surface.ActualHeight - waitingHeight) < 1,
+                "Connected device lists must use the same full-height sidebar.");
             Verify(Tabs(basic).Where(tab => tab.IsVisible).Select(tab => tab.Tag!.ToString()).SequenceEqual(new[] { "1", "3" }),
                 "The main inspector must show only Apps and Files.");
+            Verify(((FrameworkElement)basic.FindName("DeviceIdentitySummary")).Visibility == Visibility.Collapsed &&
+                basic.FindName("ConnectionText") is TextBlock { IsVisible: true } status &&
+                status.Text == LocalizationService.Get("DeviceHubPanelConnected"),
+                "The main inspector header must show only the connection status.");
             Verify(((System.Windows.Controls.Primitives.UniformGrid)basic.FindName("PageTabs")).Columns == 2 &&
                 !((Button)basic.FindName("HeaderMore")).IsVisible &&
                 !Menu(basic).Items.OfType<MenuItem>().Any(item => item.Tag?.ToString() == "app-install"),
@@ -105,7 +147,8 @@ internal static partial class Program
             Tabs(advanced)[4].IsChecked = true; Finish();
             Verify(((Button)advanced.FindName("LogStart")).IsVisible, "The logs page must remain usable inside developer tools.");
             Tabs(advanced)[0].IsChecked = true; vm.SelectedDevice = second; Finish();
-            Verify(((TextBlock)advanced.FindName("DeviceNameText")).Text == second.Name &&
+            Verify(advanced.FindName("DeviceNameText") is TextBlock { IsVisible: true } deviceName &&
+                deviceName.Text == second.Name &&
                 calls.Any(call => call.Device == second.Udid && call.Action == "device_info"),
                 "Developer tools must follow the device selected in the main window.");
             ((TabControl)developer.FindName("DeveloperPages")).SelectedIndex = 0; Finish();
@@ -139,5 +182,123 @@ internal static partial class Program
             LocalizationService.SetLanguage(language); ThemeService.Apply(theme); app.Shutdown();
         }
         return 0;
+
+        void VerifyHubClosesWithoutShowingSettings()
+        {
+            var controlTab = (RadioButton)window.FindName("ControlSettingsTab");
+            var settings = (FrameworkElement)window.FindName("ControlPanelContent");
+            var sidebar = (FrameworkElement)window.FindName("ControlPanel");
+            var nav = (Wpf.Ui.Controls.NavigationViewItem)window.FindName("DeviceHubPanelToggle");
+            KeyboardCall(window, "SetSettingsPanelVisible", true);
+            controlTab.IsChecked = true;
+            FinishWorkspaceReveal(window);
+
+            foreach (var useCloseButton in new[] { true, false })
+            {
+                nav.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                FinishWorkspaceReveal(window);
+                var hub = (DeviceHubPanel)hubHost.Content;
+                Verify(hub.IsVisible && !settings.IsVisible, "Device management must replace settings on the right.");
+                var settingsFlashed = false;
+                void TrackSettings(object sender, DependencyPropertyChangedEventArgs args) => settingsFlashed |= settings.IsVisible;
+                void VerifyClosingFrame()
+                {
+                    if (sidebar.IsVisible && sidebar.Width > 1)
+                        Verify(hub.IsVisible && !settings.IsVisible && !sidebar.IsHitTestVisible,
+                            "The outgoing sidebar must still show device management during the close animation.");
+                }
+                EventHandler sample = (_, _) => VerifyClosingFrame();
+                settings.IsVisibleChanged += TrackSettings;
+                try
+                {
+                    if (useCloseButton) ((Button)hub.FindName("CloseHubButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    else nav.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                    VerifyClosingFrame();
+                    Verify(!(bool)KeyboardField(hub, "_active"), "Closing the panel must immediately stop device management background work.");
+                    window.LayoutUpdated += sample;
+                    FinishWorkspaceReveal(window);
+                }
+                finally
+                {
+                    window.LayoutUpdated -= sample;
+                    settings.IsVisibleChanged -= TrackSettings;
+                }
+                Verify(!settingsFlashed && !sidebar.IsVisible && hubHost.Visibility == Visibility.Collapsed,
+                    "Closing device management must collapse the sidebar without flashing settings.");
+            }
+
+            ((DeviceHubPanel)hubHost.Content).Dispose();
+            KeyboardCall(window, "SetSettingsPanelVisible", true);
+            FinishWorkspaceReveal(window);
+            Verify(settings.IsVisible && controlTab.IsChecked == true, "Opening settings explicitly must restore its previous tab.");
+            ((RadioButton)window.FindName("ProjectionSettingsTab")).IsChecked = true;
+            ((Button)window.FindName("CloseSettingsPanelButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            FinishWorkspaceReveal(window);
+            Verify(!((FrameworkElement)window.FindName("ControlPanel")).IsVisible, "The settings close button must still collapse the sidebar.");
+            Console.WriteLine("PASS device management stays visible during its close animation and settings never flash.");
+        }
+
+        void VerifySidebarSwitching()
+        {
+            var left = (FrameworkElement)window.FindName("DevicePanel");
+            var preview = (FrameworkElement)window.FindName("PreviewPanel");
+            var settings = (FrameworkElement)window.FindName("ControlPanelContent");
+            var settingsTitle = (FrameworkElement)window.FindName("SettingsPanelTitle");
+            var settingsClose = (FrameworkElement)window.FindName("CloseSettingsPanelButton");
+            var hubSurface = (FrameworkElement)basic.FindName("HubSurface");
+            var hubTitle = (FrameworkElement)basic.FindName("HubTitle");
+            var hubClose = (FrameworkElement)basic.FindName("CloseHubButton");
+            var panels = KeyboardField(window, "_leftWorkspacePanel").GetType();
+            void Left(string panel) => KeyboardCall(window, "SetLeftWorkspacePanel", Enum.Parse(panels, panel));
+            Rect Bounds(FrameworkElement element) => element.TransformToAncestor(window).TransformBounds(new Rect(element.RenderSize));
+            LocalizationService.SetLanguage("zh-CN");
+            ThemeService.Apply(AppTheme.Dark);
+            Left("Devices"); Finish();
+            foreach (var scale in new[] { 1d, 1.5d, 2d })
+            {
+                IPhoneMirror.UI.Services.AccessibilityAppearance.Apply(app, scale, false);
+                Finish();
+                var widthFactor = 1 + .5 * (scale - 1);
+                var leftWidth = WorkspaceRevealPanel.DefaultLeftContentWidth * widthFactor;
+                var rightWidth = WorkspaceRevealPanel.DefaultRightContentWidth * widthFactor;
+                var hubBounds = Bounds(hubSurface);
+                var previewBounds = Bounds(preview);
+                var hubTitleOffset = hubTitle.TranslatePoint(default, hubSurface);
+                var hubCloseOffset = hubClose.TranslatePoint(default, hubSurface);
+                Verify(Math.Abs(left.ActualWidth - leftWidth) < 1 && Math.Abs(hubBounds.Width - rightWidth) < 1,
+                    $"Both sidebars must use their expected scaled widths at {scale:P0}.");
+                var largestShift = 0d;
+                EventHandler capture = (_, _) =>
+                {
+                    var bounds = Bounds(preview);
+                    largestShift = Math.Max(largestShift, Math.Max(Math.Abs(bounds.Left - previewBounds.Left),
+                        Math.Abs(bounds.Right - previewBounds.Right)));
+                };
+                window.LayoutUpdated += capture;
+                try
+                {
+                    KeyboardCall(window, "SetSettingsPanelVisible", true); Finish();
+                    Verify(settings.IsVisible && !hubSurface.IsVisible && Bounds(settings) == hubBounds,
+                        $"Settings and Device Management must occupy the same sidebar at {scale:P0}.");
+                    Verify((settingsTitle.TranslatePoint(default, settings) - hubTitleOffset).Length < 1 &&
+                        (settingsClose.TranslatePoint(default, settings) - hubCloseOffset).Length < 1,
+                        "Right sidebar titles and close buttons must align.");
+                    if (scale == 1 && ReviewCapture)
+                        SaveWindowRender(window, Path.Combine(output, "workspace-sources-settings.png"));
+                    Left("Mirroring"); Finish();
+                    Verify(Math.Abs(((FrameworkElement)window.FindName("MirroringPanel")).ActualWidth - leftWidth) < 1,
+                        "Mirroring and sources must occupy the same left sidebar width.");
+                    KeyboardCall(window, "SetDeviceHubPanelVisible", true); Finish();
+                    if (scale == 1 && ReviewCapture)
+                        SaveWindowRender(window, Path.Combine(output, "workspace-mirroring-device-management.png"));
+                    Left("Devices"); Finish();
+                }
+                finally { window.LayoutUpdated -= capture; }
+                Verify(largestShift < 1, $"Switching sidebar pages moved the preview by {largestShift:F2} DIP at {scale:P0}.");
+            }
+            IPhoneMirror.UI.Services.AccessibilityAppearance.Apply(app, 1, false);
+            Finish();
+            Console.WriteLine("PASS sidebar widths, header alignment, and stable preview geometry at 100%, 150%, and 200% text size.");
+        }
     }
 }

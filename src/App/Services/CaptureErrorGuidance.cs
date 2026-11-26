@@ -3,6 +3,9 @@ using IPhoneMirror.App.Interop;
 
 namespace IPhoneMirror.App.Services;
 
+internal readonly record struct CaptureFailureNotice(
+    string Message, CaptureFailureStage Stage, int ErrorCode);
+
 internal static class CaptureErrorGuidance
 {
     private const int DeviceSessionClosedErrorCode = -2109;
@@ -67,6 +70,9 @@ internal static class CaptureErrorGuidance
 
     internal static string StatusText(NativeCaptureStatus status) => UserMessage(status);
 
+    internal static CaptureFailureNotice Notice(NativeCaptureStatus status) =>
+        new(UserMessage(status), status.FailureStage, status.ErrorCode);
+
     internal static bool IsDeviceSessionClosedWarning(NativeCaptureStatus status) =>
         status.FailureKind == CaptureFailureKind.SystemClosed &&
         status.FailureStage == CaptureFailureStage.VideoStream &&
@@ -89,18 +95,42 @@ internal static class CaptureErrorGuidance
         : $"{errorCode} (0x{unchecked((uint)errorCode):X8})";
 
     internal static string StartFailureMessage(int errorCode, string diagnostic,
-        CaptureFailureKind? failureKind = null)
+        CaptureFailureKind? failureKind = null, CaptureFailureStage? failureStage = null)
     {
-        return UserMessage(failureKind ?? StartFailureKind(errorCode),
-            CaptureFailureStage.UsbPreflight, errorCode, diagnostic);
+        var notice = StartFailureNotice(errorCode, diagnostic, failureKind, failureStage);
+        return WithFailureDetails(notice.Message, notice.Stage, notice.ErrorCode);
     }
+
+    internal static CaptureFailureNotice StartFailureNotice(int errorCode, string diagnostic,
+        CaptureFailureKind? failureKind = null, CaptureFailureStage? failureStage = null)
+    {
+        var stage = failureStage ?? (errorCode switch
+        {
+            (int)NativeResult.DeviceNotFound => CaptureFailureStage.DeviceDiscovery,
+            (int)NativeResult.UsbConfigurationNotReady => CaptureFailureStage.DeviceReenumeration,
+            (int)NativeResult.SessionTeardownFailed => CaptureFailureStage.SessionTeardown,
+            _ => CaptureFailureStage.UsbPreflight,
+        });
+        var message = failureKind.HasValue && !string.IsNullOrWhiteSpace(diagnostic)
+            ? diagnostic : UserMessage(StartFailureKind(errorCode), stage, errorCode, diagnostic);
+        return new(message, stage, errorCode);
+    }
+
+    internal static string WithFailureDetails(string message, CaptureFailureStage stage, int errorCode) =>
+        LocalizationService.Join("\n\n", [
+            message,
+            LocalizationService.Format("CaptureFailureStageCodeFormat",
+                FailureStageText(stage), errorCode == 0
+                    ? LocalizationService.Get("CaptureFailureCodeUnavailable") : ErrorCodeText(errorCode)),
+        ]);
 
     internal static string UserMessage(CaptureFailureKind kind,
         CaptureFailureStage stage, int errorCode, string? diagnostic)
     {
-        // Keep native code, stage and diagnostic text in the structured log.
-        // The prompt is deliberately limited to the next useful user action.
-        _ = errorCode;
+        if (kind == CaptureFailureKind.VideoStream && errorCode == -2110)
+            return LocalizationService.Get("CaptureActionNativeAirPlayDecoder");
+        if (kind == CaptureFailureKind.VideoStream && errorCode == -2111)
+            return LocalizationService.Get("CaptureActionNativeAirPlayDirection");
         if (IsNoPingTimeout(diagnostic))
             return LocalizationService.Get("CaptureActionRestartDevice");
         if (IsUsbConfigurationFailure(diagnostic))
@@ -109,6 +139,9 @@ internal static class CaptureErrorGuidance
             stage == CaptureFailureStage.VideoStream &&
             errorCode == DeviceSessionClosedErrorCode)
             return LocalizationService.Get("DeviceSessionClosedWarningBody");
+        if (stage == CaptureFailureStage.InterfaceOpen &&
+            kind is not CaptureFailureKind.DeviceDisconnected)
+            return LocalizationService.Get("CaptureActionInterfaceOpen");
 
         return kind switch
         {

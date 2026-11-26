@@ -13,6 +13,50 @@ from usb_recovery_test import Hid, Ipc
 
 
 class CryptexControlRecoveryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_ios27_wireless_prepares_image_before_reopening_service_inventory(self):
+        session = bridge.TouchSession(Ipc(), 120, 'test-device', 'wireless')
+        rsd = SimpleNamespace(product_version='27.2.1', peer_info={'Services': {}})
+        with patch.object(bridge, 'prepare_cryptex_ddi', AsyncMock(return_value='27-test')) as mount:
+            with self.assertRaises(bridge.BridgePrerequisiteError) as result:
+                await session._prepare_wireless_ddi_if_needed(rsd)
+            self.assertEqual('wireless_ddi_reconnect', result.exception.code)
+            self.assertTrue(session._wireless_ddi_prepared)
+            self.assertIsNone(session._wireless_ddi_deadline)
+            await session._prepare_wireless_ddi_if_needed(rsd)
+            mount.assert_awaited_once()
+
+    async def test_wireless_image_falls_back_only_when_service_is_absent(self):
+        session = bridge.TouchSession(Ipc(), 120, 'test-device', 'wireless')
+        rsd = SimpleNamespace(product_version='18.7.8', peer_info={'Services': {}})
+        with patch.object(bridge, 'prepare_cryptex_ddi', AsyncMock()) as mount:
+            await session._prepare_wireless_ddi_if_needed(rsd)
+            rsd.product_version = '27.2.1'
+            services = rsd.peer_info['Services']
+            services[bridge.LEGACY_UNIVERSAL_HID_SERVICE] = {}
+            await session._prepare_wireless_ddi_if_needed(rsd)
+            mount.assert_not_awaited()
+            services.clear()
+            mount.side_effect = bridge.BridgePrerequisiteError('developer_image_service_unavailable', 'missing')
+            await session._prepare_wireless_ddi_if_needed(rsd)
+            self.assertFalse(session._wireless_ddi_prepared)
+            mount.side_effect = bridge.BridgePrerequisiteError('developer_image_tss_rejected', 'rejected')
+            with self.assertRaises(bridge.BridgePrerequisiteError) as result:
+                await session._prepare_wireless_ddi_if_needed(rsd)
+            self.assertEqual('developer_image_tss_rejected', result.exception.code)
+
+    async def test_wireless_personalized_image_uses_advertised_service_on_older_ios(self):
+        session = bridge.TouchSession(Ipc(), 120, 'test-device', 'wireless')
+        rsd = SimpleNamespace(product_version='18.7.8', peer_info={'Services': {
+            bridge.PersonalizedImageMounter.RSD_SERVICE_NAME: {}}})
+        with patch.object(session, '_prepare_developer_environment', AsyncMock()) as preflight, \
+             patch.object(bridge, 'prepare_cryptex_ddi', AsyncMock()) as cryptex:
+            with self.assertRaises(bridge.BridgePrerequisiteError) as result:
+                await session._prepare_wireless_ddi_if_needed(rsd)
+            self.assertEqual('wireless_ddi_reconnect', result.exception.code)
+            self.assertTrue(session._wireless_ddi_prepared)
+            preflight.assert_awaited_once_with(rsd)
+            cryptex.assert_not_awaited()
+
     def session(self):
         session = bridge.TouchSession(Ipc(), 120, 'test-device')
         session._ddi_uses_cryptex = True

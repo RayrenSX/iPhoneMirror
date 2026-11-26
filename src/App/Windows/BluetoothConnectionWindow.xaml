@@ -1,31 +1,67 @@
-<chrome:RoundedWindow xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:animations="clr-namespace:IPhoneMirror.UI.Animations" xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml" xmlns:chrome="clr-namespace:IPhoneMirror.UI.Controls" x:Class="IPhoneMirror.App.Windows.BluetoothConnectionWindow" Title="{DynamicResource DeviceBindingBluetoothWaitingTitle}" Width="522" Height="412" MinWidth="462" MinHeight="362" WindowStartupLocation="CenterOwner" ResizeMode="NoResize" Foreground="{DynamicResource TextBrush}" WindowStyle="None" AllowsTransparency="True" Background="Transparent">
+<chrome:RoundedWindow x:Class="IPhoneMirror.App.Windows.BluetoothConnectionWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:animations="clr-namespace:IPhoneMirror.UI.Animations"
+        xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+        xmlns:chrome="clr-namespace:IPhoneMirror.UI.Controls"
+        Title="{DynamicResource DeviceBindingBluetoothWaitingTitle}"
+        Width="500" SizeToContent="Height" MaxHeight="460"
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize"
+        Foreground="{DynamicResource TextBrush}" WindowStyle="None" AllowsTransparency="True" Background="Transparent">
     <Grid Style="{StaticResource SubWindowPageRoot}" animations:PageTransition.IsEnabled="True">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="16"/>
-            <RowDefinition Height="*" MinHeight="{StaticResource DialogContentMinHeight}"/>
-            <RowDefinition Height="14"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="18"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
         <Grid Style="{StaticResource SubWindowHeader}" animations:WindowDragBehavior.IsEnabled="True">
-            <TextBlock TextWrapping="Wrap" Text="{DynamicResource DeviceBindingBluetoothWaitingTitle}" Style="{StaticResource SubWindowTitle}" Margin="0,0,48,0"/>
-            <Button Style="{StaticResource SubWindowCloseButton}" Click="CancelClick" ToolTip="{DynamicResource DeviceBindingCancel}">
+            <DockPanel Margin="0,0,48,0" VerticalAlignment="Center">
+                <Border DockPanel.Dock="Left" Style="{StaticResource NoticeHeaderIcon}"
+                        Background="{DynamicResource ControlFillBrush}" Margin="0,0,10,0">
+                    <ui:SymbolIcon Symbol="Bluetooth20" FontSize="20" Foreground="{DynamicResource AccentBrush}"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+                <TextBlock Text="{DynamicResource DeviceBindingBluetoothWaitingTitle}" Style="{StaticResource SubWindowTitle}"/>
+            </DockPanel>
+            <Button Style="{StaticResource SubWindowCloseButton}" Click="CancelClick">
                 <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Dismiss20" FontSize="18"/>
             </Button>
         </Grid>
         <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
             <StackPanel>
-                <TextBlock Text="{DynamicResource DeviceBindingBluetoothBroadcasting}" TextWrapping="Wrap" FontSize="{DynamicResource FontSize16}" FontWeight="SemiBold"/>
-                <TextBlock Text="{DynamicResource DeviceBindingBluetoothWaitingDescription}" TextWrapping="Wrap" Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource SecondaryFontSize}" Margin="0,10,0,0"/>
-                <Border Background="{DynamicResource ControlFillBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,18,0,0">
-                    <DockPanel LastChildFill="True"><ui:SymbolIcon DockPanel.Dock="Left" Symbol="Bluetooth20" FontSize="18" Foreground="{DynamicResource AccentBrush}"/><TextBlock TextWrapping="Wrap" Text="{DynamicResource DeviceBindingBluetoothWaitingStatus}" Margin="9,0,0,0" VerticalAlignment="Center"/></DockPanel>
+                <Border Style="{StaticResource NoticeDetailsSurface}">
+                    <StackPanel>
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Left" Text="1" Style="{StaticResource BodyText}"
+                                       Foreground="{DynamicResource AccentBrush}" FontWeight="SemiBold" Margin="0,0,12,0"/>
+                            <StackPanel>
+                                <TextBlock Text="{DynamicResource DeviceBindingBluetoothEnableAssistiveTouch}" Style="{StaticResource BodyText}"/>
+                                <TextBlock Text="{DynamicResource DeviceBindingBluetoothAssistiveTouchPath}"
+                                           Style="{StaticResource SecondaryText}" Margin="0,3,0,0"/>
+                            </StackPanel>
+                        </DockPanel>
+                        <DockPanel Margin="0,8,0,0">
+                            <TextBlock DockPanel.Dock="Left" Text="2" Style="{StaticResource BodyText}"
+                                       Foreground="{DynamicResource AccentBrush}" FontWeight="SemiBold" Margin="0,0,12,0"/>
+                            <TextBlock Text="{DynamicResource DeviceBindingBluetoothOpenSettings}" Style="{StaticResource BodyText}"/>
+                        </DockPanel>
+                        <DockPanel Margin="0,8,0,0">
+                            <TextBlock DockPanel.Dock="Left" Text="3" Style="{StaticResource BodyText}"
+                                       Foreground="{DynamicResource AccentBrush}" FontWeight="SemiBold" Margin="0,0,12,0"/>
+                            <TextBlock Text="{DynamicResource DeviceBindingBluetoothPairComputer}" Style="{StaticResource BodyText}"/>
+                        </DockPanel>
+                    </StackPanel>
                 </Border>
-                <TextBlock x:Name="FeedbackText" TextWrapping="Wrap" Margin="0,12,0,0" Foreground="{DynamicResource WarningBrush}" AutomationProperties.LiveSetting="Polite"/>
+                <TextBlock x:Name="FeedbackText" Text="{DynamicResource DeviceBindingBluetoothWaitingStatus}"
+                           Style="{StaticResource SecondaryText}" Margin="0,12,0,0" AutomationProperties.LiveSetting="Polite"/>
             </StackPanel>
         </ScrollViewer>
-        <WrapPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right">
+        <WrapPanel Grid.Row="4" Style="{StaticResource DialogActions}">
             <Button Content="{DynamicResource DeviceBindingCancel}" Click="CancelClick" MinWidth="88"/>
-            <Button x:Name="NextButton" Content="{DynamicResource DeviceBindingNext}" IsDefault="True" Click="NextClick" Style="{StaticResource PrimaryButton}" Margin="8,0,0,0" MinWidth="100"/>
+            <Button x:Name="FindDevicesButton" Content="{DynamicResource DeviceBindingBluetoothFindPaired}"
+                    IsDefault="True" Click="FindDevicesClick" Style="{StaticResource PrimaryButton}" Margin="8,0,0,0"/>
         </WrapPanel>
     </Grid>
 </chrome:RoundedWindow>

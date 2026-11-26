@@ -1,5 +1,7 @@
 # curl and PowerShell
 
+These examples use the local v1.8.5-pre7 API. The [API reference](README.md) shows how to open the endpoint list on your running app.
+
 Copy the key into `IPHONEMIRROR_API_KEY` in your shell. Keep it out of URLs and saved command files.
 Use the port shown in Developer tools → Automation API. First enable mirroring and reverse control
 in iPhoneMirror, or use the [preparation endpoints](README.md#device-preparation-and-windows).

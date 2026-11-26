@@ -11,7 +11,8 @@ internal sealed record AppleSupportInstallResult(
     bool Success,
     bool RequiresStoreInteraction,
     string Message,
-    bool RequiresRestart = false);
+    bool RequiresRestart = false,
+    string? LogPath = null);
 
 internal enum ServiceStartOutcome
 {
@@ -274,8 +275,8 @@ internal sealed class AppleSupportInstaller(DeviceCatalog catalog)
                     ("elapsed_ms", timer.ElapsedMilliseconds),
                     ("output", LimitOutput(result.CombinedOutput)));
                 return new AppleSupportInstallResult(false, false,
-                    DriverLocalization.Format("AppleInstallerFailed", result.ExitCode,
-                        LimitOutput(result.CombinedOutput), packageLog));
+                    DriverLocalization.Format("AppleInstallerFailed", result.ExitCode),
+                    LogPath: packageLog);
             }
         }
 

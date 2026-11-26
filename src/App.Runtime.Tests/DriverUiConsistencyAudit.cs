@@ -118,34 +118,44 @@ internal static partial class Program
                     owner.GetType().GetProperty("IsBusy")!.SetValue(owner, false);
                     owner.GetType().GetProperty("OperationStatus")!.SetValue(owner, originalStatus);
                 }
-                foreach (var name in new[] { "PromptWindow", "RequiredActionWindow", "FailureHelpWindow", "DeviceTrustWindow", "PromptLong", "RequiredActionLong", "ParentDriverWindow", "ParentConfirm", "ReconnectVerificationFailed", "HelpBrowserFailed" })
+                const string previewLog = @"C:\ProgramData\iPhoneMirror.Driver\Operations\Preview\operation.log";
+                foreach (var name in new[] { "PromptWindow", "RequiredActionWindow", "FailureHelpWindow", "DeviceTrustWindow", "PromptLong", "RequiredActionLong", "ParentDriverWindow", "ParentConfirm", "ParentResetConfirm", "QuickInstallConfirm", "ReconnectVerificationFailed", "HelpBrowserFailed", "CleanupLaunchFailed", "OpenLogFailed" })
                 {
                     var window = name switch
                     {
-                        "ReconnectVerificationFailed" => Construct("Windows.PromptWindow", app.FindResource("ParentManagerTitle"),
-                            app.FindResource(name) + "\n" + app.FindResource("ParentResetComplete"),
-                            app.FindResource("Acknowledge"), string.Empty, false, false),
+                        "ReconnectVerificationFailed" => Construct("Windows.FailureHelpWindow", app.FindResource(name), previewLog),
                         "HelpBrowserFailed" => Construct("Windows.PromptWindow", app.FindResource("HelpBrowserFailedTitle"),
-                            string.Format((string)app.FindResource(name), "https://www.i4.cn/", diagnostic),
-                            app.FindResource("Acknowledge"), string.Empty, false, false),
+                            string.Format((string)app.FindResource(name), "https://www.i4.cn/"),
+                            app.FindResource("Acknowledge"), string.Empty, false, false, true),
+                        "CleanupLaunchFailed" => Construct("Windows.PromptWindow", app.FindResource("DriverCleanupUnavailableTitle"),
+                            app.FindResource("DriverCleanupScriptStartFailed"),
+                            app.FindResource("Acknowledge"), string.Empty, false, false, true),
+                        "OpenLogFailed" => Construct("Windows.PromptWindow", app.FindResource("CannotOpenLogs"),
+                            app.FindResource("OpenLogFailedBody"),
+                            app.FindResource("Acknowledge"), string.Empty, false, false, true),
                         "ParentConfirm" => Construct("Windows.PromptWindow", app.FindResource("ParentConfirmTitle"),
                             string.Format((string)app.FindResource("ParentConfirmBody"),
-                                auditDevice.GetType().GetProperty("SelectionText")!.GetValue(auditDevice),
-                                auditDevice.GetType().GetProperty("InstanceId")!.GetValue(auditDevice),
-                                auditDevice.GetType().GetProperty("ParentStatusText")!.GetValue(auditDevice),
-                                auditTarget.GetType().GetProperty("DisplayText")!.GetValue(auditTarget)),
-                            app.FindResource("ParentConfirmApply"), app.FindResource("Cancel"), true, true),
+                                "iPhone 16 Pro Max · iOS 26.0",
+                                $"Microsoft · usb.inf · {auditTarget.GetType().GetProperty("VersionText")!.GetValue(auditTarget)}"),
+                            app.FindResource("ParentConfirmApply"), app.FindResource("Cancel"), true, true, false),
+                        "ParentResetConfirm" => Construct("Windows.PromptWindow", app.FindResource("ParentReset"),
+                            string.Format((string)app.FindResource("ParentReenumerateConfirmBody"), "iPhone 16 Pro Max · iOS 26.0"),
+                            app.FindResource("ParentReset"), app.FindResource("Cancel"), true, true, false),
+                        "QuickInstallConfirm" => Construct("Windows.PromptWindow", app.FindResource("QuickInstallTitle"),
+                            app.FindResource("QuickInstallBody"), app.FindResource("StartInstall"),
+                            app.FindResource("Cancel"), true, false, false),
                         "ParentDriverWindow" => Construct("Windows.ParentDriverWindow", auditDevice, auditChoices,
                             app.FindResource("ParentListPartial") + "\n" + string.Join("\n", Enumerable.Repeat(diagnostic, 8))),
-                        "PromptLong" => Construct("Windows.PromptWindow", "Device confirmation / 裝置確認", string.Join(" ", Enumerable.Repeat("Confirm device trust before continuing. 请确认设备已信任此电脑。", 40)), "Continue after confirming device trust and developer mode / 确认后继续", app.FindResource("Cancel"), true, false),
+                        "PromptLong" => Construct("Windows.PromptWindow", "Device confirmation / 裝置確認", string.Join(" ", Enumerable.Repeat("Confirm device trust before continuing. 请确认设备已信任此电脑。", 40)), "Continue after confirming device trust and developer mode / 确认后继续", app.FindResource("Cancel"), true, false, false),
                         "RequiredActionLong" => Construct("Windows.RequiredActionWindow", "Device confirmation / 裝置確認", string.Join(" ", Enumerable.Repeat("Confirm device trust before continuing. 请确认设备已信任此电脑。", 40)), "Continue after confirming device trust and developer mode / 确认后继续"),
-                        "PromptWindow" => Construct("Windows." + name, "iPhoneMirror",
-                            string.Format((string)app.FindResource("ConfirmOperationBody"), app.FindResource("Continue"), "Test iPhone", "USB\\VID_05AC\\Preview"),
-                            app.FindResource("Continue"), app.FindResource("Cancel"), true, false),
+                        "PromptWindow" => Construct("Windows." + name,
+                            string.Format((string)app.FindResource("ConfirmOperation"), app.FindResource("Repair")),
+                            string.Format((string)app.FindResource("ConfirmOperationBody"), "Test iPhone"),
+                            app.FindResource("Repair"), app.FindResource("Cancel"), true, false, false),
                         "RequiredActionWindow" => Construct("Windows." + name, "iPhoneMirror",
                             string.Format((string)app.FindResource("AppleRestartRequired"), "C:\\Preview\\driver.log"), app.FindResource("Continue")),
                         "FailureHelpWindow" => Construct("Windows." + name,
-                            string.Format((string)app.FindResource("OfflineMsiFailed"), 1603, app.FindResource("CheckPending"), "C:\\Preview\\driver.log")),
+                            app.FindResource("ParentChangeRolledBack"), previewLog),
                         _ => Construct("Windows." + name),
                     };
                     window.Owner = owner;
@@ -155,6 +165,25 @@ internal static partial class Program
                         {
                             window.UpdateLayout();
                             AssertSelfDrawnWindowCorners(window);
+                            if (window.GetType().Name == "PromptWindow")
+                                AssertNoticeHeaderAlignment(window, "HeaderTitle");
+                            if (window.GetType().Name == "FailureHelpWindow")
+                            {
+                                AssertNoticeHeaderAlignment(window, "HeaderTitle");
+                                InteractionAssert(!FindVisualDescendants<System.Windows.Controls.Expander>(window).Any(),
+                                    "Driver recovery options must not require expansion.");
+                                foreach (var id in new[] { "FailureCopyGroup", "FailureOpenWebsite", "FailureCleanup", "FailureOpenLog" })
+                                {
+                                    InteractionAssert(FindVisualDescendants<System.Windows.Controls.Button>(window)
+                                        .Any(button => button.IsVisible && System.Windows.Automation.AutomationProperties
+                                            .GetAutomationId(button) == id), $"Recovery action {id} was not visible.");
+                                }
+                                InteractionAssert(!FindVisualDescendants<System.Windows.Controls.TextBlock>(window)
+                                    .Any(text => text.IsVisible && text.Text.Contains(previewLog, StringComparison.OrdinalIgnoreCase))
+                                    && !FindVisualDescendants<System.Windows.Controls.TextBox>(window).Any(text => text.IsVisible),
+                                    "Driver log location should be available through the button only.");
+                            }
+                            var key = $"{culture}-{theme}-{textScale}-{name}";
                             if (name == "ParentDriverWindow")
                             {
                                 var list = FindVisualDescendant<System.Windows.Controls.ListBox>(window, _ => true)!;
@@ -163,10 +192,29 @@ internal static partial class Program
                                 if (((System.Windows.Media.SolidColorBrush)border.BorderBrush).Color !=
                                     ((System.Windows.Media.SolidColorBrush)app.FindResource("AccentBrush")).Color)
                                     throw new InvalidOperationException("Parent driver selection must use the application accent.");
+                                var details = (FrameworkElement)window.FindName("TechnicalDetails");
+                                var detailsButton = (System.Windows.Controls.Button)window.FindName("DetailsButton");
+                                var content = (System.Windows.Controls.ScrollViewer)window.FindName("DriverContentScroll");
+                                var summary = (FrameworkElement)window.FindName("DeviceSummary");
+                                InteractionAssert(!details.IsVisible && summary.TranslatePoint(new Point(), content).Y >= 0,
+                                    "The device summary should appear before optional technical diagnostics.");
+                                AssertVisibleButtonsFit(window);
+                                SaveWindowRender(window, Path.Combine(output, key + ".png"));
+                                detailsButton.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+                                window.UpdateLayout();
+                                InteractionAssert(details.IsVisible &&
+                                    FindVisualDescendants<System.Windows.Controls.TextBlock>(details).Any(block =>
+                                        block.IsVisible && block.Text.Contains("Win32=5", StringComparison.Ordinal)),
+                                    "Driver diagnostics were lost when opening technical details.");
+                                detailsButton.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+                                content.ScrollToTop();
+                                window.UpdateLayout();
                             }
-                            var key = $"{culture}-{theme}-{textScale}-{name}";
-                            AssertVisibleButtonsFit(window);
-                            SaveWindowRender(window, Path.Combine(output, key + ".png"));
+                            else
+                            {
+                                AssertVisibleButtonsFit(window);
+                                SaveWindowRender(window, Path.Combine(output, key + ".png"));
+                            }
                             ExerciseWorkAreaSizes(window, key, findings, Path.Combine(output, key));
                             AssertEscapeCloses(window);
                             count++;
@@ -197,20 +245,20 @@ internal static partial class Program
     private static object CreateParentAuditDevice(Assembly assembly) => Activator.CreateInstance(
         assembly.GetType("IPhoneMirror.DriverInstaller.Models.AppleDeviceRecord")!,
         [@"USB\VID_05AC&PID_12A8\UI_AUDIT_ONLY_LONG_DEVICE_IDENTIFIER_000000000000",
-         "UI_AUDIT_ONLY", "Test iPhone", "iPhone18,1", "iPhone Pro Max",
-         "Development and diagnostics device / 开发与诊断设备 / 開發與診斷裝置", "26.0",
+         "UI_AUDIT_ONLY", "Test iPhone", "iPhone18,1", "iPhone 16 Pro Max", "iPhone", "26.0",
          1, "usbccgp", true, false, Array.Empty<string>(), (uint?)0, true,
          "usb.inf", "Composite.Dev", "10.0.26100.1", Array.Empty<string>()])!;
 
     private static Array CreateParentAuditChoices(Assembly assembly)
     {
         var type = assembly.GetType("IPhoneMirror.DriverInstaller.Services.ParentDriverChoice")!;
-        var choices = Array.CreateInstance(type, 4);
-        for (var i = 0; i < choices.Length; i++)
-            choices.SetValue(Activator.CreateInstance(type,
-                [i == 0 ? @"C:\Windows\INF\usb.inf" : $@"C:\Windows\INF\oem{i}.inf",
-                 i == 0 ? "Composite.Dev" : "Audit.Device", $"USB composite device candidate {i + 1} / USB 复合设备驱动候选项 / USB 複合裝置驅動程式候選項",
-                 "Microsoft / Driver provider", 0x000A000066140001UL, 0L]), i);
+        var choices = Array.CreateInstance(type, 3);
+        choices.SetValue(Activator.CreateInstance(type, [@"C:\Windows\INF\usb.inf", "Composite.Dev",
+            "USB Composite Device", "Microsoft", 0x000A000066140001UL, 0L]), 0);
+        choices.SetValue(Activator.CreateInstance(type, [@"C:\Windows\INF\oem3.inf", "AppleUSB_CCGPDriverInstall",
+            "Apple Mobile Device USB Composite Device", "Apple, Inc.", 0x021A000000000000UL, 0L]), 1);
+        choices.SetValue(Activator.CreateInstance(type, [@"C:\Windows\INF\wpdmtp.inf", "MTP",
+            "MTP USB Device", "Microsoft", 0x000A000066140001UL, 0L]), 2);
         return choices;
     }
 }

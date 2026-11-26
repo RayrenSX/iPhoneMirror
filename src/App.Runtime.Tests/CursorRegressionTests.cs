@@ -58,14 +58,14 @@ internal static partial class Program
                     "Repeated arrow updates must preserve Bluetooth's hidden cursor count");
             }
 
-            InteractionSet(preview, "_isFixed", false);
+            InteractionSet(preview, "_controlInputSuspended", true);
             var unfixedCursor = CursorTestLoadCursor(0, 32649);
             CursorTestSetCursor(unfixedCursor);
             object[] unfixedArgs = [(nint)0, 0x0020, (nint)0, (nint)1, false];
             previewType.GetMethod("WindowProcedure", InteractionMembers)!.Invoke(preview, unfixedArgs);
             InteractionAssert(!(bool)unfixedArgs[4] && CursorTestGetCursor() == unfixedCursor,
                 "An unfixed window must preserve ordinary cursor negotiation.");
-            InteractionSet(preview, "_isFixed", true);
+            InteractionSet(preview, "_controlInputSuspended", false);
             InteractionSet(preview, "_isUsbControlEnabled", (Func<bool>)(() => false));
             var hand = CursorTestLoadCursor(0, 32649);
             CursorTestSetCursor(hand);

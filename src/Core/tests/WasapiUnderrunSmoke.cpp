@@ -11,6 +11,7 @@
 // PCM is submitted, and no system endpoint settings are changed.
 int run_wasapi_underrun_smoke() {
     using namespace std::chrono_literals;
+    using iPhoneMirror::audio::PlaybackBuffer;
     using iPhoneMirror::audio::WasapiRenderer;
     try {
         const iPhoneMirror::coremedia::AudioStreamBasicDescription format{
@@ -54,8 +55,27 @@ int run_wasapi_underrun_smoke() {
         std::this_thread::sleep_for(100ms);
         renderer.enqueue(std::vector<std::uint8_t>(257 * 4));
         wait_for_drain(3330);
+
+        const auto change_buffer = [&](PlaybackBuffer buffer) {
+            renderer.set_buffer(buffer);
+            const auto deadline = std::chrono::steady_clock::now() + 2s;
+            while (renderer.stats().active && std::chrono::steady_clock::now() < deadline)
+                std::this_thread::sleep_for(10ms);
+            if (renderer.stats().active) throw std::runtime_error("playback buffer did not re-prime");
+        };
+        change_buffer(PlaybackBuffer::High);
+        for (int i = 0; i < 3; ++i) renderer.enqueue(packet);
+        std::this_thread::sleep_for(100ms);
+        if (renderer.stats().active || renderer.stats().queued_frames != 3072)
+            throw std::runtime_error("high buffer started with insufficient PCM");
+        for (int i = 0; i < 3; ++i) renderer.enqueue(packet);
+        wait_for_drain(9474);
+
+        change_buffer(PlaybackBuffer::Low);
+        for (int i = 0; i < 3; ++i) renderer.enqueue(packet);
+        wait_for_drain(12546);
         renderer.stop();
-        std::cout << "WASAPI partial-buffer drain and resume passed\n";
+        std::cout << "WASAPI partial-buffer drain, resume, and live buffer changes passed\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "WASAPI underrun smoke failed: " << error.what() << '\n';

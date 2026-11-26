@@ -1,8 +1,6 @@
 using System.Globalization;
-using System.IO;
 using System.Windows;
 using IPhoneMirror.App.Services;
-using IPhoneMirror.App.Updater;
 
 namespace IPhoneMirror.App.Localization;
 
@@ -19,12 +17,9 @@ internal static class LocalizationService
     private const string AppFontFamilyKey = "AppFontFamily";
     private const string DefaultFontFamily = "Segoe UI, Microsoft YaHei UI";
     private const string JapaneseFontFamily = "Segoe UI, Yu Gothic UI";
-    private static readonly string SettingsPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "iPhoneMirror", "settings.json");
-
     private static string _selectedLanguage = SystemLanguage;
     private static CultureInfo _effectiveCulture = CultureInfo.GetCultureInfo(English);
+    private static Func<string, bool>? _savePreference;
 
     internal static event EventHandler? LanguageChanged;
 
@@ -34,13 +29,13 @@ internal static class LocalizationService
         ? ResolveCultureName(CultureInfo.InstalledUICulture.Name)
         : ResolveCultureName(_selectedLanguage);
 
-    internal static void Initialize()
+    internal static void Initialize(string language, Func<string, bool>? savePreference = null)
     {
-        var configured = LoadLanguage();
-        ApplyLanguage(configured, persist: false, notify: false);
+        ApplyLanguage(language, persist: false, notify: false);
+        _savePreference = savePreference;
     }
 
-    internal static void SetLanguage(string language) =>
+    internal static bool SetLanguage(string language) =>
         ApplyLanguage(language, persist: true, notify: true);
 
     internal static string Get(string key)
@@ -80,7 +75,7 @@ internal static class LocalizationService
         window.Closed += (_, _) => { closed = true; LanguageChanged -= Changed; };
     }
 
-    private static void ApplyLanguage(string language, bool persist, bool notify)
+    private static bool ApplyLanguage(string language, bool persist, bool notify)
     {
         if (language is not (SystemLanguage or SimplifiedChinese or
             TraditionalChineseHongKong or TraditionalChineseTaiwan or English or Japanese))
@@ -91,19 +86,25 @@ internal static class LocalizationService
             : language;
         var culture = CultureInfo.GetCultureInfo(cultureName);
 
-        // Record the requested language before loading its resource dictionary so a
-        // startup-failure dialog remains localized even when that load throws.
-        _selectedLanguage = language;
+        // Keep startup failure dialogs in the requested language.
+        if (!persist) _selectedLanguage = language;
         var application = Application.Current;
+        ResourceDictionary? replacement = null;
         if (application is not null)
         {
-            var dictionaries = application.Resources.MergedDictionaries;
-            var replacement = new ResourceDictionary
+            replacement = new ResourceDictionary
             {
                 Source = new Uri(
                     $"/{typeof(LocalizationService).Assembly.GetName().Name};component/" +
                     $"{DictionaryPrefix}{cultureName}.xaml", UriKind.Relative),
             };
+        }
+        if (persist && _savePreference?.Invoke(language) == false) return false;
+
+        _selectedLanguage = language;
+        if (application is not null && replacement is not null)
+        {
+            var dictionaries = application.Resources.MergedDictionaries;
             var existingIndex = -1;
             for (var index = 0; index < dictionaries.Count; ++index)
             {
@@ -125,8 +126,8 @@ internal static class LocalizationService
         CultureInfo.DefaultThreadCurrentCulture = culture;
         CultureInfo.DefaultThreadCurrentUICulture = culture;
 
-        if (persist) SaveLanguage(language);
         if (notify) LanguageChanged?.Invoke(null, EventArgs.Empty);
+        return true;
     }
 
     // DesignTokens falls back to Microsoft YaHei UI for CJK text, which draws
@@ -172,32 +173,4 @@ internal static class LocalizationService
             StringComparison.OrdinalIgnoreCase) ||
         cultureName.Equals("zh-MO", StringComparison.OrdinalIgnoreCase);
 
-    private static string LoadLanguage(string? settingsPath = null)
-    {
-        try
-        {
-            settingsPath ??= SettingsPath;
-            if (!File.Exists(settingsPath)) return SystemLanguage;
-            return new UpdateSettingsStore(settingsPath).Load().Language;
-        }
-        catch (Exception error)
-        {
-            DiagnosticLogger.Exception("localization", "language_load_failed", error);
-            return SystemLanguage;
-        }
-    }
-
-    private static void SaveLanguage(string language, string? settingsPath = null)
-    {
-        try
-        {
-            new UpdateSettingsStore(settingsPath ?? SettingsPath).Update(settings =>
-                settings.Language = language);
-        }
-        catch (Exception error)
-        {
-            // Language switching must remain usable even if settings cannot be saved.
-            DiagnosticLogger.Exception("localization", "language_save_failed", error);
-        }
-    }
 }

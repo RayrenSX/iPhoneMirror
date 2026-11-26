@@ -105,20 +105,22 @@ internal static partial class Program
 
     private static void AssertNarrowWorkspacePanelToggle(Window window, string name, HashSet<string> findings)
     {
-        if (window is not IPhoneMirror.App.MainWindow || !name.EndsWith("workspace-settings")) return;
+        if (window is not IPhoneMirror.App.MainWindow main || !name.EndsWith("workspace-settings")) return;
         var setSettings = window.GetType().GetMethod("SetSettingsPanelVisible", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        var setLeft = window.GetType().GetMethod("SetLeftWorkspacePanel", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        var devices = Enum.Parse(setLeft.GetParameters()[0].ParameterType, "Devices");
         var center = (FrameworkElement)window.FindName("CenterPanel");
+        var workspace = (FrameworkElement)window.FindName("MainContentGrid");
+        var left = (FrameworkElement)window.FindName("LeftPanelHost");
         var settings = (FrameworkElement)window.FindName("ControlPanel");
-        setSettings.Invoke(window, [false]);
-        AdvanceDispatcher(TimeSpan.FromMilliseconds(360));
-        window.UpdateLayout();
-        if (Grid.GetRowSpan(center) != 1 || Grid.GetColumn(settings) != 4)
-            findings.Add(name + ": closing narrow settings panel left a stale stacked layout");
+        setLeft.Invoke(window, [devices]);
+        FinishWorkspaceReveal(main);
+        if (!left.IsVisible || settings.IsVisible || center.ActualWidth < workspace.ActualWidth - left.ActualWidth - 19)
+            findings.Add(name + ": narrow workspace did not give priority to the preview and the opened sources panel");
         setSettings.Invoke(window, [true]);
-        AdvanceDispatcher(TimeSpan.FromMilliseconds(360));
-        window.UpdateLayout();
-        if (Grid.GetRowSpan(center) != 2 || Grid.GetColumn(settings) != 0)
-            findings.Add(name + ": reopening narrow settings panel did not restore adaptive layout");
+        FinishWorkspaceReveal(main);
+        if (left.IsVisible || !settings.IsVisible || center.ActualWidth < workspace.ActualWidth - settings.ActualWidth - 19)
+            findings.Add(name + ": narrow workspace did not switch from sources to settings");
     }
 
     private static void AuditAllTabs(Window window, string name, HashSet<string> findings, string? renderPath = null)

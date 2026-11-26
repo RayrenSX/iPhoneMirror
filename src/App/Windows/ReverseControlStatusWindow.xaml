@@ -4,7 +4,7 @@
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
         xmlns:design="clr-namespace:IPhoneMirror.UI.Controls"
         xmlns:animations="clr-namespace:IPhoneMirror.UI.Animations"
-        Width="542" SizeToContent="Height" MinHeight="382" Title="{DynamicResource ReverseControlTitle}" MaxHeight="702"
+        Width="542" SizeToContent="Height" Title="{DynamicResource ReverseControlTitle}" MaxHeight="702"
         ResizeMode="NoResize" WindowStartupLocation="CenterOwner" ShowInTaskbar="False" Foreground="{DynamicResource TextBrush}"
         xmlns:chrome="clr-namespace:IPhoneMirror.UI.Controls"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent">
@@ -12,22 +12,76 @@
         <Grid animations:PageTransition.IsEnabled="True">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/><RowDefinition Height="16"/>
-                <RowDefinition Height="*" MinHeight="{StaticResource DialogContentMinHeight}"/><RowDefinition Height="16"/>
-                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/><RowDefinition Height="16"/>
+                  <RowDefinition Height="Auto" MinHeight="40"/>
             </Grid.RowDefinitions>
-            <Grid Grid.Row="0" Style="{StaticResource SubWindowHeader}" animations:WindowDragBehavior.IsEnabled="True">
-                <StackPanel Margin="0,0,48,0">
-                    <TextBlock Text="{DynamicResource ReverseControlTitle}" Style="{StaticResource SubWindowTitle}"/>
-                    <TextBlock Text="{Binding DeviceSummary}" TextWrapping="Wrap" Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource BodyFontSize}" Margin="0,4,0,0"/>
-                </StackPanel>
-                <Button Style="{StaticResource SubWindowCloseButton}" Click="OnCloseClick">
+            <Grid x:Name="NoticeHeader" Grid.Row="0" Style="{StaticResource SubWindowHeader}" animations:WindowDragBehavior.IsEnabled="True">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <Border x:Name="HeaderIcon" Style="{StaticResource NoticeHeaderIcon}" Background="{DynamicResource ErrorSurfaceBrush}"
+                        Width="32" Height="32"
+                        Visibility="{Binding FailureVisibility}">
+                    <ui:SymbolIcon Symbol="ErrorCircle20" FontSize="20" Foreground="{DynamicResource ErrorBrush}"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+                    <TextBlock x:Name="HeaderTitle" Grid.Column="1">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock" BasedOn="{StaticResource NoticeHeaderTitle}">
+                                <Setter Property="Text" Value="{DynamicResource ReverseControlTitle}"/>
+                                <Setter Property="Margin" Value="0,0,12,0"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding HasFailure}" Value="True">
+                                        <Setter Property="Text" Value="{Binding StageTitle}"/>
+                                        <Setter Property="Margin" Value="10,0,12,0"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                    <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding DeviceSummary}">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock" BasedOn="{StaticResource SubWindowSubtitle}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding HasFailure}" Value="True">
+                                        <Setter Property="Margin" Value="10,3,12,0"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                <Button x:Name="HeaderClose" Grid.Column="2" Style="{StaticResource NoticeHeaderCloseButton}" Click="OnCloseClick"
+                        AutomationProperties.Name="{DynamicResource Close}">
                     <ui:SymbolIcon Style="{StaticResource ButtonSymbolIcon}" Symbol="Dismiss20" FontSize="18"/>
                 </Button>
             </Grid>
             <ScrollViewer x:Name="ControlContentScrollViewer" Grid.Row="2"
                           VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                 <StackPanel>
-            <StackPanel  HorizontalAlignment="Center">
+            <StackPanel Visibility="{Binding FailureVisibility}">
+                <TextBlock Text="{Binding StageDescription}" Style="{StaticResource BodyText}"/>
+                <TextBox x:Name="FailureDetailsText" Text="{Binding FailureDetails, Mode=OneWay}"
+                         Visibility="{Binding FailureDetailsVisibility}" Margin="0,10,0,0"
+                         Style="{StaticResource NoticeDiagnosticText}"
+                         AutomationProperties.Name="{DynamicResource ErrorTechnicalDetails}"/>
+            </StackPanel>
+            <StackPanel>
+                <StackPanel.Style>
+                    <Style TargetType="StackPanel">
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding HasFailure}" Value="True">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </StackPanel.Style>
+            <StackPanel HorizontalAlignment="Center">
                 <Border Width="46" Height="46" CornerRadius="23" Background="{DynamicResource AccentBrush}" HorizontalAlignment="Center">
                     <ui:SymbolIcon Symbol="Cursor20" FontSize="21" Foreground="{DynamicResource OnAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                 </Border>
@@ -58,6 +112,7 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
             </Border>
+            </StackPanel>
             <Border  Style="{StaticResource SettingsSection}" Padding="14,12"
                     Margin="0,8,0,2" Visibility="{Binding BluetoothPairingStepsVisibility}">
                 <StackPanel>
@@ -96,7 +151,7 @@
                 <StackPanel>
                     <Grid>
                         <Grid.ColumnDefinitions><ColumnDefinition Width="28"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                        <Border Width="28" Height="28" CornerRadius="14"
+                        <Border Width="28" Height="28" CornerRadius="8" VerticalAlignment="Center"
                                 design:StatusAppearance.Tone="{Binding PromptTone}">
                             <ui:SymbolIcon Symbol="{Binding PromptSymbol}" design:StatusAppearance.Tone="{Binding PromptTone}"
                                            HorizontalAlignment="Center" VerticalAlignment="Center"/>
@@ -137,16 +192,15 @@
                             </DataTemplate>
                         </ListBox.ItemTemplate>
                     </ListBox>
-                    <TextBlock Text="{Binding PromptTechnicalDetails}" Visibility="{Binding PromptTechnicalDetailsVisibility}"
-                               Foreground="{DynamicResource MutedTextBrush}" FontFamily="{StaticResource CodeFontFamily}" FontSize="{DynamicResource CaptionFontSize}"
-                               TextWrapping="Wrap" Margin="0,9,0,0"/>
+                    <TextBox Text="{Binding PromptTechnicalDetails, Mode=OneWay}"
+                             Visibility="{Binding PromptTechnicalDetailsVisibility}" Margin="0,10,0,0"
+                             Style="{StaticResource NoticeDiagnosticText}"
+                             AutomationProperties.Name="{DynamicResource ErrorTechnicalDetails}"/>
                 </StackPanel>
             </Border>
                 </StackPanel>
             </ScrollViewer>
             <WrapPanel Grid.Row="4" Style="{StaticResource DialogActions}">
-                <Button Content="{DynamicResource ReverseControlRetry}" Click="OnRetryClick" Visibility="{Binding RetryVisibility}"
-                        MinWidth="88" Margin="{StaticResource DialogActionMargin}"/>
                 <Button Content="{DynamicResource Cancel}" Click="OnCancelClick" MinWidth="88" Margin="{StaticResource DialogActionMargin}">
                     <Button.Style>
                         <Style TargetType="Button" BasedOn="{StaticResource SecondaryButton}">
@@ -165,6 +219,8 @@
                         Visibility="{Binding PromptPrimaryVisibility}" IsEnabled="{Binding IsPromptPrimaryEnabled}"
                         MinWidth="96" Style="{StaticResource PrimaryButton}"/>
                 <Button Content="{DynamicResource Close}" Click="OnCloseClick" AutomationProperties.AutomationId="ControlStatusCloseButton" Visibility="{Binding CloseVisibility}"
+                        MinWidth="88" Margin="{StaticResource DialogActionMargin}" Style="{StaticResource SecondaryButton}"/>
+                <Button Content="{DynamicResource ReverseControlRetry}" Click="OnRetryClick" Visibility="{Binding RetryVisibility}"
                         MinWidth="88" Margin="{StaticResource DialogActionMargin}" Style="{StaticResource PrimaryButton}"/>
             </WrapPanel>
         </Grid>

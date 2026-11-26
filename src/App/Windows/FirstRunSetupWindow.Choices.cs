@@ -41,20 +41,26 @@ public partial class FirstRunSetupWindow
     private void AppearanceChoices()
     {
         var row = CardRow();
+        RadioButton? appliedChoice = null;
         foreach (var theme in Enum.GetValues<AppTheme>())
         {
-            var card = ChoiceCard("theme", "SetupTheme" + theme, null, ThemeService.Preference == theme);
+            var selected = ThemeService.Preference == theme;
+            var card = ChoiceCard("theme", "SetupTheme" + theme, null, selected);
+            if (selected) appliedChoice = card;
             card.Tag = Symbol(theme switch { AppTheme.Light => "sun", AppTheme.Dark => "moon", _ => "monitor" });
             var content = (StackPanel)card.Content;
             content.Children.Insert(0, ThemePreview(theme));
             card.Checked += (_, _) =>
             {
-                ThemeService.Apply(theme);
-                if (Application.Current is App app)
+                if (Application.Current is App app &&
+                    !app.TrySetUpdatePreference(settings => settings.Theme, (settings, value) => settings.Theme = value, theme))
                 {
-                    app.UpdateSettings.Theme = theme;
-                    if (!app.SaveUpdateSettings()) Failure(new System.IO.IOException(L("SetupSaveFailed")));
+                    if (appliedChoice is not null) appliedChoice.IsChecked = true;
+                    Failure(new System.IO.IOException(L("SetupSaveFailed")));
+                    return;
                 }
+                appliedChoice = card;
+                ThemeService.Apply(theme);
             };
             row.Children.Add(card);
         }

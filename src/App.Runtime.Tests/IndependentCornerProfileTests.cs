@@ -25,6 +25,7 @@ internal static partial class Program
         var calls = new List<object>();
         var wheelEvents = new List<PreviewPointerEventArgs>();
         (double Radius, double Exponent) applied = default;
+        var rejectCornerChange = false;
         var constructor = typeof(NativePreviewWindow).GetConstructors(KeyboardTestMembers).Single();
         var parameters = constructor.GetParameters();
         var values = parameters.Select(parameter => parameter.DefaultValue).ToArray();
@@ -44,6 +45,7 @@ internal static partial class Program
         var setterIndex = Array.FindIndex(parameters, parameter => parameter.Name == "setCornerProfile");
         if (setterIndex >= 0) values[setterIndex] = (Func<ulong, nint, double, double, bool>)((sessionHandle, hwnd, radius, exponent) =>
             {
+                if (rejectCornerChange) return false;
                 var success = NativeCore.SetDeviceWindowCornerProfile(sessionHandle, hwnd, radius, exponent);
                 InteractionAssert(success, "The synthetic renderer rejected a window corner profile.");
                 applied = (radius, exponent);
@@ -89,6 +91,14 @@ internal static partial class Program
                 "Cannot provide the late iPhone 17 model metadata.");
             Expect("iPhone18,3", 1640, 2360, "late iPhone 17 model metadata");
 
+            var cornerItem = (System.Windows.Controls.MenuItem)KeyboardField(preview, "_cornerItem");
+            var previousHeader = cornerItem.Header;
+            rejectCornerChange = true;
+            KeyboardCall(preview, "ToggleCorners");
+            rejectCornerChange = false;
+            Expect("iPhone18,3", 1640, 2360, "failed change keeps the rendered corner profile");
+            InteractionAssert(Equals(previousHeader, cornerItem.Header), "A failed corner change updated the menu.");
+
             KeyboardCall(preview, "ToggleCorners");
             Expect("iPhone18,3", 1640, 2360, "explicit remove corners", enabled: false);
             preview.SetSourceDimensions(1206, 2622);
@@ -99,6 +109,9 @@ internal static partial class Program
             Expect("iPhone18,1", 1206, 2622, "restoring corners uses the refreshed base profile");
 
             InteractionAssert(preview.SetPhoneFrame(true), "Cannot enable the synthetic phone frame.");
+            InteractionAssert(!cornerItem.IsEnabled, "The renderer is showing a phone frame, so the corner command must be unavailable.");
+            KeyboardCall(preview, "ToggleCorners");
+            Expect("iPhone18,1", 1206, 2622, "the frame prevents changes to the corner preference");
             preview.SetSourceDimensions(2007, 2853);
             InteractionAssert(preview.UpdateDeviceAppearance("iPhone19,4", DeviceAppearance.Unknown),
                 "Cannot select the Duo inner frame.");
@@ -110,6 +123,7 @@ internal static partial class Program
             InteractionAssert(preview.PhoneFrameEnabled && preview.ActiveDeviceFrame?.Id == "iphone-duo",
                 "Switching Duo panels disabled the user's phone frame preference.");
             InteractionAssert(preview.SetPhoneFrame(false), "Cannot disable the synthetic phone frame.");
+            InteractionAssert(cornerItem.IsEnabled, "Hiding the phone frame must make corner controls available again.");
             preview.SetSourceDimensions(2007, 2853);
             Expect("iPhone19,4", 2007, 2853, "unframed Duo returns to inner panel");
 
@@ -119,6 +133,21 @@ internal static partial class Program
                 calls.Count == beforeUnchanged, "Unchanged geometry or metadata resent the same corner profile.");
 
             TestIndependentRotationGeometry(core, handle, preview, wheelEvents);
+            using var replacement = core.CreateExternalSession("independent-recovery-fixture", false, 0).Handle ??
+                throw new InvalidOperationException("Cannot create the replacement preview session.");
+            InteractionAssert(!preview.RebindSession(ulong.MaxValue) && preview.SessionHandle == handle.RawHandle,
+                "A failed recovery must not report the rejected handle as the bound session.");
+            InteractionAssert(preview.RebindSession(replacement.RawHandle) &&
+                preview.SessionHandle == replacement.RawHandle && preview.PhoneFrameEnabled,
+                "A successful retry must publish the replacement session and restore the phone frame.");
+            core.PushExternalFrame(replacement, 1, 120, 260, new byte[120 * 260 * 3 / 2]);
+            var retryTime = Stopwatch.StartNew();
+            while (NativeCore.GetDeviceWindowPhoneFrameOrientation(replacement.RawHandle, preview.Handle) < 0 &&
+                retryTime.Elapsed < TimeSpan.FromSeconds(3))
+                AdvanceDispatcher(TimeSpan.FromMilliseconds(25));
+            InteractionAssert(NativeCore.GetDeviceWindowPhoneFrameOrientation(replacement.RawHandle, preview.Handle) == 0,
+                "The replacement renderer did not present the frame using the retained phone artwork.");
+            Console.WriteLine("PASS independent preview recovery: rejected handle and successful retry.");
             File.WriteAllText(Path.Combine(output, "results.json"), JsonSerializer.Serialize(new
             {
                 scope = "Real independent HWND and synthetic native renderer; no phone or capture receiver is used.",

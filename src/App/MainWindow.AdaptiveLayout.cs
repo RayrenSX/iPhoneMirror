@@ -10,21 +10,26 @@ public partial class MainWindow
     private const double CompleteMinimumWindowWidth = 480;
     private const double CompleteMinimumPreviewWidth = 320;
     private bool _workspaceLayoutQueued;
+    private bool _workspacePrefersRightPanel = true;
     private double _workspacePinnedLeftWidth, _workspacePinnedRightWidth;
     private bool _preparingWorkspaceReveal;
     private (double Width, double Height, double Scale, double Aspect)? _horizontalProjectionResize;
     private double _completeResizePreviewWidth;
+    private bool _completePreviewAtResizeLimit;
+    private bool _completeHorizontalResize;
     private double WorkspaceReadingScale => TryFindResource("BodyFontSize") is double size ? size / 14 : 1;
-    private double WorkspaceDeviceWidth => 300 * (1 + .5 * (WorkspaceReadingScale - 1));
-    private double WorkspaceSettingsWidth => 362 * (1 + .5 * (WorkspaceReadingScale - 1));
+    private double WorkspaceSidebarReadingFactor => 1 + .5 * (WorkspaceReadingScale - 1);
+    private double WorkspaceLeftWidth => Controls.WorkspaceRevealPanel.DefaultLeftContentWidth * WorkspaceSidebarReadingFactor;
+    private double WorkspaceRightWidth => Controls.WorkspaceRevealPanel.DefaultRightContentWidth * WorkspaceSidebarReadingFactor;
+    private double WorkspacePreviewReadingFactor => 1 + .35 * (WorkspaceReadingScale - 1);
 
     private double GetCompleteWorkspaceMinimumWidth()
     {
         var chrome = ActualWidth > 0 && RootLayout.ActualWidth > 0
             ? Math.Max(0, ActualWidth - RootLayout.ActualWidth) : 96;
-        var sidebars = (_leftWorkspacePanel != LeftWorkspacePanel.None ? WorkspaceDeviceWidth + 18 : 0) +
+        var sidebars = (_leftWorkspacePanel != LeftWorkspacePanel.None ? WorkspaceLeftWidth + 18 : 0) +
             (IsRightWorkspacePanelVisible ? WorkspaceRightWidth + 18 : 0);
-        var preview = CompleteMinimumPreviewWidth * (1 + .35 * (WorkspaceReadingScale - 1));
+        var preview = CompleteMinimumPreviewWidth * WorkspacePreviewReadingFactor;
         var maximum = Math.Min(MaxWidth,
             IPhoneMirror.SharedUI.Services.WindowWorkAreaController.GetAvailableSize(this).Width);
         // WPF rounds layout sizes to physical pixels. A fractional minimum
@@ -40,17 +45,73 @@ public partial class MainWindow
         MinWidth = GetCompleteWorkspaceMinimumWidth();
     }
 
+    private bool NeedsSingleWorkspacePanel(bool openingLeftPanel = false)
+    {
+        if (_viewModel.IsLightweightApplicationMode || _isFullScreen ||
+            (!openingLeftPanel && _leftWorkspacePanel == LeftWorkspacePanel.None) || !IsRightWorkspacePanelVisible ||
+            MainContentGrid.ActualWidth <= 0) return false;
+
+        var shortViewport = MainContentGrid.ActualHeight < 360;
+        var workAreaWidth = IPhoneMirror.SharedUI.Services.WindowWorkAreaController.GetAvailableSize(this).Width;
+        var chromeWidth = Math.Max(0, ActualWidth - RootLayout.ActualWidth);
+        var workspaceWidth = shortViewport ? MainContentGrid.ActualWidth : Math.Min(workAreaWidth, MaxWidth) - chromeWidth;
+        var previewWidth = workspaceWidth - WorkspaceLeftWidth - WorkspaceRightWidth - 36;
+        // Short viewports need more line length; taller windows can still grow to fit both cards.
+        var preferredWidth = shortViewport ? 440 : CompleteMinimumPreviewWidth;
+        // Allow one DIP for WPF's pixel rounding at the normal minimum width.
+        return previewWidth + 1 < preferredWidth * WorkspacePreviewReadingFactor;
+    }
+
+    private void KeepPreferredWorkspacePanel()
+    {
+        if (!NeedsSingleWorkspacePanel()) return;
+        if (_workspacePrefersRightPanel)
+        {
+            _leftWorkspacePanel = LeftWorkspacePanel.None;
+            return;
+        }
+
+        _isSettingsPanelVisible = false;
+        _isDeviceHubPanelVisible = false;
+        SynchronizeRightPanelContent();
+    }
+
     private void OnIdleSurfaceSizeChanged(object sender, SizeChangedEventArgs e)
     {
-        if (WaitingDeviceIllustration is null || ReadyDeviceIllustration is null) return;
-        // Prioritize the status and instructions when there is no room for the illustration.
-        var compact = e.NewSize.Height < 220;
-        WaitingDeviceIllustration.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+        if (WaitingAirPlayCard is null || WaitingDeviceGlyph is null || ReadyDeviceIllustration is null) return;
+        var stackRoutes = e.NewSize.Width < 520 * WorkspacePreviewReadingFactor;
+        Grid.SetColumnSpan(WaitingUsbCard, stackRoutes ? 3 : 1);
+        Grid.SetColumnSpan(WaitingAirPlayCard, stackRoutes ? 3 : 1);
+        Grid.SetColumn(WaitingAirPlayCard, stackRoutes ? 0 : 2);
+        Grid.SetRow(WaitingAirPlayCard, stackRoutes ? 1 : 0);
+        WaitingAirPlayCard.Margin = new Thickness(0, stackRoutes ? 8 : 0, 0, 0);
+        WaitingForDeviceState.MaxWidth = stackRoutes ? 310 : 512;
+        var compact = e.NewSize.Height < 270;
+        WaitingConnectionOptions.Margin = new Thickness(0, compact ? 10 : 18, 0, 0);
+        WaitingDeviceIllustration.Width = WaitingDeviceIllustration.Height = compact ? 36 : 64;
+        WaitingDeviceIllustration.CornerRadius = new CornerRadius(WaitingDeviceIllustration.Width / 2);
+        WaitingDeviceIllustration.Margin = new Thickness(0, 0, 0, compact ? 6 : 14);
+        WaitingDeviceGlyph.Width = compact ? 16 : 26;
+        WaitingDeviceGlyph.Height = compact ? 20 : 34;
         ReadyDeviceIllustration.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
-        WaitingDeviceTitle.Margin = ReadyDeviceTitle.Margin = new Thickness(0, compact ? 0 : 20, 0, 0);
+        ReadyDeviceTitle.Margin = new Thickness(0, compact ? 0 : 20, 0, 0);
     }
 
     private void OnStatisticsSizeChanged(object sender, SizeChangedEventArgs e) => OnWorkspaceLayoutChanged(sender, e);
+
+    private void OnNavigationPaneStateChanged(object sender, RoutedEventArgs e)
+    {
+        if (!ReferenceEquals(e.OriginalSource, RootNavigation)) return;
+        for (DependencyObject? ancestor = MirroringPanelToggle; ancestor is not null && ancestor != RootNavigation;
+             ancestor = System.Windows.Media.VisualTreeHelper.GetParent(ancestor))
+        {
+            if (ancestor is not ScrollViewer menu) continue;
+            // In the compact rail, the scrollbar consumes the icon column. The menu still scrolls by wheel and keyboard.
+            menu.SetCurrentValue(ScrollViewer.VerticalScrollBarVisibilityProperty,
+                RootNavigation.IsPaneOpen ? ScrollBarVisibility.Auto : ScrollBarVisibility.Hidden);
+            break;
+        }
+    }
 
     private void UpdateStatisticsLayout()
     {
@@ -95,7 +156,8 @@ public partial class MainWindow
             _workspaceLayoutQueued = false;
             if (!_shutdownStarted && IsLoaded)
             {
-                UpdateWorkspaceLayout();
+                if (NeedsSingleWorkspacePanel()) ApplyWorkspacePanelState();
+                else UpdateWorkspaceLayout();
                 TrimLightweightWorkspaceWidth();
             }
         });
@@ -113,7 +175,7 @@ public partial class MainWindow
         if (_isFullScreen) return;
         if (!preserveSurfaceWidths && _workspaceTransition?.IsRunning != true)
         {
-            if (LeftPanelHost.Visibility == Visibility.Visible) LeftPanelHost.Width = WorkspaceDeviceWidth;
+            if (LeftPanelHost.Visibility == Visibility.Visible) LeftPanelHost.Width = WorkspaceLeftWidth;
             if (ControlPanel.Visibility == Visibility.Visible) ControlPanel.Width = WorkspaceRightWidth;
         }
         UpdateStatisticsLayout();
@@ -126,12 +188,13 @@ public partial class MainWindow
         // Keep the same single-row header in complete and lightweight modes.
         // Width changes only compact secondary status, never move the action
         // into a new row or change the subtitle's user-selected visibility.
-        var readingFactor = 1 + .35 * (WorkspaceReadingScale - 1);
+        var readingFactor = WorkspacePreviewReadingFactor;
         var compactStatus = _viewModel.IsLightweightApplicationMode || RootLayout.ActualWidth < 1100 * readingFactor;
         DetectionStatus.MaxWidth = compactStatus ? 0 : 360;
         DriverStatusGap.Width = new GridLength(compactStatus || _viewModel.HideInterfaceDescriptions ? 0 : 18);
         VersionBadge.Visibility = RootLayout.ActualWidth < 580 * readingFactor ? Visibility.Collapsed : Visibility.Visible;
         UpdateCompleteWorkspaceMinimumWidth();
+        RefreshCompletePreviewFit();
         RefreshLightweightPreviewViewport();
         UpdateWorkspaceViewportConstraints();
     }
@@ -166,7 +229,7 @@ public partial class MainWindow
 
     private double GetLightweightFixedWorkspaceWidth(double currentWidth) =>
         GetLightweightFixedChromeWidth(currentWidth) +
-        (_leftWorkspacePanel != LeftWorkspacePanel.None ? WorkspaceDeviceWidth + 18 : 0) +
+        (_leftWorkspacePanel != LeftWorkspacePanel.None ? WorkspaceLeftWidth + 18 : 0) +
         (IsRightWorkspacePanelVisible ? WorkspaceRightWidth + 18 : 0);
 
     private bool CanConstrainCompleteWorkspace => IsLoaded && IsVisible &&
@@ -178,6 +241,25 @@ public partial class MainWindow
         HasLightweightVideoPresentation && HasLightweightContentDimensions &&
         PreviewPanel.IsVisible && PreviewPanel.ActualWidth > 0 && PreviewPanel.ActualHeight > 0;
 
+    private void RefreshCompletePreviewFit()
+    {
+        var fit = (PreviewViewportSlot.FitHeight && HasLightweightContentDimensions) ||
+            (CanConstrainCompletePreview && (_completePreviewAtResizeLimit || ActualWidth <= MinWidth + 0.5));
+        var aspect = fit ? GetCompletePreviewAspect() : 0;
+        if (PreviewViewportSlot.FittedAspect != aspect) PreviewViewportSlot.FittedAspect = aspect;
+    }
+
+    private double GetCompletePreviewAspect()
+    {
+        var width = _viewModel.SourceVideoWidth;
+        var height = _viewModel.SourceVideoHeight;
+        if (height == 0) return 0;
+        if (!_isFullScreen && _mainPreviewFrame is { } frame && frame.Session == _viewModel.CurrentSessionHandle)
+            return width > height ? (double)frame.Artwork.FrameHeight / frame.Artwork.FrameWidth
+                : (double)frame.Artwork.FrameWidth / frame.Artwork.FrameHeight;
+        return (double)width / height;
+    }
+
     private double GetCompletePreviewMinimumWindowWidth(NativeRect current, int proposedHeight, double scale)
     {
         var border = PreviewPanel.BorderThickness;
@@ -185,13 +267,16 @@ public partial class MainWindow
         var horizontalFrame = border.Left + border.Right + padding.Left + padding.Right;
         var verticalFrame = border.Top + border.Bottom + padding.Top + padding.Bottom;
         var heightChange = (proposedHeight - (current.Bottom - current.Top)) / scale;
-        var pictureHeight = Math.Max(0, PreviewPanel.ActualHeight - verticalFrame + heightChange);
+        // Use the slot's available height. The fitted landscape panel may be
+        // shorter than its slot before the window starts changing size.
+        var currentHeight = PreviewViewportSlot.FitHeight ? PreviewViewportSlot.ActualHeight : PreviewPanel.ActualHeight;
+        var pictureHeight = Math.Max(0, currentHeight - verticalFrame + heightChange);
         var pictureWidth = Math.Min(Math.Max(0, PreviewPanel.ActualWidth - horizontalFrame),
-            pictureHeight * _viewModel.SourceVideoWidth / _viewModel.SourceVideoHeight);
+            pictureHeight * GetCompletePreviewAspect());
         // Preserve the displayed picture, including a landscape picture that
         // is already width-limited. Only its surrounding black space can go.
         _completeResizePreviewWidth = horizontalFrame + pictureWidth;
-        var chrome = (current.Right - current.Left) / scale - PreviewPanel.ActualWidth;
+        var chrome = (current.Right - current.Left) / scale - PreviewViewportSlot.ActualWidth;
         var maximum = Math.Min(MaxWidth,
             IPhoneMirror.SharedUI.Services.WindowWorkAreaController.GetAvailableSize(this).Width);
         return Math.Min(maximum, Math.Max(GetCompleteWorkspaceMinimumWidth(), chrome + _completeResizePreviewWidth));
@@ -289,7 +374,7 @@ public partial class MainWindow
         var showSettings = IsRightWorkspacePanelVisible ||
             (ControlPanel.Visibility == Visibility.Visible && GetLightweightElementWidth(ControlPanel) > 0);
         var animating = _preparingWorkspaceReveal || _workspaceSurfaceAnimationActive || _workspaceTransition?.IsRunning == true;
-        var leftRequest = showLeft ? (animating ? Math.Max(0, LeftPanelHost.Width) : WorkspaceDeviceWidth) : 0;
+        var leftRequest = showLeft ? (animating ? Math.Max(0, LeftPanelHost.Width) : WorkspaceLeftWidth) : 0;
         var rightRequest = showSettings ? (animating ? Math.Max(0, ControlPanel.Width) : WorkspaceRightWidth) : 0;
         var gaps = animating
             ? GetLightweightColumnWidth(LeftGapColumn) + GetLightweightColumnWidth(RightGapColumn)
@@ -365,7 +450,7 @@ public partial class MainWindow
         {
             // Keep content measure stable during the reveal. At rest it wraps
             // within the allocated sidebar instead of clipping its controls.
-            LeftPanelHost.ContentWidth = showLeft ? left : WorkspaceDeviceWidth;
+            LeftPanelHost.ContentWidth = showLeft ? left : WorkspaceLeftWidth;
             ControlPanel.ContentWidth = showSettings ? right : WorkspaceRightWidth;
         }
     }

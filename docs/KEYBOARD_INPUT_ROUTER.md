@@ -1,5 +1,7 @@
 # Keyboard Input Router：审计、实现与验证
 
+> 历史记录：以下发现和验证按文中日期、设备与工作区解释。当前操作见[使用指南](USER_GUIDE.md)，实现与构建见[架构](ARCHITECTURE.md)和[开发指南](DEVELOPMENT.md)。
+
 ## 1. 修改前的实际输入链路与根因
 
 审计范围：主 WPF 窗口、NativePreviewHost、NativePreviewWindow、Raw Input、WH_KEYBOARD_LL、WM_HOTKEY、映射录制/执行、USB/无线 DirectUsbInputBridge、BluetoothHidMouseService、DeviceControlSession 与设备绑定后的路由捕获。

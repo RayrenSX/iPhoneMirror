@@ -67,7 +67,7 @@ internal static partial class Program
                 var press = new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left)
                 { RoutedEvent = Mouse.PreviewMouseDownEvent };
                 firstCard.RaiseEvent(press);
-                InteractionAssert(press.Handled && list.IsMouseCaptureWithin && list.SelectedItem is ToolbarRow { Id: "WirelessControlButton" },
+                InteractionAssert(press.Handled && list.IsMouseCaptureWithin && list.SelectedItem is ToolbarRow { Id: "UsbControlButton" },
                     "The routed press did not select the actual card and capture the row for dragging.");
                 editor.EndToolbarDrag(cancel: false);
                 var order = editor.Draft.Items.ToArray(); var origin = Center(first);
@@ -132,7 +132,7 @@ internal static partial class Program
                     var preview = (ListBox)render.FindName("PreviewList");
                     var boxes = preview.Items.Cast<object>().Select(row => (FrameworkElement)preview.ItemContainerGenerator.ContainerFromItem(row))
                         .Select(item => item.TransformToAncestor(render).TransformBounds(new Rect(item.RenderSize))).ToArray();
-                    InteractionAssert(boxes.Length == 8 && boxes.Max(b => b.Top) - boxes.Min(b => b.Top) < 1 &&
+                    InteractionAssert(boxes.Length == PreviewToolbarSettings.DefaultItems.Length && boxes.Max(b => b.Top) - boxes.Min(b => b.Top) < 1 &&
                         boxes.Min(b => b.Left) >= 12 && boxes.Max(b => b.Right) <= render.ActualWidth - 12 &&
                         Visuals(preview).OfType<ScrollViewer>().All(scroll => scroll.ComputedHorizontalScrollBarVisibility != Visibility.Visible),
                         "Tools are clipped, wrapped or scrolled in " + language + "/" + theme);
@@ -143,7 +143,7 @@ internal static partial class Program
                 }
                 finally { SetKeyboardField(render, "_focusCanClose", true); render.Close(); }
             }
-            Console.WriteLine("PASS simple toolbar: original theme background; no visual settings/arrows/scrolling; compact footer; drag threshold, insert both directions, mouse release, capture loss, Escape rollback, persistence and command identity; five languages/two themes at 150% with all eight tools visible.");
+            Console.WriteLine("PASS simple toolbar: original theme background; no visual settings/arrows/scrolling; compact footer; drag threshold, insert both directions, mouse release, capture loss, Escape rollback, persistence and command identity; five languages/two themes at 150% with all six default tools visible.");
             return 0;
         }
         finally { CloseWorkspaceTestWindow(main); app.Shutdown(); }

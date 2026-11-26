@@ -11,7 +11,7 @@ public partial class MainWindow
     private readonly Func<int, bool> _isPhysicalKeyboardKeyDown = key => GetAsyncKeyState(key) < 0;
     private bool IsKeyboardHookNeeded => !_mappingClosing &&
         (Application.Current is not App { IsUiPreviewMode: true } ||
-         _mappingSettings.Enabled || _mappingCapture.Waiting || _mappingCapture.HasHeldKeys);
+         _mappingSettings.HasActiveMappings || _mappingCapture.Waiting || _mappingCapture.HasHeldKeys);
 
     private void SetKeyboardHookRefreshEnabled(bool enabled)
     {

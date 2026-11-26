@@ -2,6 +2,7 @@
 
 #include "Capture/DecoderSwitchCoordinator.h"
 #include "Capture/ICaptureSession.h"
+#include "Capture/PreviewAudioSync.h"
 #include "Protocol/QuickTimeSession.h"
 
 #include <atomic>
@@ -47,6 +48,7 @@ struct VideoInputMetadata {
     std::chrono::steady_clock::time_point received_at;
     std::optional<unsigned> rotation_turns;
     bool native_airplay{};
+    std::optional<unsigned> physical_turns;
 };
 
 class VideoInputMetadataQueue {
@@ -140,14 +142,16 @@ class StreamingSilenceWatchdog final {
 public:
     using Clock = std::chrono::steady_clock;
     static constexpr auto SilenceLimit = std::chrono::seconds(10);
+    static constexpr auto PhoneAudioSilenceLimit = std::chrono::seconds(45);
 
     void observe_media(Clock::time_point now) noexcept { last_media_at_ = now; }
     void reset() noexcept { last_media_at_.reset(); }
     void arm(Clock::time_point now) noexcept { last_media_at_ = now; }
 
-    [[nodiscard]] bool expired(Clock::time_point now) const noexcept {
+    [[nodiscard]] bool expired(Clock::time_point now,
+        Clock::duration limit = SilenceLimit) const noexcept {
         return last_media_at_ && now >= *last_media_at_ &&
-            now - *last_media_at_ >= SilenceLimit;
+            now - *last_media_at_ >= limit;
     }
 
     [[nodiscard]] std::chrono::milliseconds silence_duration(
@@ -302,6 +306,8 @@ public:
         std::uint64_t after_sequence) const override;
     void set_audio_enabled(bool enabled) noexcept override;
     void set_audio_volume(float volume) noexcept override;
+    void set_audio_playback_preferences(std::uint32_t buffer, bool sync) override;
+    void set_device_audio_route(bool enabled) noexcept;
     void set_target_fps(std::uint32_t target_fps) noexcept override;
     [[nodiscard]] std::uint32_t target_fps() const noexcept override;
     void set_decoder_preference(media::DecoderPreference preference) noexcept override;
@@ -318,6 +324,7 @@ private:
     mutable std::mutex mutex_;
     Snapshot snapshot_;
     std::shared_ptr<const media::DecodedFrame> latest_frame_;
+    PreviewAudioSync preview_audio_sync_;
     std::jthread worker_;
     mutable std::mutex active_usb_mutex_;
     std::function<void()> active_usb_cancel_;
@@ -333,6 +340,9 @@ private:
     std::atomic_uint32_t target_fps_{60};
     std::atomic_bool play_audio_{true};
     std::atomic<float> audio_volume_{1.0F};
+    std::atomic_bool device_audio_route_{};
+    std::atomic_bool sync_audio_preview_{};
+    std::uint32_t audio_buffer_{};
     // Sustained black decoded video is the observable signature we can expose
     // for iOS protected-content capture restrictions. Audio may be absent too;
     // keep the capture session alive and let the UI explain the limitation.

@@ -24,7 +24,7 @@ enum class SessionState {
 struct SessionOptions {
     // DisplaySize describes the receiver, not a guaranteed encoder size.
     // The ordinary non-Valeria path can select a reduced AirPlay tier even
-    // for a panel-sized request; native_airplay enables the native iPad path.
+    // for a panel-sized request; native_airplay enables the native presentation path.
     std::uint32_t requested_width{1206};
     std::uint32_t requested_height{2622};
     bool request_native_display_size{false};
@@ -64,8 +64,8 @@ public:
     [[nodiscard]] std::vector<std::vector<std::uint8_t>> begin_display_reconfigure(
         std::uint32_t width, std::uint32_t height);
     [[nodiscard]] std::vector<std::vector<std::uint8_t>> complete_display_reconfigure();
+    [[nodiscard]] std::vector<std::uint8_t> set_audio_route(bool to_pc);
     void set_demo_mode(bool enabled) noexcept { options_.demo_mode = enabled; }
-    void set_native_airplay(bool enabled) noexcept { options_.native_airplay = enabled; }
     void reset();
 
     [[nodiscard]] SessionState state() const noexcept { return state_; }
@@ -83,9 +83,12 @@ public:
 
 private:
     SessionOptions options_;
+    bool release_audio_on_stop_{};
     SessionState state_{SessionState::WaitingForPing};
     std::chrono::steady_clock::time_point epoch_{std::chrono::steady_clock::now()};
     std::uint64_t device_audio_clock_{};
+    bool have_audio_clock_{};
+    bool audio_route_release_pending_{};
     std::uint64_t local_audio_clock_{};
     std::uint64_t device_video_clock_{};
     std::uint64_t local_video_clock_{};

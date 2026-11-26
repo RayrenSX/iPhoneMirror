@@ -2,6 +2,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Interop;
 using IPhoneMirror.App.Models;
 
@@ -32,6 +33,9 @@ internal static partial class Program
         window.UpdateLayout();
         KeyboardCall(preview, "SetPresentationVisible", true);
         var hwnd = (nint)KeyboardField(preview, "WindowHandle");
+        var editorHost = (Panel)window.FindName("MainContentGrid");
+        var localButton = new Button { Width = 32, Height = 24,
+            HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top };
         try
         {
             InteractionAssert(hwnd != 0 && (bool)KeyboardField(preview, "CapturePointerInput"),
@@ -56,14 +60,13 @@ internal static partial class Program
             window.ShowInTaskbar = true;
             window.Title = "iPhoneMirror preview pointer regression";
             ActivateMappingTestWindow(window);
-            // The version badge is passive text. Use a real enabled toolbar
-            // button so this test actually transfers keyboard focus to WPF.
-            var toolbar = ((System.Windows.Controls.Panel)window.FindName("PreviewQuickActions"))
-                .Children.OfType<System.Windows.Controls.Button>().First(button => button.IsVisible && button.IsEnabled);
-            toolbar.Focus();
+            // Use a local focus target that is available in every workspace layout.
+            editorHost.Children.Add(localButton);
+            window.UpdateLayout();
+            InteractionAssert(localButton.Focus(), $"{context}: could not focus the local fixture button.");
             AdvanceDispatcher(TimeSpan.FromMilliseconds(50));
             InteractionAssert((bool)KeyboardCall(window, "IsMainKeyboardEditorFocused")!,
-                $"{context}: toolbar focus must initially keep keyboard input local.");
+                $"{context}: button focus must initially keep keyboard input local.");
             packets.SetLength(0);
             Click();
             var touches = ReadPreviewTouchPackets(packets);
@@ -71,7 +74,7 @@ internal static partial class Program
                 touches.All(p => Math.Abs(p.X - 0.5) < 0.01 && Math.Abs(p.Y - 0.5) < 0.01),
                 $"{context}: a main-preview click must send down/up at the displayed center.");
             InteractionAssert(!(bool)KeyboardCall(window, "IsMainKeyboardEditorFocused")!,
-                $"{context}: clicking the native preview must restore keyboard focus from the toolbar.");
+                $"{context}: clicking the native preview must restore keyboard focus from the local button.");
 
             packets.SetLength(0);
             Send(0x0201, x, y);
@@ -107,6 +110,7 @@ internal static partial class Program
         }
         finally
         {
+            editorHost.Children.Remove(localButton);
             KeyboardCall(preview, "ReleasePointerCapture");
             KeyboardCall(preview, "SetPresentationVisible", false);
             preview.ClearValue(UIElement.VisibilityProperty);

@@ -79,7 +79,7 @@ internal static class AccessibilityAppearance
 
     private const string WindowBrushKeys =
         "BackgroundBrush AppBackgroundBrush AppBackground WindowBackgroundBrush SidebarBrush PanelBrush PanelBackground " +
-        "PanelAltBrush PanelRaisedBrush RaisedBackground CardBrush CardHoverBrush WorkspaceCardBrush WorkspaceCardHoverBrush " +
+        "PanelAltBrush PanelRaisedBrush RaisedBackground CardBrush CardHoverBrush WorkspaceCardBrush WorkspaceSidebarBrush WorkspaceCardHoverBrush " +
         "SelectionBrush WorkspaceItemBrush WorkspaceItemSelectedBrush DialogSurfaceBrush PrimaryActionDisabledBrush ControlFillBrush " +
         "ControlHoverBrush ControlPressedBrush IconButtonHoverBrush IconButtonPressedBrush WarningSurfaceBrush ErrorSurfaceBrush " +
         "SuccessSurfaceBrush InfoSurfaceBrush OverlayBrush MediaOverlayBrush MediaPlayerScrimBrush MediaPlayerControlFillBrush " +

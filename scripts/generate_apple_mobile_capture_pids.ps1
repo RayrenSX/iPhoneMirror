@@ -36,11 +36,12 @@ function Replace-Section([string]$path, [string]$pattern, [string]$replacement,
     if (-not $match.Success) {
         throw "Could not locate the $label PID section in $path"
     }
-    $expanded = $replacement.Replace('{START}', $match.Groups[1].Value).Replace(
+    $newline = if ($text.Contains("`r`n")) { "`r`n" } else { "`n" }
+    $expanded = ($replacement -replace '\r?\n', $newline).Replace('{START}', $match.Groups[1].Value).Replace(
         '{END}', $match.Groups[2].Value)
     $updated = $text.Substring(0, $match.Index) + $expanded +
         $text.Substring($match.Index + $match.Length)
-    [IO.File]::WriteAllText($path, $updated, $encoding)
+    if ($updated -cne $text) { [IO.File]::WriteAllText($path, $updated, $encoding) }
 }
 
 $managedValues = ($productIds | ForEach-Object { "0x$_" }) -join ', '
@@ -51,8 +52,8 @@ Replace-Section $managedPath `
 
 $nativeValues = ($productIds | ForEach-Object { "0x$_" }) -join ', '
 Replace-Section $nativePath `
-    '(?s)(constexpr std::array<std::uint32_t, \d+> mobile_capture_product_ids\{).*?(\};)' `
-    ('{START}' + "`r`n        " + $nativeValues + "{END}") `
+    '(?s)(constexpr std::array<std::uint32_t, )\d+> mobile_capture_product_ids\{.*?(\};)' `
+    ('{START}' + $productIds.Count + '> mobile_capture_product_ids{' + "`n        " + $nativeValues + '{END}') `
     'native'
 
 $cleanupValues = ($productIds | ForEach-Object { "    '$_'" }) -join "`r`n"

@@ -3,7 +3,6 @@ import asyncio
 import sys
 import time
 import unittest
-import uuid
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
@@ -34,6 +33,7 @@ class MediaAuthRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.displays = []
         self.receivers = []
         self.hids = []
+        self.media_stop = self.enterContext(patch('device_hub.stop_display_media', new_callable=AsyncMock))
         self.rsd = SimpleNamespace(service=SimpleNamespace(address=('phone', 1)))
         self.enterContext(patch.object(bridge, 'DisplayService', side_effect=self.display))
         self.enterContext(patch.object(bridge, 'UniversalHIDServiceService', side_effect=self.hid))
@@ -43,9 +43,7 @@ class MediaAuthRecoveryTests(unittest.IsolatedAsyncioTestCase):
 
     def display(self, _):
         display = SimpleNamespace(__aenter__=AsyncMock(), __aexit__=AsyncMock(),
-            start_video_stream=AsyncMock(return_value={'connection': {'options': {
-                'avcMediaStreamOptionClientSessionID': {'uuid': uuid.uuid4()}}}}),
-            stop_media_stream=AsyncMock())
+            start_video_stream=AsyncMock(return_value={}))
         self.displays.append(display)
         return display
 
@@ -80,7 +78,9 @@ class MediaAuthRecoveryTests(unittest.IsolatedAsyncioTestCase):
                     self.fail('authentication without media must not yield HID')
         self.assertEqual([], self.hids)
         receiver.close.assert_called_once()
-        self.displays[0].stop_media_stream.assert_awaited_once()
+        self.media_stop.assert_awaited_once()
+        self.assertEqual(self.media_stop.call_args.args[1],
+                         self.displays[0].start_video_stream.call_args.kwargs['client_session_id'])
         self.displays[0].__aexit__.assert_awaited_once()
 
     async def test_receiver_error_prevents_ping_ready_and_hid_only_repair(self):
@@ -255,6 +255,7 @@ class MediaAuthRecoveryTests(unittest.IsolatedAsyncioTestCase):
                 self.receivers.clear()
                 self.displays.clear()
                 self.hids.clear()
+                self.media_stop.reset_mock()
                 session = bridge.TouchSession(Ipc(), 120, 'test-device')
                 session._remote_pairing_provision_attempted = True
                 session._ddi_uses_cryptex = True
@@ -288,9 +289,10 @@ class MediaAuthRecoveryTests(unittest.IsolatedAsyncioTestCase):
                     await asyncio.wait_for(session._connect_with_lockdown(fresh), 3)
                 session._reconnect_lockdown.assert_awaited_once()
                 self.assertEqual(2, len(self.receivers))
-                for display, receiver in zip(self.displays, self.receivers):
+                self.assertEqual(self.media_stop.await_count, len(self.receivers))
+                for display, receiver, released in zip(self.displays, self.receivers, self.media_stop.await_args_list):
                     display.start_video_stream.assert_awaited_once()
-                    display.stop_media_stream.assert_awaited_once()
+                    self.assertEqual(released.args[1], display.start_video_stream.call_args.kwargs['client_session_id'])
                     display.__aexit__.assert_awaited_once()
                     receiver.close.assert_called_once()
                 self.assertEqual([1, 2], [e['generation'] for e in session.ipc.events if e.get('event') == 'ready'])

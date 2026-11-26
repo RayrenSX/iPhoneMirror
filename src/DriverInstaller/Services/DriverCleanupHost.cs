@@ -13,7 +13,7 @@ internal static class DriverCleanupHost
     private const string ScriptFileName = "remove_selected_iphone_drivers.ps1";
     private const string ScriptResourceName = "DriverCleanup.Script.ps1";
     private const string ScriptHash =
-        "8D31AFAFD0C7F7640F04CED6E7F65894EE67553C0CC709B64222F08BBBB27B89";
+        "64D3ECCF5A07B3CBC9214C476FAD2208668B114E405D73A0251FCBB74BF699FB";
 
     internal static bool IsRequested(IReadOnlyList<string> arguments) =>
         arguments.Count >= 1 && string.Equals(arguments[0], Switch,
@@ -98,6 +98,7 @@ internal static class DriverCleanupHost
             using var process = Process.Start(start)
                 ?? throw new InvalidOperationException("The driver cleanup script did not start.");
             process.WaitForExit();
+            DriverLogger.WriteEvent("cleanup", "script_exited", ("exit_code", process.ExitCode));
             return process.ExitCode;
         }
         catch (Exception error)

@@ -33,22 +33,38 @@ internal static partial class Program
             var path = Path.Combine(directory, "settings.json");
             var store = new UpdateSettingsStore(path);
             store.Save(new UpdateSettings { Language = "en-US", WirelessReceiverName = "Keep my receiver" });
+            SetKeyboardField(app, "_settingsStore", store);
             foreach (var language in new[] { "zh-TW", "zh-HK", "zh-CN", "en-US", "zh-TW" })
             {
-                service.GetMethod("SaveLanguage", flags)!.Invoke(null, [language, path]);
+                KeyboardCall(app, "LoadStartupSettings", true);
+                app.IsUiPreviewMode = false;
+                Check(LocalizationService.SetLanguage(language) && app.UpdateSettings.Language == language,
+                    "The language switch must update the same preferences used by other windows.");
+                app.UpdateSettings.SourceCardFields = SourceCardFields.Name | SourceCardFields.Model;
+                Check(app.SaveUpdateSettings(), "A subsequent source-card save failed.");
+                app.IsUiPreviewMode = true;
                 // Use the production startup loader and a fresh store, as on restart.
-                var restored = (string)service.GetMethod("LoadLanguage", flags)!.Invoke(null, [path])!;
-                ApplyLanguage(restored);
+                KeyboardCall(app, "LoadStartupSettings", true);
+                var restored = app.UpdateSettings.Language;
                 Check(restored == language && LocalizationService.SelectedLanguage == language,
                     "Language preference failed to survive reload: " + language);
                 Check(CultureInfo.CurrentUICulture.Name == language &&
                     LocalizationService.EffectiveCulture.Name == language, "Wrong effective culture");
-                Check(new UpdateSettingsStore(path).Load().WirelessReceiverName == "Keep my receiver",
+                Check(app.UpdateSettings.WirelessReceiverName == "Keep my receiver" &&
+                    app.UpdateSettings.SourceCardFields == (SourceCardFields.Name | SourceCardFields.Model),
                     "Language save overwrote unrelated preferences");
                 Check(app.Resources.MergedDictionaries.Count(d =>
                     d.Source?.OriginalString.Contains("Localization/Strings.") == true) == 1,
                     "Language dictionaries accumulated");
             }
+            SetKeyboardField(app, "_settingsStore", new UpdateSettingsStore(Path.Combine(path, "blocked.json")));
+            app.IsUiPreviewMode = false;
+            Check(!LocalizationService.SetLanguage("ja-JP") && LocalizationService.SelectedLanguage == "zh-TW" &&
+                app.UpdateSettings.Language == "zh-TW" && app.Resources.MergedDictionaries.Count(d =>
+                    d.Source?.OriginalString.Contains("Localization/Strings.") == true) == 1,
+                "A failed language write must leave the previous preference and dictionary active.");
+            app.IsUiPreviewMode = true;
+            SetKeyboardField(app, "_settingsStore", store);
             foreach (var culture in new[] { "zh-TW", "zh-Hant-TW", "ZH-tw" })
                 Check(LocalizationService.ResolveCultureName(culture) == "zh-TW", "Taiwan fallback: " + culture);
             Check(LocalizationService.StartupCultureName == "zh-TW", "Startup fallback ignored Taiwan");
@@ -83,6 +99,7 @@ internal static partial class Program
         }
         finally
         {
+            app.IsUiPreviewMode = true;
             // Only this test's newly created temporary files.
             File.Delete(Path.Combine(directory, "settings.json"));
             if (!Directory.EnumerateFileSystemEntries(directory).Any()) Directory.Delete(directory);

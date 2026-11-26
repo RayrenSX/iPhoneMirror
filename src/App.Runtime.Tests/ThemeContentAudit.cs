@@ -7,6 +7,7 @@ using System.Windows.Data;
 using System.Windows.Media;
 using IPhoneMirror.App;
 using IPhoneMirror.App.Updater;
+using IPhoneMirror.App.Windows;
 using Wpf.Ui.Controls;
 using Button = System.Windows.Controls.Button;
 using TextBlock = System.Windows.Controls.TextBlock;
@@ -38,7 +39,12 @@ internal static partial class Program
             {
                 open.Invoke(owner, [surface]);
                 var dialog = app.Windows.Cast<Window>().Last(w => w != owner);
-                SeedThemeList(Visuals(dialog).OfType<ListBox>().First());
+                if (dialog is BluetoothClientBindingWindow binding)
+                {
+                    binding.Clients.Add(new("theme-device-1", "Ray’s Phone", string.Empty, DateTimeOffset.UnixEpoch));
+                    binding.Clients.Add(new("theme-device-2", "Ray’s Phone", string.Empty, DateTimeOffset.UnixEpoch));
+                }
+                else SeedThemeList(Visuals(dialog).OfType<ListBox>().First());
             }
             var toolbar = (ScrollViewer)owner.FindName("PreviewToolbarScrollViewer");
             var actions = (Panel)owner.FindName("PreviewQuickActions");
@@ -55,7 +61,8 @@ internal static partial class Program
                     foreach (var window in app.Windows.Cast<Window>().Where(w => w.IsVisible))
                     {
                         window.UpdateLayout();
-                        foreach (var list in Visuals(window).OfType<ListBox>().Where(l => l.ItemsSource is ThemeListItem[]))
+                        foreach (var list in Visuals(window).OfType<ListBox>().Where(l => l.ItemsSource is ThemeListItem[] ||
+                                     window is BluetoothClientBindingWindow binding && ReferenceEquals(l.ItemsSource, binding.Clients)))
                         {
                             // Exercise both selected and unselected device cards in the live tree.
                             foreach (var selection in new[] { 0, 1 })
@@ -212,7 +219,18 @@ internal static partial class Program
         public string ModelDisplay => "iPhone 12 mini";
         public string ModelName => ModelDisplay;
         public string OsDisplay => "iOS 18.7.8";
+        public string CardTransport => "USB";
+        public string CardModel => ModelDisplay;
+        public string CardSystemVersion => OsDisplay;
+        public string CardStatusDisplay => DisplayL("DeviceCardStatusReady");
+        public string CardStatusDetail => StatusDisplay;
         public string StatusDisplay => DisplayL("ConnectionReady");
+        public bool IsMirroring => false;
+        public bool IsMediaCast => false;
+        public bool IsTablet => false;
+        public bool HasPendingWiredReadiness => false;
+        public bool HasConnectionError => false;
+        public bool IsDisconnected => false;
         public string ConnectionTimeText => "2026-10-01 12:00";
         public string BindingText => "";
         public string IdentifierText => Udid;

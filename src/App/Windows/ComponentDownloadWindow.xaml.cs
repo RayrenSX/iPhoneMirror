@@ -82,8 +82,13 @@ public partial class ComponentDownloadWindow : IPhoneMirror.UI.Controls.RoundedW
             }
             IsIndeterminate = value.Percentage is null;
             Percentage = value.Percentage ?? 0;
-            StatusText = LocalizationService.Format("DownloadProgressFormat", Percentage);
-            DetailText = $"{value.BytesReceived / 1_000_000.0:F1} / {value.TotalBytes.GetValueOrDefault() / 1_000_000.0:F1} MB   ·   {value.BytesPerSecond / 1_000_000.0:F1} MB/s";
+            StatusText = value.Percentage is { } percentage
+                ? LocalizationService.Format("DownloadProgressFormat", percentage)
+                : LocalizationService.Get("DownloadProgressUnknownSize");
+            var received = $"{value.BytesReceived / 1_000_000.0:F1} MB";
+            var total = value.TotalBytes is > 0
+                ? $" / {value.TotalBytes.Value / 1_000_000.0:F1} MB" : string.Empty;
+            DetailText = $"{received}{total}   ·   {value.BytesPerSecond / 1_000_000.0:F1} MB/s";
         });
         try
         {

@@ -57,6 +57,15 @@
                               Content="{DynamicResource IndependentWindowOpaqueOnHover}"/>
                     <TextBlock Visibility="{DynamicResource InterfaceDescriptionsVisibility}" Text="{DynamicResource IndependentWindowOpaqueOnHoverHelp}" TextWrapping="Wrap" Margin="0,8,0,0"
                                Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"/>
+                    <StackPanel x:Name="ClickThroughSection" Margin="0,14,0,0" Visibility="Collapsed">
+                        <CheckBox x:Name="ClickThroughCheckBox" Checked="OnClickThroughChanged" Unchecked="OnClickThroughChanged"
+                                  AutomationProperties.AutomationId="IndependentWindowClickThrough"
+                                  AutomationProperties.HelpText="{DynamicResource IndependentWindowClickThroughOpacityHint}"
+                                  Content="{DynamicResource IndependentWindowClickThrough}"/>
+                        <TextBlock x:Name="ClickThroughHint" Text="{DynamicResource IndependentWindowClickThroughOpacityHint}"
+                                   TextWrapping="Wrap" Margin="0,6,0,0"
+                                   Foreground="{DynamicResource MutedTextBrush}" FontSize="{DynamicResource CaptionFontSize}"/>
+                    </StackPanel>
                 </StackPanel>
             </ScrollViewer>
         </Border>

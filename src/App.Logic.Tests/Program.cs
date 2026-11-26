@@ -16,6 +16,23 @@ using IPhoneMirror.App.Updater;
 using IPhoneMirror.Shared.Networking;
 using IPhoneMirror.SharedUI.Services;
 
+if (args is ["--explorer-mapping"])
+{
+    ExplorerWebDavLocksTests.Run();
+    await ExplorerWebDavTests.RunAsync();
+    await ExplorerFileStoreTests.Run();
+    await ExplorerRootStoreTests.Run();
+    await ExplorerTreeCacheTests.Run();
+    await ExplorerStorageTests.Run();
+    return;
+}
+
+if (args is ["--paired-device-discovery"])
+{
+    PairedDeviceDiscoveryTests.Run();
+    return;
+}
+
 const string delayedExitEnvironment =
     "IPHONE_MIRROR_TEST_DELAYED_PROCESS_EXIT_MS";
 if (int.TryParse(Environment.GetEnvironmentVariable(delayedExitEnvironment),
@@ -604,13 +621,11 @@ Equal(true,
         StringComparison.Ordinal) &&
     mainWindowSource.Contains("MediaCastVideoHost.Background = Brushes.Black;",
         StringComparison.Ordinal) &&
-    mainWindowSource.Contains("MainPreviewHost.IsFullScreenPresentation = _isFullScreen;",
-        StringComparison.Ordinal) &&
-    nativePreviewHostSource.Contains("internal bool IsFullScreenPresentation",
+    nativePreviewHostSource.Contains("SetPropW(_window, MainPreviewProperty, 1)",
         StringComparison.Ordinal) &&
     nativePreviewHostSource.Contains("SetWindowRgn(_window, 0, true)",
         StringComparison.Ordinal),
-    "full-screen previews use black WPF fill and a rectangular native surface");
+    "full-screen video uses black WPF fill and the native renderer owns the picture outline");
 Equal(true,
     mainWindowSource.Contains("PreviewPanel.ClearValue(MinWidthProperty);",
         StringComparison.Ordinal) &&
@@ -829,9 +844,16 @@ Equal(true, mainViewModelSource.Contains(
 Equal(true, mainViewModelSource.Contains(
         "LocalizationService.Format(\"DriverSafetyWarningFormat\", driverStatus.Diagnostic)", StringComparison.Ordinal) &&
     mainViewModelSource.Contains(
-        "CaptureErrorGuidance.StartFailureMessage(\n                            preflight.ErrorCode",
+        "startFailure = CaptureErrorGuidance.StartFailureNotice(\n                        preflight.ErrorCode, preflight.Message, preflight.FailureKind, preflight.FailureStage)",
         StringComparison.Ordinal),
     "wired preflight records the filter warning while preserving start error propagation");
+var wiredStart = mainViewModelSource[
+    mainViewModelSource.IndexOf("private async Task StartAsync()", StringComparison.Ordinal)..
+    mainViewModelSource.IndexOf("private async Task ApplyVideoSettingsAsync()", StringComparison.Ordinal)];
+var wiredStartRelease = wiredStart.LastIndexOf("EndSessionLifecycleOperation(requestedDevice.Udid);", StringComparison.Ordinal);
+Equal(true, wiredStartRelease >= 0 &&
+    wiredStart.IndexOf("ShowWiredCaptureFailure(title, failure, requestedDevice.Udid", StringComparison.Ordinal) > wiredStartRelease,
+    "wired restart is offered only after the original session start releases lifecycle ownership");
 Equal(true, mainViewModelSource.Contains(
         "? CaptureFailureKind.UsbConnection\n            : CaptureFailureKind.Driver",
         StringComparison.Ordinal),
@@ -1302,9 +1324,14 @@ foreach (var windowPath in themedWindowDirectories.SelectMany(directory =>
         windowText.Contains("WindowStyle=\"None\"", StringComparison.Ordinal) ||
         windowText.StartsWith("<chrome:RoundedWindow", StringComparison.Ordinal),
         $"{windowName} uses custom or Fluent window chrome");
-    Equal(true, windowText.Contains("SubWindowCloseButton", StringComparison.Ordinal),
+    Equal(true, windowDocument.Descendants().Any(element =>
+        element.Name.LocalName == "Button" && (string?)element.Attribute("Style") is
+            "{StaticResource SubWindowCloseButton}" or "{StaticResource NoticeHeaderCloseButton}"),
         $"{windowName} provides the shared custom close button");
-    Equal(true, windowText.Contains("SubWindowTitle", StringComparison.Ordinal),
+    Equal(true, windowDocument.Descendants().Any(element =>
+        element.Name.LocalName is "TextBlock" or "Style" &&
+        ((string?)element.Attribute("Style") is "{StaticResource SubWindowTitle}" or "{StaticResource NoticeHeaderTitle}" ||
+         (string?)element.Attribute("BasedOn") == "{StaticResource NoticeHeaderTitle}")),
         $"{windowName} uses the shared child-window title hierarchy");
     Equal(true,
         windowText.Contains("RoundedWindowContent", StringComparison.Ordinal) ||
@@ -1364,7 +1391,8 @@ foreach (var windowPath in themedWindowDirectories.SelectMany(directory =>
             StringComparison.Ordinal) ||
         windowText.Contains("MouseLeftButtonDown=", StringComparison.Ordinal),
         $"{Path.GetFileName(windowPath)} exposes a draggable title region");
-    if (windowText.Contains("SubWindowCloseButton", StringComparison.Ordinal))
+    if (windowText.Contains("SubWindowCloseButton", StringComparison.Ordinal) ||
+        windowText.Contains("NoticeHeaderCloseButton", StringComparison.Ordinal))
     {
         Equal(true, windowText.Contains("Style=\"{StaticResource ButtonSymbolIcon}\"",
                 StringComparison.Ordinal),
@@ -1640,11 +1668,11 @@ Equal(true,
     "Bluetooth input remains gated until the independent five-second deadline");
 Equal(true,
     statusWindowCode.Contains("CanBeginControlAfterClose", StringComparison.Ordinal) &&
-    statusWindowCode.Contains("if (beginControl) _countdownElapsed?.Invoke();", StringComparison.Ordinal) &&
+    statusWindowCode.Contains("if (_closed && beginControl) _countdownElapsed?.Invoke();", StringComparison.Ordinal) &&
     !File.ReadAllText(Path.Combine(sourceDirectory,
         "App", "Windows", "ReverseControlStatusWindow.xaml"))
         .Contains("ReverseControlDetails", StringComparison.Ordinal),
-    "closing the Bluetooth status window at ready starts control immediately and the diagnostics details expander is removed");
+    "a completed manual close at Bluetooth ready starts control and the diagnostics details expander is removed");
 Equal(true,
     mainWindowCode.Contains("var drained = 0;", StringComparison.Ordinal) &&
     mainWindowCode.Contains("drained++ < 64", StringComparison.Ordinal),
@@ -1766,7 +1794,7 @@ Equal(true,
     "left workspace pages stay exclusive while settings toggles independently");
 Equal(true,
     mainWindowCode.Contains(
-        "_leftWorkspacePanel == LeftWorkspacePanel.Devices)",
+        "_leftWorkspacePanel != LeftWorkspacePanel.None || NeedsSingleWorkspacePanel(openingLeftPanel: true)",
         StringComparison.Ordinal) &&
     mainWindowCode.Contains("workspace_left_panel_auto_opened",
         StringComparison.Ordinal),
@@ -1775,7 +1803,7 @@ Equal(true,
 // WorkspaceRevealTests, rather than requiring a particular animation method name.
 Equal(true,
     mainWindowCode.Contains(
-        "SetWorkspaceSurfaceImmediate(LeftPanelHost, visible: false, width: WorkspaceDeviceWidth)",
+        "SetWorkspaceSurfaceImmediate(LeftPanelHost, visible: false, width: WorkspaceLeftWidth)",
         StringComparison.Ordinal) &&
     mainWindowCode.Contains(
         "SetWorkspaceSurfaceImmediate(ControlPanel, visible: false, width: WorkspaceRightWidth)",
@@ -1975,19 +2003,17 @@ Equal(true,
         StringComparison.Ordinal),
     "only the active independent Bluetooth control window hides the cursor and consumes right-click input");
 Equal(true,
-    nativePreviewHostCode.Contains("MainPreviewInnerCornerRadius = 15.0",
+    nativePreviewHostCode.Contains("CreateWindowExW(WsExNoRedirectionBitmap,",
         StringComparison.Ordinal) &&
-    nativePreviewHostCode.Contains("UpdateWindowRegion();", StringComparison.Ordinal) &&
-    nativePreviewHostCode.Contains("CreateRoundRectRgn(0, 0, width, height,",
-        StringComparison.Ordinal) &&
-    !nativePreviewHostCode.Contains("width + 1, height + 1", StringComparison.Ordinal),
-    "main preview native child uses the same inner radius as the WPF frame without extending past its bounds");
+    nativePreviewHostCode.Contains("CreateRectRgn(bounds.Left, bounds.Top, bounds.Right, bounds.Bottom)",
+        StringComparison.Ordinal),
+    "the main preview composes its alpha while the HWND only clips to ancestor bounds");
 Equal(true,
     mainWindowCode.Contains(
-        "var independentWindowOpen = _secondaryMirrors.IsOpen(_viewModel.SelectedDevice);",
+        "!_secondaryMirrors.IsOpen(_viewModel.SelectedDevice);",
         StringComparison.Ordinal) &&
-    mainWindowCode.Contains(
-        "if (session != 0 && !independentWindowOpen)",
+    File.ReadAllText(Path.Combine(sourceDirectory, "App", "MainWindow.PreviewAppearance.cs")).Contains(
+        "SetDeviceWindowCornerProfile(session, window,",
         StringComparison.Ordinal),
     "switching application mode does not reset the corner profile of an independent preview");
 var noticeWindowCode = File.ReadAllText(Path.Combine(sourceDirectory,
@@ -2598,11 +2624,19 @@ Equal(false, CaptureErrorGuidance.IsUsbConfigurationFailure(
 var compactCaptureGuidance = CaptureErrorGuidance.UserMessage(
     CaptureFailureKind.NoVideoFrames, CaptureFailureStage.VideoStream, -42,
     "decoder failed while opening a 1920x1080 frame");
+Equal(LocalizationService.Get("CaptureActionNativeAirPlayDecoder"),
+    CaptureErrorGuidance.UserMessage(CaptureFailureKind.VideoStream,
+        CaptureFailureStage.Decoder, -2110, "native runtime missing"),
+    "native B missing runtime has specific recovery guidance");
+Equal(LocalizationService.Get("CaptureActionNativeAirPlayDirection"),
+    CaptureErrorGuidance.UserMessage(CaptureFailureKind.VideoStream,
+        CaptureFailureStage.VideoStream, -2111, "native direction interrupted"),
+    "native B direction failure explains retry without a low-resolution fallback");
 Equal(LocalizationService.Get("CaptureActionVideoRetry"), compactCaptureGuidance,
     "capture failure prompts tell the user how to recover");
 Equal(false, compactCaptureGuidance.Contains("-42", StringComparison.Ordinal) ||
     compactCaptureGuidance.Contains("1920x1080", StringComparison.Ordinal),
-    "capture failure prompts do not expose native codes or diagnostic details");
+    "short capture status guidance omits raw native details");
 var deviceSessionClosedStatus = new NativeCaptureStatus
 {
     FailureKind = CaptureFailureKind.SystemClosed,
@@ -4306,7 +4340,7 @@ Equal("ipad-rounded",
 Equal("rectangular",
     DeviceCornerProfileResolver.Resolve(null, 1000, 1000).Id,
     "ambiguous geometry does not clip");
-Equal(0, DeviceCornerProfile.Rectangular.GetGdiRadius(1206),
+Equal(0.0, DeviceCornerProfile.Rectangular.RadiusRatio,
     "rectangular fallback radius");
 
 WirelessRuntimeAvailabilityTests.Run();
@@ -5505,15 +5539,16 @@ try
 {
     var activeDiagnosticPath = Path.Combine(diagnosticDirectory, "test.log");
     await File.WriteAllTextAsync(activeDiagnosticPath, new string('x', 128));
-    var sessionStarted = true;
-    Equal(true, DiagnosticLogger.TryRotateIfNeeded(activeDiagnosticPath,
-            64, 2, ref sessionStarted),
-        "diagnostic logger rotates an oversized active file");
-    Equal(false, sessionStarted,
-        "diagnostic rotation requires a new session header");
-    Equal(true, File.Exists(activeDiagnosticPath + ".1"),
+    DiagnosticLogger.AppendLog(activeDiagnosticPath, "current\n", 64, 2);
+    Equal("current\n", await File.ReadAllTextAsync(activeDiagnosticPath),
+        "diagnostic logger rotates an oversized active file before appending");
+    var diagnosticArchives = Directory.EnumerateFiles(diagnosticDirectory)
+        .Where(path => Path.GetFileName(path).StartsWith("test.log.", StringComparison.Ordinal)).ToArray();
+    Equal(1, diagnosticArchives.Length,
         "diagnostic rotation retains the previous file");
-    var expiredPath = Path.Combine(diagnosticDirectory, "expired.log.1");
+    Equal(new string('x', 128), await File.ReadAllTextAsync(diagnosticArchives[0]),
+        "diagnostic rotation preserves the archived content");
+    var expiredPath = Path.Combine(diagnosticDirectory, "application.log.1");
     await File.WriteAllTextAsync(expiredPath, "expired");
     File.SetLastWriteTimeUtc(expiredPath, DateTime.UtcNow.AddDays(-30));
     var cleanupResult = DiagnosticLogger.CleanupDirectory(diagnosticDirectory,
@@ -5550,6 +5585,26 @@ try
     Equal(1, longLines.Count, "log reader returns one bounded long line");
     Equal(16 * 1024, longLines[0].Length, "log reader bounds individual line memory");
     Equal(true, longLines[0].EndsWith('…'), "bounded log line has a truncation marker");
+    await File.WriteAllTextAsync(logPath, "old incomplete");
+    Sequence(Array.Empty<string>(), await reader.ReadNewLinesAsync(),
+        "log reader buffers a fragment before rotation");
+    var rotatedPath = logPath + ".2";
+    try
+    {
+        await File.AppendAllTextAsync(logPath, " done\nlast old line\n");
+        File.Move(logPath, rotatedPath);
+        await File.WriteAllTextAsync(logPath, "replacement file starts here\n");
+        Sequence(["old incomplete done", "last old line", "replacement file starts here"],
+            await reader.ReadNewLinesAsync(),
+            "log reader drains a rotated archive and starts the larger replacement at the beginning");
+    }
+    finally
+    {
+        File.Delete(rotatedPath);
+    }
+    await File.WriteAllTextAsync(logPath, new string('x', 256 * 1024) + "\nlast full line\n");
+    Sequence(["last full line"], await new NativeLogTailReader(logPath).ReadNewLinesAsync(),
+        "log reader discards a clipped first line when starting at the end of a large file");
 }
 finally
 {
@@ -5742,13 +5797,13 @@ Equal(false, SingleInstanceCoordinator.IsSameExecutable(currentExecutable, null)
 
 var deviceA = new DeviceCaptureState { Udid = "phone-a", Handle = new NativeSessionHandle(11, ownsHandle: false), FrameRate = 60, Volume = 80 };
 var deviceB = new DeviceCaptureState { Udid = "phone-b", Handle = new NativeSessionHandle(22, ownsHandle: false), FrameRate = 30, Volume = 25 };
-Equal(UsbProjectionMode.Demo, deviceA.UsbProjectionMode,
-    "USB projection defaults to recommended demo mode");
+Equal(UsbProjectionMode.AirPlay, deviceA.UsbProjectionMode,
+    "USB projection defaults to recommended native mode");
 deviceA.UsbProjectionMode = UsbProjectionMode.AirPlay;
-deviceB.UsbProjectionMode = UsbProjectionMode.Aisi;
+deviceB.UsbProjectionMode = UsbProjectionMode.Demo;
 Equal(UsbProjectionMode.AirPlay, deviceA.UsbProjectionMode,
     "device A keeps its independent USB projection mode");
-Equal(UsbProjectionMode.Aisi, deviceB.UsbProjectionMode,
+Equal(UsbProjectionMode.Demo, deviceB.UsbProjectionMode,
     "device B keeps its independent USB projection mode");
 Equal(DecoderPreference.Auto, deviceA.DecoderPreference,
     "decoder selection defaults to capability-based automatic fallback");
@@ -6072,6 +6127,7 @@ Equal(WirelessStallRecoveryAction.None,
 ExplorerWebDavLocksTests.Run();
 await ExplorerWebDavTests.RunAsync();
 await ExplorerFileStoreTests.Run();
+await ExplorerRootStoreTests.Run();
 await DiagnosticLogMaintenanceTests.RunAsync();
 Console.WriteLine("App logic tests passed.");
 if (Directory.Exists(diagnosticTestRoot))

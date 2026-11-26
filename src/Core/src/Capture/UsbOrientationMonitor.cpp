@@ -59,6 +59,17 @@ struct UsbOrientationMonitor::Impl {
     std::wstring environment_key, published_address, previous_address;
     bool owns_endpoint{};
 
+    void unpublish_endpoint() noexcept {
+        if (owns_endpoint && !published_address.empty()) {
+            std::array<wchar_t, 128> current{};
+            GetEnvironmentVariableW(environment_key.c_str(), current.data(), static_cast<DWORD>(current.size()));
+            if (current.data() == published_address)
+                SetEnvironmentVariableW(environment_key.c_str(), nullptr);
+        }
+        published_address.clear();
+        owns_endpoint = false;
+    }
+
     void stop() noexcept {
         // Stop clients before releasing the mux owner. In normal application
         // teardown, reverse-control is already stopped before capture ends.
@@ -70,18 +81,11 @@ struct UsbOrientationMonitor::Impl {
         reader.request_stop();
         if (reader.joinable()) reader.join();
         timeline.clear();
-        if (owns_endpoint && !published_address.empty()) {
-            std::array<wchar_t, 128> current{};
-            GetEnvironmentVariableW(environment_key.c_str(), current.data(), static_cast<DWORD>(current.size()));
-            if (current.data() == published_address)
-                SetEnvironmentVariableW(environment_key.c_str(), nullptr);
-        }
         process.reset(); output.reset(); job.reset();
-        published_address.clear();
-        owns_endpoint = false;
     }
     ~Impl() { stop(); }
-    void read(std::stop_token token) noexcept {
+    void read(std::stop_token token, bool required) noexcept {
+        bool reported_orientation = false;
         try {
             std::string pending;
             std::array<char, 2048> bytes{};
@@ -103,8 +107,13 @@ struct UsbOrientationMonitor::Impl {
                     if (!line.empty() && line.back() == '\r') line.pop_back();
                     if (const auto orientation = unsigned_field(line, "IM_ORIENTATION ")) {
                         timeline.observe(*orientation, detail::OrientationTimeline::Clock::now());
+                        if (!required && !reported_orientation && detail::springboard_rotation_turns(*orientation)) {
+                            reported_orientation = true;
+                            logging::write("usb_projection artwork_orientation=springboard mode=demo");
+                        }
                     } else if (line == "IM_ORIENTATION_UNAVAILABLE") {
                         timeline.clear();
+                        if (!required) logging::write("usb_orientation unavailable mode=demo fallback=video");
                     } else if (const auto port = unsigned_field(line, "IM_MUX "); port && *port && *port <= 65535) {
                         published_address = std::format(L"127.0.0.1:{}", *port);
                         owns_endpoint = published_address != previous_address;
@@ -117,6 +126,7 @@ struct UsbOrientationMonitor::Impl {
             }
         } catch (...) {}
         timeline.clear();
+        unpublish_endpoint();
     }
 };
 UsbOrientationMonitor::UsbOrientationMonitor() : impl_(std::make_unique<Impl>()) {}
@@ -125,8 +135,8 @@ void UsbOrientationMonitor::stop() noexcept { impl_->stop(); }
 std::optional<unsigned> UsbOrientationMonitor::at(detail::OrientationTimeline::Clock::time_point time) const {
     return impl_->timeline.at(time);
 }
-bool UsbOrientationMonitor::start(std::string_view serial, std::stop_token stop_token) {
-    if (impl_->process.value) return false;
+bool UsbOrientationMonitor::start(std::string_view serial, std::stop_token stop_token, bool required) {
+    if (impl_->process.value || stop_token.stop_requested()) return false;
     try {
         std::wstring identity;
         for (const auto character : serial) {
@@ -189,7 +199,10 @@ bool UsbOrientationMonitor::start(std::string_view serial, std::stop_token stop_
         }
         ResumeThread(process.hThread);
         child_input.reset(); child_output.reset();
-        impl_->reader = std::jthread([this](std::stop_token token) { impl_->read(token); });
+        impl_->reader = std::jthread([this, required](std::stop_token token) { impl_->read(token, required); });
+        // A reverse-control bridge can borrow the mux endpoint even when
+        // orientation is unavailable. Keep its owner until capture teardown.
+        if (!required) return true;
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(8);
         while (!stop_token.stop_requested() && std::chrono::steady_clock::now() < deadline) {
             if (at(std::chrono::steady_clock::now())) {
@@ -201,7 +214,8 @@ bool UsbOrientationMonitor::start(std::string_view serial, std::stop_token stop_
         }
         impl_->stop();
     } catch (...) { impl_->stop(); }
-    logging::write("usb_orientation unavailable native_airplay=disabled");
+    if (required && !stop_token.stop_requested())
+        logging::write("usb_orientation unavailable native_airplay=required");
     return false;
 }
 }

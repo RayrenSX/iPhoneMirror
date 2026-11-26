@@ -165,6 +165,7 @@ internal sealed partial class DeviceHubPanel
                 if (!process)
                 {
                     Action("PanelOpenApp", "app-launch", true);
+                    Action("PanelCloseApp", "app-close", true);
                     Action("PanelRestartMetalHud", "app-metal-hud-restart", true);
                 }
                 Copy(process ? "PanelCopyPid" : "PanelCopyBundleId");

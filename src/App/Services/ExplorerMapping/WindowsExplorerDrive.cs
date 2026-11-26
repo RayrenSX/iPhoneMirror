@@ -26,6 +26,7 @@ internal sealed class WindowsExplorerDrive : IAsyncDisposable
     private static readonly TimeSpan DisconnectTimeout = TimeSpan.FromSeconds(8);
     private readonly object _disposeGate = new();
     private Task? _disposeTask;
+    private string? _displayName;
 
     private WindowsExplorerDrive(string driveName, string uncPath)
     {
@@ -37,6 +38,24 @@ internal sealed class WindowsExplorerDrive : IAsyncDisposable
     internal string RootPath => DriveName + "\\";
     // Do not write this capability-bearing value to ordinary diagnostic logs.
     internal string UncPath { get; }
+
+    internal void RefreshFolders(string relativePath = "")
+    {
+        DeviceHubExplorerFileStore.ValidatePath(relativePath, allowRoot: true);
+        lock (_disposeGate)
+        {
+            if (_disposeTask is null) SHChangeNotify(0x00001000, 0x0005, RootPath + relativePath.Replace('/', '\\'), null);
+        }
+    }
+
+    internal void RefreshStorage()
+    {
+        lock (_disposeGate)
+            if (_disposeTask is null) SHChangeNotify(0x00002000, 0x0005, RootPath, null);
+    }
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    private static extern void SHChangeNotify(uint eventId, uint flags, string path, string? otherPath);
 
     internal static ExplorerDriveAvailability GetAvailability()
     {
@@ -79,7 +98,7 @@ internal sealed class WindowsExplorerDrive : IAsyncDisposable
     }
 
     internal static async Task<WindowsExplorerDrive> ConnectAsync(Uri endpoint,
-        CancellationToken cancellation = default)
+        CancellationToken cancellation = default, string? displayName = null)
     {
         var uncPath = ToUncPath(endpoint);
         cancellation.ThrowIfCancellationRequested();
@@ -89,7 +108,15 @@ internal sealed class WindowsExplorerDrive : IAsyncDisposable
                 "The Windows WebClient service is unavailable or disabled.");
         // WNet can trigger an installed, manual-start redirector. Do not change
         // service configuration, start it with elevation, or alter its limits.
-        var pending = Task.Run(() => ConnectCore(uncPath, cancellation), CancellationToken.None);
+        var completion = new TaskCompletionSource<WindowsExplorerDrive>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var worker = new Thread(() =>
+        {
+            try { completion.TrySetResult(ConnectCore(uncPath, cancellation, displayName)); }
+            catch (Exception error) { completion.TrySetException(error); }
+        }) { IsBackground = true, Name = "Explorer drive connection" };
+        worker.SetApartmentState(ApartmentState.STA);
+        worker.Start();
+        var pending = completion.Task;
         try { return await pending.WaitAsync(ConnectTimeout, cancellation).ConfigureAwait(false); }
         catch
         {
@@ -110,7 +137,7 @@ internal sealed class WindowsExplorerDrive : IAsyncDisposable
         catch { /* The initial caller already receives the bounded failure. */ }
     }
 
-    private static WindowsExplorerDrive ConnectCore(string uncPath, CancellationToken cancellation)
+    private static WindowsExplorerDrive ConnectCore(string uncPath, CancellationToken cancellation, string? displayName)
     {
         MappingGate.Wait(cancellation);
         try
@@ -136,6 +163,7 @@ internal sealed class WindowsExplorerDrive : IAsyncDisposable
                     // the mapping, rather than reporting only WNet registration.
                     using var entries = Directory.EnumerateFileSystemEntries(mapped.RootPath).GetEnumerator();
                     _ = entries.MoveNext();
+                    if (!string.IsNullOrWhiteSpace(displayName)) mapped.SetDisplayName(displayName);
                     cancellation.ThrowIfCancellationRequested();
                     return mapped;
                 }
@@ -148,6 +176,33 @@ internal sealed class WindowsExplorerDrive : IAsyncDisposable
             throw new IOException("No free drive letter is available between T: and Z:.");
         }
         finally { MappingGate.Release(); }
+    }
+
+    private void SetDisplayName(string name)
+    {
+        object? shell = null, drives = null, item = null;
+        try
+        {
+            var type = Type.GetTypeFromProgID("Shell.Application");
+            if (type is null) return;
+            shell = Activator.CreateInstance(type);
+            if (shell is null) return;
+            drives = ((dynamic)shell).NameSpace(17); // This PC owns the drive label.
+            if (drives is null) return;
+            item = ((dynamic)drives).ParseName(RootPath);
+            if (item is not null)
+            {
+                ((dynamic)item).Name = name;
+                _displayName = name;
+            }
+        }
+        catch (Exception error) when (error is COMException or InvalidOperationException or
+            Microsoft.CSharp.RuntimeBinder.RuntimeBinderException or UnauthorizedAccessException) { }
+        finally
+        {
+            foreach (var value in new[] { item, drives, shell })
+                if (value is not null && Marshal.IsComObject(value)) Marshal.FinalReleaseComObject(value);
+        }
     }
 
     internal static string ToUncPath(Uri endpoint)
@@ -191,7 +246,8 @@ internal sealed class WindowsExplorerDrive : IAsyncDisposable
     private void DisconnectCore()
     {
         var current = QueryRemote(DriveName);
-        if (current.Error == NotConnected || (current.Error == 0 && !SameRemote(current.Remote, UncPath))) return;
+        if (current.Error == NotConnected || (current.Error == 0 && !SameRemote(current.Remote, UncPath)))
+        { ClearDisplayName(); return; }
         if (current.Error != 0) throw new Win32Exception(current.Error, "Windows could not inspect the phone mapping before disconnecting.");
         // WNet's remote-name overload only removes deviceless connections; the
         // redirected letter must be removed by local name. Check its exact
@@ -201,6 +257,20 @@ internal sealed class WindowsExplorerDrive : IAsyncDisposable
         var error = WNetCancelConnection2W(DriveName, 0, true);
         if (error is not (0 or NotConnected))
             throw new Win32Exception(error, "Windows could not disconnect the phone mapping.");
+        ClearDisplayName();
+    }
+
+    private void ClearDisplayName()
+    {
+        if (_displayName is null) return;
+        try
+        {
+            var identity = UncPath.Replace("\\DavWWWRoot\\", "\\", StringComparison.OrdinalIgnoreCase).Replace('\\', '#');
+            using var mount = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Explorer\MountPoints2\" + identity, writable: true);
+            if (mount?.GetValue("_LabelFromReg") is string label && label == _displayName)
+                mount.DeleteValue("_LabelFromReg", throwOnMissingValue: false);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.Security.SecurityException) { }
     }
 
     private static bool SameRemote(string? left, string right) =>

@@ -228,7 +228,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         catch (Exception error)
         {
-            PromptWindow.Inform(this, L("CannotOpenLogs"), error.Message);
+            DriverLogger.WriteException("ui", "open_log_failed", error);
+            PromptWindow.Inform(this, L("CannotOpenLogs"), L("OpenLogFailedBody"), isError: true);
         }
     }
 
@@ -243,8 +244,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         catch (Exception error)
         {
             DriverLogger.WriteException("ui", "driver_cleanup_script_start_failed", error);
-            PromptWindow.Inform(this, L("DriverCleanupTitle"),
-                F("DriverCleanupScriptStartFailed", error.Message));
+            PromptWindow.Inform(this, L("DriverCleanupUnavailableTitle"),
+                L("DriverCleanupScriptStartFailed"), isError: true);
         }
     }
 
@@ -278,7 +279,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 OperationStatus = result.Message;
                 DriverLogger.WriteError("ui", "apple_support_install_failed",
                     ("message", result.Message));
-                ShowFailure(result.Message);
+                ShowFailure(result.Message, result.LogPath);
             }
             else
             {
@@ -320,7 +321,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         OperationStatus = result.Message;
         if (result.RequiresRestart) PromptWindow.Inform(this, L("RequiredAppleInstallTitle"), result.Message);
-        else ShowFailure(result.Message);
+        else ShowFailure(result.Message, result.LogPath);
         return false;
     }
 
@@ -329,7 +330,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async Task InstallAllAsync()
     {
-        if (IsBusy) return;
+        if (IsBusy || SelectedDevice is not { IsPresent: true } selected) return;
         var answer = PromptWindow.Confirm(this,
             L("QuickInstallTitle"), L("QuickInstallBody"), L("StartInstall"));
         if (!answer) return;
@@ -342,65 +343,62 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             if (!await EnsureAppleSupportReadyAsync()) return;
             driverChanged |= !appleSupportWasReady;
             await RefreshCoreAsync();
-            if (!Devices.Any(device => device.IsPresent))
+            if (!Devices.Any(device => device.IsPresent && SameDevice(device, selected)))
             {
                 var action = new RequiredActionWindow(
                     L("ConnectPhoneTitle"), L("ConnectPhoneBody"),
                     L("StartDetection")) { Owner = this }.ShowDialog();
-                if (action != true || !await WaitForAnyDeviceAsync(TimeSpan.FromMinutes(3)))
+                if (action != true) return;
+                if (!await WaitForPresenceAsync(selected.InstanceId, true, TimeSpan.FromMinutes(3)))
                 {
-                    ShowFailure(F("WaitDeviceTimeout", DriverLogger.Path));
+                    ShowFailure(L("SelectedDeviceDisconnected"), DriverLogger.Path);
                     return;
                 }
                 await RefreshCoreAsync();
             }
 
-            var selectedInstanceId = SelectedDevice?.InstanceId;
-            await RefreshCoreAsync();
-            var device = Devices.FirstOrDefault(item =>
-                string.Equals(item.InstanceId, selectedInstanceId, StringComparison.OrdinalIgnoreCase));
+            var device = Devices.FirstOrDefault(item => SameDevice(item, selected));
             if (device is not { IsPresent: true })
             {
-                ShowFailure(F("SelectedDeviceDisconnected", DriverLogger.Path));
+                ShowFailure(L("SelectedDeviceDisconnected"), DriverLogger.Path);
                 return;
             }
 
             if (!device.IsCaptureParent || !device.IsHealthy)
             {
-                var composite = await Task.Run(() =>
+                var captureDriver = await Task.Run(() =>
                 {
-                    using var choices = new ParentDriverNative(device.InstanceId, composite: true);
-                    return choices.Choices.FirstOrDefault();
+                    using var candidates = new ParentDriverNative(device.InstanceId);
+                    return ParentDriverChoice.SelectCaptureDriver(candidates.Choices);
                 }) ??
                     throw new InvalidOperationException(L("ParentCompositeUnavailable"));
-                var consent = ParentDriverWindow.ConfirmChange(this, device, ParentDriverAction.Bind, composite);
+                var consent = ParentDriverWindow.ConfirmChange(this, device, ParentDriverAction.Bind, captureDriver);
                 if (consent is null) return;
                 OperationStatus = F("RepairingParent", device.DisplayName);
                 var parent = await _operations.RunAsync(DriverOperationKind.ParentRepair, device, consent);
                 if (parent.RequiresRestart)
                 {
-                    PromptWindow.Inform(this, L("ParentManagerTitle"), ParentResultText(parent));
+                    PromptWindow.Inform(this, L("ParentManagerTitle"), DriverResultText(parent));
                     return;
                 }
                 if (!parent.Success)
                 {
-                    ShowFailure(parent.Message + "\n" + F("LogSuffix", parent.LogPath));
+                    ShowFailure(parent.Message, parent.LogPath);
                     return;
                 }
                 if (parent.RequiresReplug && !await GuideReconnectAsync(device.InstanceId,
-                        DriverOperationKind.ParentRepair, composite)) return;
+                        DriverOperationKind.ParentRepair, parent.LogPath, captureDriver)) return;
                 await RefreshCoreAsync();
-                device = Devices.FirstOrDefault(item =>
-                    string.Equals(item.InstanceId, selectedInstanceId, StringComparison.OrdinalIgnoreCase));
-                if (device is not { IsHealthy: true } ||
-                    !string.Equals(device.Service, "usbccgp", StringComparison.OrdinalIgnoreCase))
+                device = Devices.FirstOrDefault(item => SameDevice(item, selected));
+                if (device is not { IsHealthy: true, IsCaptureParent: true } ||
+                    !ParentDriverChange.BindingMatches(device, captureDriver))
                 {
-                    ShowFailure(F("ParentRepairFailed", DriverLogger.Path));
+                    ShowFailure(L("ParentRepairFailed"), parent.LogPath);
                     return;
                 }
             }
 
-            if (device.HasLibUsb0Filter && _libUsb.FilesMatch)
+            if (DriverOperationSafety.IsFilterReady(device, _libUsb))
             {
                 OperationStatus = F("DeviceReady", device.DisplayName);
                 return;
@@ -412,17 +410,18 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             OperationStatus = F(kind == DriverOperationKind.Install ? "InstallingDriver" : "RepairingDriver",
                 device.DisplayName);
             var result = await _operations.RunAsync(kind, device);
-            if (!result.Success || result.RequiresRestart)
+            if (result.RequiresRestart)
             {
-                ShowFailure(result.Message + "\n" + F("LogSuffix", result.LogPath));
+                PromptWindow.Inform(this, L("QuickInstallTitle"), DriverResultText(result));
+                return;
+            }
+            if (!result.Success)
+            {
+                ShowFailure(result.Message, result.LogPath);
                 return;
             }
             if (result.RequiresReplug &&
-                !await GuideReconnectAsync(device.InstanceId, kind))
-            {
-                ShowFailure(F("ReconnectTimeout", result.LogPath));
-                return;
-            }
+                !await GuideReconnectAsync(device.InstanceId, kind, result.LogPath)) return;
             driverChanged = true;
             OperationStatus = F("QuickInstallComplete", device.DisplayName);
         }
@@ -430,7 +429,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             DriverLogger.WriteException("ui", "quick_install_failed", error);
             OperationStatus = error.Message;
-            ShowFailure(error.Message + "\n" + F("LogSuffix", DriverLogger.Path));
+            ShowFailure(error.Message, DriverLogger.Path);
         }
         finally
         {
@@ -440,20 +439,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
-    private async Task<bool> WaitForAnyDeviceAsync(TimeSpan timeout)
-    {
-        var deadline = DateTime.UtcNow + timeout;
-        do
-        {
-            var present = await Task.Run(() => _catalog
-                .GetAppleDevices(includeMetadata: false)
-                .Any(device => device.IsPresent));
-            if (present) return true;
-            OperationStatus = L("WaitingForDevice");
-            await Task.Delay(500);
-        } while (DateTime.UtcNow < deadline);
-        return false;
-    }
+    private static bool SameDevice(AppleDeviceRecord candidate, AppleDeviceRecord selected) =>
+        string.Equals(candidate.InstanceId, selected.InstanceId, StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(candidate.Serial, selected.Serial, StringComparison.OrdinalIgnoreCase);
 
     private async void OnInstallClick(object sender, RoutedEventArgs e) =>
         await RunOperationAsync(DriverOperationKind.Install);
@@ -496,22 +484,20 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             if (dialog.ShowDialog() != true || dialog.Consent is null) return;
             OperationStatus = F("RepairingParent", device.DisplayName);
             var result = await _operations.RunAsync(DriverOperationKind.ParentRepair, device, dialog.Consent);
-            status = ParentResultText(result);
-            PromptWindow.Inform(this, L("ParentManagerTitle"), status);
+            status = DriverResultText(result);
+            PromptWindow.Inform(this, L("ParentManagerTitle"), status, isError: !result.Success && !result.RequiresRestart);
             if (result.Success && result.RequiresReplug && !result.RequiresRestart)
             {
-                if (!await GuideReconnectAsync(device.InstanceId, DriverOperationKind.ParentRepair, dialog.Consent.Driver))
-                {
-                    status = L("ReconnectVerificationFailed") + "\n" + ParentResultText(result);
-                    PromptWindow.Inform(this, L("ParentManagerTitle"), status);
-                }
+                if (!await GuideReconnectAsync(device.InstanceId, DriverOperationKind.ParentRepair,
+                        result.LogPath, dialog.Consent.Driver))
+                    status = OperationStatus;
             }
         }
         catch (Exception error)
         {
             DriverLogger.WriteException("ui", "parent_management_failed", error);
             status = error.Message;
-            PromptWindow.Inform(this, L("ParentManagerTitle"), status);
+            PromptWindow.Inform(this, L("ParentManagerTitle"), status, isError: true);
         }
         finally
         {
@@ -526,7 +512,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
-    private static string ParentResultText(DriverOperationResult result) => result.Message +
+    private static string DriverResultText(DriverOperationResult result) => result.Message +
         (string.IsNullOrEmpty(result.BackupPath) ? string.Empty : "\n\n" + F("ParentBackupFormat", result.BackupPath)) +
         (string.IsNullOrEmpty(result.LogPath) ? string.Empty : "\n" + F("LogSuffix", result.LogPath));
 
@@ -534,8 +520,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         var device = SelectedDevice;
         if (device is null || IsBusy) return;
-        if (kind is DriverOperationKind.Install or DriverOperationKind.Repair &&
-            (!device.IsPresent || !AppleSupportReady)) return;
+        if ((kind is DriverOperationKind.Install or DriverOperationKind.Repair) &&
+            (!AppleSupportReady || !DriverOperationSafety.CanApplyCaptureFilter(device, kind))) return;
         if (kind == DriverOperationKind.Uninstall && !device.HasLibUsb0Filter) return;
 
         var verbKey = kind switch
@@ -547,67 +533,37 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var verb = L(verbKey);
         var answer = PromptWindow.Confirm(this,
             F("ConfirmOperation", verb),
-            F("ConfirmOperationBody", verb, device.SelectionText, device.DetailText),
+            F("ConfirmOperationBody", device.SelectionText),
             verb, kind == DriverOperationKind.Uninstall);
         if (!answer) return;
-
-        var targetInstanceId = device.InstanceId;
-        var targetSerial = device.Serial;
 
         var driverChanged = false;
         IsBusy = true;
         try
         {
-            for (var attempt = 0; attempt < 2; attempt++)
+            OperationStatus = F("Operating", verb, device.DisplayName);
+            var result = await _operations.RunAsync(kind, device);
+            if (result.RequiresRestart)
             {
-                OperationStatus = F("Operating", verb, device.DisplayName);
-                var result = await _operations.RunAsync(kind, device);
-                if (!result.Success || result.RequiresRestart)
-                {
-                    var failure = result.Message + (string.IsNullOrWhiteSpace(result.LogPath)
-                        ? string.Empty : "\n" + F("LogSuffix", result.LogPath));
-                    OperationStatus = failure;
-                    DriverLogger.WriteError("ui", "driver_operation_failed",
-                        ("kind", kind), ("attempt", attempt + 1),
-                        ("message", result.Message),
-                        ("operation_log", DriverLogger.DescribePath(result.LogPath)));
-                    if (!ShowFailure(failure)) break;
-                    await RefreshCoreAsync();
-                    device = Devices.FirstOrDefault(candidate =>
-                        string.Equals(candidate.InstanceId, targetInstanceId,
-                            StringComparison.OrdinalIgnoreCase) &&
-                        string.Equals(candidate.Serial, targetSerial,
-                            StringComparison.OrdinalIgnoreCase));
-                    if (device is null ||
-                        kind is DriverOperationKind.Install or DriverOperationKind.Repair &&
-                        (!device.IsPresent || !AppleSupportReady) ||
-                        kind == DriverOperationKind.Uninstall && !device.HasLibUsb0Filter)
-                    {
-                        DriverLogger.WriteWarning("ui", "driver_retry_target_unavailable",
-                            ("kind", kind),
-                            ("device", DriverLogger.DeviceFingerprint(targetSerial)));
-                        OperationStatus = F("SelectedDeviceDisconnected", DriverLogger.Path);
-                        break;
-                    }
-                    continue;
-                }
-
-                if (result.RequiresReplug)
-                {
-                    var reconnected = await GuideReconnectAsync(device.InstanceId, kind);
-                    if (!reconnected)
-                    {
-                        ShowFailure(L("ReplugTimeout"));
-                        break;
-                    }
-                }
-                driverChanged = true;
-                OperationStatus = kind == DriverOperationKind.Uninstall
-                    ? L("DriverUninstalled")
-                    : L("DriverInstalled");
-                await RefreshCoreAsync();
-                break;
+                OperationStatus = DriverResultText(result);
+                PromptWindow.Inform(this, verb, OperationStatus);
+                return;
             }
+            if (!result.Success)
+            {
+                OperationStatus = DriverResultText(result);
+                DriverLogger.WriteError("ui", "driver_operation_failed", ("kind", kind),
+                    ("message", result.Message), ("operation_log", DriverLogger.DescribePath(result.LogPath)));
+                ShowFailure(result.Message, result.LogPath);
+                return;
+            }
+            if (result.RequiresReplug && !await GuideReconnectAsync(device.InstanceId, kind, result.LogPath))
+                return;
+
+            driverChanged = true;
+            OperationStatus = kind == DriverOperationKind.Uninstall
+                ? L("DriverUninstalled")
+                : L("DriverInstalled");
         }
         catch (Exception error)
         {
@@ -634,7 +590,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     }
 
     private async Task<bool> GuideReconnectAsync(string instanceId, DriverOperationKind kind,
-        ParentDriverChoice? expectedDriver = null)
+        string logPath, ParentDriverChoice? expectedDriver = null)
     {
         var present = _catalog.FindExact(instanceId, instanceId[(instanceId.LastIndexOf('\\') + 1)..])
             ?.IsPresent == true;
@@ -644,29 +600,40 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 L("UnplugTitle"), L("UnplugBody"), L("Unplugged"));
             if (!unplug) return false;
             if (!await WaitForPresenceAsync(instanceId, false, TimeSpan.FromMinutes(3)))
-                return false;
+                return ReportReconnectFailure(L("ReconnectTimeout"), logPath);
         }
 
         var reconnect = PromptWindow.Confirm(this,
             L("ReconnectTitle"), L("ReconnectBody"), L("Reconnected"));
         if (!reconnect) return false;
         if (!await WaitForPresenceAsync(instanceId, true, TimeSpan.FromMinutes(3)))
-            return false;
+            return ReportReconnectFailure(L("ReconnectTimeout"), logPath);
 
         var timer = Stopwatch.StartNew();
         do
         {
             var current = await Task.Run(() => _catalog.FindExact(instanceId,
                 instanceId[(instanceId.LastIndexOf('\\') + 1)..]));
-            if (DriverOperationSafety.IsReconnectComplete(current, kind, expectedDriver))
+            if (current is not null && DriverOperationSafety.IsReconnectComplete(current, kind, expectedDriver))
             {
                 await RefreshCoreAsync();
-                return true;
+                var refreshed = Devices.FirstOrDefault(device => SameDevice(device, current));
+                if (refreshed is not null && DriverOperationSafety.IsReconnectComplete(refreshed, kind, expectedDriver) &&
+                    (kind is not (DriverOperationKind.Install or DriverOperationKind.Repair) ||
+                     DriverOperationSafety.IsFilterReady(refreshed, _libUsb)))
+                    return true;
+                return ReportReconnectFailure(L("ReconnectVerificationFailed"), logPath);
             }
             await Task.Delay(500);
         } while (timer.Elapsed < TimeSpan.FromSeconds(20));
         await RefreshCoreAsync();
-        OperationStatus = L("ReconnectVerificationFailed");
+        return ReportReconnectFailure(L("ReconnectVerificationFailed"), logPath);
+    }
+
+    private bool ReportReconnectFailure(string message, string logPath)
+    {
+        OperationStatus = message;
+        ShowFailure(message, logPath);
         return false;
     }
 
@@ -732,8 +699,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             var connected = Devices.Count(device => device.IsPresent);
             var ready = connected > 0 && AppleSupportReady && _libUsb.FilesMatch &&
                         Devices.Where(device => device.IsPresent).All(device =>
-                            device.IsHealthy && string.Equals(device.Service, "usbccgp",
-                                StringComparison.OrdinalIgnoreCase) && device.HasLibUsb0Filter);
+                            DriverOperationSafety.IsFilterReady(device, _libUsb));
             OperationStatus = connected == 0
                 ? L("SimpleNoDevice")
                 : ready
@@ -743,8 +709,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         NotifyCommands();
     }
 
-    private bool ShowFailure(string message) =>
-        new FailureHelpWindow(message) { Owner = this }.ShowDialog() == true;
+    private void ShowFailure(string message, string? logPath = null) =>
+        new FailureHelpWindow(message, string.IsNullOrWhiteSpace(logPath) ? DriverLogger.Path : logPath)
+            { Owner = this }.ShowDialog();
 
     private void NotifyCommands()
     {

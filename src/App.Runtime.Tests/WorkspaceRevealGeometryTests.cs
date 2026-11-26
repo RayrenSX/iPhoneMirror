@@ -92,8 +92,13 @@ internal static partial class Program
         {
             Left(true); Settings(true);
             AuditFixCall(window, "ApplyWorkspacePanelState", false);
+            // Opening both cards can raise MinWidth and resize the HWND.
+            // Finish that resize before sampling the next close transition.
+            AdvanceDispatcher(TimeSpan.FromMilliseconds(100));
             window.UpdateLayout();
             InteractionAssert(Grid.GetRow(settings) == 0 && Grid.GetColumn(settings) == 4, "Settings must stay in the right column.");
+            InteractionAssert(left.IsVisible && settings.IsVisible && left.ActualWidth > 1 && settings.ActualWidth > 1,
+                $"Both sidebars must be open before the close test (left={left.ActualWidth:F1}, settings={settings.ActualWidth:F1}).");
         }
         window.MinWidth = 0; // Exercise the layout used on small/high-DPI work areas.
         window.Height = 700;
@@ -124,8 +129,10 @@ internal static partial class Program
             finally { window.LayoutUpdated -= capture; window.LayoutUpdated -= renderCapture; }
             InteractionAssert(renderedWidths.All(value => value <= outgoingWidth + 1.5),
                 $"Closing sidebar first expanded from its rendered width {outgoingWidth}: {string.Join(",", renderedWidths.Take(12))}.");
-            var intermediate = samples.Where(s => s.Width > 1 && s.Width < (closeSettings ? 361 : 299)).ToArray();
-            InteractionAssert(intermediate.Length > 0, "Stacked close skipped intermediate geometry.");
+            var intermediate = samples.Where(s => s.Width > 1 && s.Width < outgoingWidth - 1).ToArray();
+            InteractionAssert(intermediate.Length > 0,
+                $"At {width} DIP, closing {outgoing.Name} from {outgoingWidth:F1} DIP skipped intermediate geometry. " +
+                $"Observed widths: {string.Join(", ", samples.Select(sample => $"{sample.Width:F1}").Take(12))}.");
             InteractionAssert(samples.All(s => s.Preview >= beforePreview - 1),
                 $"Closing a stacked card squeezed the preview at {width} DIP: {beforePreview:F1} -> {samples.Min(s => s.Preview):F1}.");
             InteractionAssert(intermediate.All(s => s.Row == 0 &&

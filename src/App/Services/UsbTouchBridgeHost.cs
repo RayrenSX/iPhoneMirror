@@ -55,6 +55,9 @@ internal sealed class UsbTouchBridgeHost : IAsyncDisposable
     }
     internal bool SupportsAutomationClipboard => _bridge.SupportsAutomationClipboard;
     internal bool SupportsDeviceHub => _bridge.SupportsDeviceHub;
+    internal bool SupportsTouchDisplayPreview => _bridge.SupportsTouchDisplayPreview;
+    internal Task UpdateTouchDisplayPreviewAsync(uint width, uint height, CancellationToken cancellation) =>
+        _bridge.UpdateTouchDisplayPreviewAsync(width, height, cancellation);
     internal Task<System.Text.Json.JsonElement> DeviceHubAsync(string action, object? arguments,
         Func<bool> current, CancellationToken cancellation) => _bridge.DeviceHubAsync(action, arguments, current, cancellation);
     internal Func<IDisposable>? InputAdmission { set => _bridge.InputAdmission = value; }
@@ -71,7 +74,8 @@ internal sealed class UsbTouchBridgeHost : IAsyncDisposable
     internal event EventHandler<BridgeStatusEventArgs>? StatusChanged;
 
     internal async Task StartAsync(UsbTouchTransport transport, string udid,
-        string bridgePath, CancellationToken cancellationToken = default)
+        string bridgePath, CancellationToken cancellationToken = default,
+        (uint Width, uint Height) previewSize = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(udid);
         long version;
@@ -93,7 +97,7 @@ internal sealed class UsbTouchBridgeHost : IAsyncDisposable
         try
         {
             await _bridge.StartAsync(bridgePath, bridgePath, udid, 120,
-                transport == UsbTouchTransport.Wireless, startup.Token);
+                transport == UsbTouchTransport.Wireless, startup.Token, previewSize);
             if (!string.Equals(_bridge.Udid, udid, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException(LocalizationService.Get("TouchBridgeTargetMismatch"));
             lock (_gate)

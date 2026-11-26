@@ -157,7 +157,8 @@ if(IPHONEMIRROR_BUILD_TESTS)
     add_test(NAME WirelessReceiverProtocolSmoke COMMAND
         iPhoneMirror.WirelessReceiver.ProtocolSmoke
         $<TARGET_FILE:iPhoneMirror.WirelessHost>)
-    set_tests_properties(WirelessReceiverProtocolSmoke PROPERTIES TIMEOUT 35)
+    # This test sequentially starts a receiver for every unique catalog height.
+    set_tests_properties(WirelessReceiverProtocolSmoke PROPERTIES TIMEOUT 90)
     add_test(NAME WirelessReceiverMediaRouteSmoke COMMAND
         iPhoneMirror.WirelessReceiver.ProtocolSmoke
         $<TARGET_FILE:iPhoneMirror.WirelessHost> --media-route)

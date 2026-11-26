@@ -302,6 +302,7 @@ cbuffer ShapeConstants : register(b0) {
     float frameRotation;
     float3 framePadding;
     float4 hiddenSensor;
+    float2 outputOrigin;
 };
 
 float2 rotateBy(float2 uv, float rotation) {
@@ -317,17 +318,16 @@ float2 rotateUv(float2 uv) { return rotateBy(uv, rotationQuarterTurns); }
 float cornerCoverage(float2 pixel) {
     if (cornerEnabled < 0.5) return 1.0;
 
-    // The GUI resolves a device-family visual fit from ProductType. fwidth
-    // creates sub-pixel coverage instead of the binary stair steps produced
-    // by an HRGN fallback.
+    // Estimate pixel coverage in the direction normal to the outline.
     float radius = max(cornerRadius, 1.0);
     float2 halfSize = outputSize * 0.5;
-    float2 corner = max(abs(pixel - halfSize) - (halfSize - radius), 0.0) / radius;
+    float2 inset = abs(pixel - outputOrigin - halfSize) - (halfSize - radius);
+    float2 corner = max(inset, 0.0) / radius;
     float powered = pow(corner.x, cornerExponent) + pow(corner.y, cornerExponent);
     float normalizedDistance = pow(max(powered, 1.0e-8), 1.0 / cornerExponent) - 1.0;
     float distancePixels = normalizedDistance * radius;
-    float antialiasWidth = max(fwidth(distancePixels), 0.75);
-    return 1.0 - smoothstep(-antialiasWidth, antialiasWidth, distancePixels);
+    float coverage = saturate(0.5 - distancePixels / max(fwidth(distancePixels), 0.001));
+    return min(inset.x, inset.y) > 0.0 ? coverage : 1.0;
 }
 
 float4 premultiplyForCorner(float3 rgb, float2 pixel) {
@@ -492,6 +492,8 @@ struct D3D11PreviewRenderer::Impl {
         float frame_rotation{};
         float frame_padding[3]{};
         float hidden_sensor[4]{};
+        float output_origin[2]{};
+        float origin_padding[2]{};
     };
 
     struct ImageAdjustments {
@@ -507,6 +509,7 @@ struct D3D11PreviewRenderer::Impl {
     PreviewTestHooks test_hooks;
 #endif
     std::jthread worker;
+    bool main_preview{};
     bool composition_mode{};
 
     ComPtr<ID3D11Device> device;
@@ -672,13 +675,17 @@ struct D3D11PreviewRenderer::Impl {
 
     void initialize() {
         RECT rect{};
+        main_preview = GetPropW(window, L"iPhoneMirrorMainPreview") != nullptr;
+        const auto previous_dpi = main_preview
+            ? SetThreadDpiAwarenessContext(GetWindowDpiAwarenessContext(window)) : nullptr;
         GetClientRect(window, &rect);
+        if (previous_dpi) (void)SetThreadDpiAwarenessContext(previous_dpi);
         target_width = std::max<LONG>(1, rect.right - rect.left);
         target_height = std::max<LONG>(1, rect.bottom - rect.top);
         const auto window_style = GetWindowLongPtrW(window, GWL_STYLE);
         const auto extended_style = GetWindowLongPtrW(window, GWL_EXSTYLE);
-        composition_mode = (window_style & WS_CHILD) == 0 &&
-            (extended_style & WS_EX_NOREDIRECTIONBITMAP) != 0;
+        composition_mode = (extended_style & WS_EX_NOREDIRECTIONBITMAP) != 0 &&
+            ((window_style & WS_CHILD) == 0 || main_preview);
 
         constexpr D3D_FEATURE_LEVEL levels[] = {
             D3D_FEATURE_LEVEL_11_1,
@@ -1100,11 +1107,18 @@ struct D3D11PreviewRenderer::Impl {
         return result.applied || result.needs_redraw;
     }
 
-    void update_shape_constants(UINT width, UINT height, bool enabled, int rotation = 0,
-        const media::DecodedFrame* frame = nullptr) {
+    void update_shape_constants(float width, float height, bool enabled, int rotation = 0,
+        const media::DecodedFrame* frame = nullptr,
+        const D3D11_VIEWPORT* picture = nullptr) {
         ShapeConstantData values{};
-        values.output_width = static_cast<float>(width);
-        values.output_height = static_cast<float>(height);
+        values.output_width = width;
+        values.output_height = height;
+        if (picture) {
+            values.output_width = picture->Width;
+            values.output_height = picture->Height;
+            values.output_origin[0] = picture->TopLeftX;
+            values.output_origin[1] = picture->TopLeftY;
+        }
         const auto packed_profile = corner_profile.load(std::memory_order_relaxed);
         const auto normalized_radius = std::bit_cast<float>(
             static_cast<std::uint32_t>(packed_profile >> 32U));
@@ -1123,19 +1137,26 @@ struct D3D11PreviewRenderer::Impl {
             values.frame_rotation = static_cast<float>(artwork_rotation);
             if (hide_artwork_sensor) {
                 const auto& sensor = *artwork_sensor;
-                values.hidden_sensor[0] = sensor.left;
-                values.hidden_sensor[1] = sensor.top;
-                values.hidden_sensor[2] = sensor.right;
-                values.hidden_sensor[3] = sensor.bottom;
+                // The detector bounds describe the visible sensor. Include
+                // its faint edge texels and the linear filter's footprint so
+                // the neighboring screen pixels cannot pick up the artwork.
+                // Keep the replacement inside the screen aperture.
+                const auto pad_x = 2.0F / art.width;
+                const auto pad_y = 2.0F / art.height;
+                values.hidden_sensor[0] = std::max(art.screen_x, sensor.left - pad_x);
+                values.hidden_sensor[1] = std::max(art.screen_y, sensor.top - pad_y);
+                values.hidden_sensor[2] = std::min(art.screen_x + art.screen_width, sensor.right + pad_x);
+                values.hidden_sensor[3] = std::min(art.screen_y + art.screen_height, sensor.bottom + pad_y);
             }
         }
         ID3D11ShaderResourceView* artwork_views[] = {device_frame_view.Get(), device_mask_view.Get()};
         context->PSSetShaderResources(3, 2, artwork_views);
         const auto effective_radius = values.phone_frame > 0.5F && normalized_radius == 0.0F
             ? 0.1784F : normalized_radius;
-        values.corner_radius = static_cast<float>(std::min(width, height)) * effective_radius;
+        const auto short_edge = std::min(values.output_width, values.output_height);
+        values.corner_radius = short_edge * effective_radius;
         values.corner_exponent = curve_exponent;
-        values.corner_enabled = enabled && effective_radius > 0.0F ? 1.0F : 0.0F;
+        values.corner_enabled = enabled && values.corner_radius > 0.0F ? 1.0F : 0.0F;
         values.rotation_quarter_turns = static_cast<float>(rotation);
         values.hdr_surface = hdr_surface_active() ? 1.0F : 0.0F;
         {
@@ -1186,11 +1207,7 @@ struct D3D11PreviewRenderer::Impl {
     }
 
     bool rounded_window_enabled() const noexcept {
-        // The main compact preview is a child HWND and therefore cannot use a
-        // transparent DComp swap chain. It still needs the shader's
-        // anti-aliased device curve; the matching HWND region removes only
-        // the fully transparent outer pixels. Full-screen and maximized
-        // surfaces intentionally remain rectangular.
+        if (main_preview) return true;
         const auto packed_profile = corner_profile.load(std::memory_order_relaxed);
         const auto normalized_radius = std::bit_cast<float>(
             static_cast<std::uint32_t>(packed_profile >> 32U));
@@ -1208,7 +1225,7 @@ struct D3D11PreviewRenderer::Impl {
         context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         context->VSSetShader(vertex_shader.Get(), nullptr, 0);
         context->PSSetShader(mask_pixel_shader.Get(), nullptr, 0);
-        update_shape_constants(target_width, target_height, rounded);
+        update_shape_constants(static_cast<float>(target_width), static_cast<float>(target_height), rounded);
         context->Draw(3, 0);
     }
 
@@ -1218,7 +1235,8 @@ struct D3D11PreviewRenderer::Impl {
         constexpr float transparent[] = {0, 0, 0, 0};
         context->OMSetRenderTargets(1, target.GetAddressOf(), nullptr);
         context->ClearRenderTargetView(target.Get(), composition_mode ? transparent : black);
-        if (composition_mode) draw_black_background(rounded_window_enabled());
+        if (composition_mode && !main_preview)
+            draw_black_background(rounded_window_enabled());
         check(swap_chain->Present(1, 0), "Present black frame");
     }
 
@@ -1604,9 +1622,12 @@ struct D3D11PreviewRenderer::Impl {
         auto source_turns = landscape ? 1 : 0;
         hide_artwork_sensor = false;
         if (artwork_active) {
-            if (frame.device_orientation_turns &&
+            if (frame.device_orientation_turns && frame.width != frame.height &&
                 (*frame.device_orientation_turns & 1U) == static_cast<unsigned>(landscape)) {
                 source_turns = static_cast<int>(*frame.device_orientation_turns % 4U);
+                // If telemetry goes away, only new frame evidence may
+                // establish a fallback side for this landscape run.
+                if (frame.wireless_landscape_run != 0) wireless_landscape_orientation = {};
             } else if (landscape && artwork_sensor) {
                 const auto previous_side = wireless_landscape_orientation.confirmed();
                 const auto detected = frame.wireless_landscape_run != 0
@@ -1652,11 +1673,18 @@ struct D3D11PreviewRenderer::Impl {
             static_cast<float>(std::max(target_width, target_height));
         if (horizontal_gap >= 0.0F && horizontal_gap < 1.0F &&
             vertical_gap >= 0.0F && vertical_gap < 1.0F &&
-            aspect_error <= pixel_error_limit) {
+            (main_preview || aspect_error <= pixel_error_limit)) {
             viewport.TopLeftX = 0.0F;
             viewport.TopLeftY = 0.0F;
             viewport.Width = static_cast<float>(target_width);
             viewport.Height = static_cast<float>(target_height);
+        }
+        if (main_preview) {
+            // Align the straight edges and the coverage mask to the same pixels.
+            viewport.Width = std::max(1.0F, std::round(viewport.Width));
+            viewport.Height = std::max(1.0F, std::round(viewport.Height));
+            viewport.TopLeftX = std::floor((target_width - viewport.Width) * 0.5F);
+            viewport.TopLeftY = std::floor((target_height - viewport.Height) * 0.5F);
         }
         viewport.MinDepth = 0;
         viewport.MaxDepth = 1;
@@ -1693,14 +1721,17 @@ struct D3D11PreviewRenderer::Impl {
         constexpr float transparent[] = {0, 0, 0, 0};
         ID3D11ShaderResourceView* empty[] = {nullptr, nullptr, nullptr};
         const auto rounded = rounded_window_enabled();
+        const auto draw_background = composition_mode && !artwork_active && !main_preview;
+        const auto picture = main_preview ? &viewport : nullptr;
         const auto draw_nv12 = [&](const D3D11_VIEWPORT& draw_viewport,
                                    UINT output_width, UINT output_height,
-                                   bool apply_corner, int rotation) {
+                                   bool final_pass, int rotation) {
             context->RSSetViewports(1, &draw_viewport);
             context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
             context->VSSetShader(vertex_shader.Get(), nullptr, 0);
             context->PSSetShader(pixel_shader.Get(), nullptr, 0);
-            update_shape_constants(output_width, output_height, apply_corner, rotation, &frame);
+            update_shape_constants(static_cast<float>(output_width), static_cast<float>(output_height),
+                final_pass && rounded, rotation, &frame, final_pass ? picture : nullptr);
             ID3D11ShaderResourceView* nv12_views[] = {
                 shared_gpu_frame ? shared_gpu_y_view.Get() : y_view.Get(),
                 shared_gpu_frame ? shared_gpu_uv_view.Get() : uv_view.Get()};
@@ -1713,8 +1744,8 @@ struct D3D11PreviewRenderer::Impl {
         if (!use_limited_pass) {
             context->OMSetRenderTargets(1, target.GetAddressOf(), nullptr);
             context->ClearRenderTargetView(target.Get(), composition_mode ? transparent : black);
-            if (composition_mode && !artwork_active) draw_black_background(rounded);
-            draw_nv12(viewport, target_width, target_height, rounded, turns);
+            if (draw_background) draw_black_background(rounded);
+            draw_nv12(viewport, target_width, target_height, true, turns);
         } else {
             ensure_render_texture(limited_width, limited_height);
             context->OMSetRenderTargets(1, render_target.GetAddressOf(), nullptr);
@@ -1732,10 +1763,11 @@ struct D3D11PreviewRenderer::Impl {
             context->OMSetRenderTargets(0, nullptr, nullptr);
             context->OMSetRenderTargets(1, target.GetAddressOf(), nullptr);
             context->ClearRenderTargetView(target.Get(), composition_mode ? transparent : black);
-            if (composition_mode && !artwork_active) draw_black_background(rounded);
+            if (draw_background) draw_black_background(rounded);
             context->RSSetViewports(1, &viewport);
             context->PSSetShader(copy_pixel_shader.Get(), nullptr, 0);
-            update_shape_constants(target_width, target_height, rounded);
+            update_shape_constants(static_cast<float>(target_width), static_cast<float>(target_height),
+                rounded, 0, nullptr, picture);
             ID3D11ShaderResourceView* copy_view = render_view.Get();
             context->PSSetShaderResources(2, 1, &copy_view);
             context->Draw(3, 0);
@@ -1793,6 +1825,10 @@ struct D3D11PreviewRenderer::Impl {
     }
 
     void run(std::stop_token token) noexcept {
+        // A worker otherwise inherits the process default, which can differ
+        // from its HWND's owning thread. DXGI buffers use physical pixels.
+        if (main_preview)
+            (void)SetThreadDpiAwarenessContext(GetWindowDpiAwarenessContext(window));
         logging::write(std::format("d3d_preview wait_mode={}",
             preview_wait.high_resolution() ? "high_resolution_timer" : "Sleep_fallback"));
         while (!token.stop_requested()) {

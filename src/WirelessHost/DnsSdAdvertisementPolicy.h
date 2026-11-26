@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <format>
 #include <ranges>
 #include <string>
 #include <string_view>
@@ -21,9 +22,15 @@ inline std::uint16_t airplay_service_port(std::wstring_view mode,
 // Bit 42 requests explicit H.264/HEVC codec configuration from recent iPhones.
 inline constexpr std::wstring_view MirroringFeatures = L"0x5A7FFEE6,0x400";
 inline constexpr std::wstring_view AvcOnlyMirroringFeatures = L"0x5A7FFEE6,0x0";
-inline std::wstring_view mirroring_features() noexcept {
-    return iphone_mirror_mirror_features_high() == 0U ?
-        AvcOnlyMirroringFeatures : MirroringFeatures;
+inline std::wstring mirroring_features() {
+    auto features = iphone_mirror_mirror_features_low();
+#ifdef _WIN32
+    if (iphone_mirror_diagnostic_mirror_audio_event() == 3 &&
+        iphone_mirror_mirror_diagnostic_enabled(L"IPHONE_MIRROR_DIAGNOSTIC_RAOP_WITHDRAWN"))
+        features &= ~((1U << 9) | (1U << 11) | (15U << 18) | (1U << 30));
+#endif
+    return std::format(L"0x{:X},0x{:X}", features,
+        iphone_mirror_mirror_features_high());
 }
 // Dedicated video receivers must not advertise Screen (bit 7) or the screen
 // multicodec capability (bit 42), otherwise iOS lists them under mirroring.

@@ -75,6 +75,7 @@ struct PipeCapture {
     bool environment_sync_failed{};
     bool runtime_device_id_invalid{};
     std::atomic_uint pauses{}, resumes{}, reconnects{}, geometries{}, disconnects{}, configured_keepalives{};
+    std::atomic_uint audio_discovery_withdrawals{}, audio_discovery_restorations{};
 };
 
 void drain_pipe(HANDLE pipe, PipeCapture& capture) {
@@ -105,8 +106,15 @@ void drain_pipe(HANDLE pipe, PipeCapture& capture) {
         if (header.type != iPhoneMirror::wireless::MessageType::Log) continue;
         const std::string_view log(reinterpret_cast<const char*>(payload.data()),
             payload.size());
+        if (log.find("video_diag event=40") != std::string_view::npos ||
+            log.find("audio_discovery withdraw=") != std::string_view::npos)
+            std::cout << log << '\n';
         if (log.find("protocol_event=mirror_keepalive_configured") != std::string_view::npos)
             ++capture.configured_keepalives;
+        if (log.find("audio_discovery withdraw=true changed=true") != std::string_view::npos)
+            ++capture.audio_discovery_withdrawals;
+        if (log.find("audio_discovery withdraw=false changed=true") != std::string_view::npos)
+            ++capture.audio_discovery_restorations;
         capture.environment_sync_failed = capture.environment_sync_failed ||
             log.find("IPHONE_MIRROR_DLL_ENVIRONMENT_SYNC failed") !=
                 std::string_view::npos;
@@ -291,9 +299,8 @@ SOCKET connect_with_retry(unsigned short port, in_addr address) {
 }
 
 std::vector<std::uint8_t> socket_request(SOCKET socket,
-    std::string_view request) {
+    std::string_view request, DWORD timeout = 5000) {
     if (!send_all(socket, request)) return {};
-    DWORD timeout = 5000;
     setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO,
         reinterpret_cast<const char*>(&timeout), sizeof(timeout));
     std::vector<std::uint8_t> response;
@@ -641,7 +648,8 @@ constexpr std::uint8_t second_setup_plist[] = {
 };
 
 bool probe_media_route(DWORD process_id, unsigned short raop_port,
-    in_addr local_address, PipeCapture& capture) {
+    in_addr local_address, PipeCapture& capture, int event_mode, std::uint64_t initial_features,
+    bool video_only) {
     auto timing_socket = WSASocketW(AF_INET, SOCK_DGRAM, IPPROTO_UDP,
         nullptr, 0, WSA_FLAG_NO_HANDLE_INHERIT);
     if (timing_socket == INVALID_SOCKET) return false;
@@ -688,6 +696,54 @@ bool probe_media_route(DWORD process_id, unsigned short raop_port,
 
     const BinaryPlist response_plist(response_body(setup_two_response));
     const auto root = response_plist.root();
+    if (event_mode != 0) {
+        const BinaryPlist initial_plist(response_body(setup_one_response));
+        const auto initial_root = initial_plist.root();
+        const auto event_port = root ? plist_integer(response_plist, *root, "eventPort") : std::nullopt;
+        bool event_valid = false;
+        if (event_port && *event_port > 0 && *event_port <= 65535 && *event_port != raop_port &&
+            initial_root && plist_integer(initial_plist, *initial_root, "eventPort") == event_port) {
+            const auto event_socket = connect_with_retry(static_cast<unsigned short>(*event_port), local_address);
+            if (event_socket != INVALID_SOCKET) {
+                const auto receive_update = [&](std::uint64_t features, bool audio, int sequence, DWORD timeout) {
+                    const auto update = socket_request(event_socket, {}, timeout);
+                    const BinaryPlist update_plist(response_body(update));
+                    const auto update_root = update_plist.root();
+                    const auto value = update_root ? update_plist.dictionary_value(*update_root, "value") : std::nullopt;
+                    const auto formats = value ? update_plist.dictionary_value(*value, "supportedFormats") : std::nullopt;
+                    const auto audio_fields_absent = (!video_only && features != 0x4001A43F4E6ULL) || (value &&
+                        !update_plist.dictionary_value(*value, "audioFormats") &&
+                        !update_plist.dictionary_value(*value, "audioLatencies"));
+                    return update_root && plist_string(update_plist, *update_root, "type") == "updateInfo" &&
+                        value && plist_integer(update_plist, *value, "features") == features &&
+                        audio_fields_absent &&
+                        formats && plist_integer(update_plist, *formats, "audioStream") == (audio ? 21235712U : 0U) &&
+                        send_all(event_socket, "RTSP/1.0 200 OK\r\nCSeq: " + std::to_string(sequence) +
+                            "\r\nContent-Length: 0\r\n\r\n");
+                };
+                const auto await_discovery_change = [](const std::atomic_uint& count) {
+                    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+                    while (count.load() == 0 && std::chrono::steady_clock::now() < deadline)
+                        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+                    return count.load() == 1;
+                };
+                const auto downgraded_features = event_mode == 3 ? 0x4001A43F4E6ULL : 0x4005A43F4E6ULL;
+                event_valid = event_mode == 1 ?
+                    receive_update(initial_features, false, 0, 5000) :
+                    receive_update(initial_features, true, 0, 5000) &&
+                    receive_update(downgraded_features, false, 1, 18000);
+                if (event_valid && event_mode == 3)
+                    event_valid = await_discovery_change(capture.audio_discovery_withdrawals);
+                closesocket(event_socket);
+                if (event_valid && event_mode == 3)
+                    event_valid = await_discovery_change(capture.audio_discovery_restorations);
+            }
+        }
+        closesocket(control_socket);
+        closesocket(timing_socket);
+        std::cout << "audio event mode=" << event_mode << " negotiation=" << event_valid << '\n';
+        return event_valid && successful_rtsp_response(setup_one_response) && successful_rtsp_response(setup_two_response);
+    }
     const auto streams = root ?
         response_plist.dictionary_value(*root, "streams") : std::nullopt;
     const auto stream = streams ?
@@ -872,7 +928,8 @@ bool probe_media_route(DWORD process_id, unsigned short raop_port,
 bool probe_mode(const std::filesystem::path& host, std::wstring_view mode,
     std::uint32_t features, std::uint64_t full_features,
     std::optional<in_addr> route_address = std::nullopt,
-    std::uint32_t width = 1280, std::uint32_t height = 720, std::uint32_t fps = 30) {
+    std::uint32_t width = 1280, std::uint32_t height = 720, std::uint32_t fps = 30,
+    int event_mode = 0, bool video_only = false) {
     const auto raop_port = free_port(SOCK_STREAM, IPPROTO_TCP);
     auto airplay_port = free_port(SOCK_STREAM, IPPROTO_TCP);
     for (int attempt = 0; airplay_port == raop_port && attempt < 10; ++attempt)
@@ -972,6 +1029,9 @@ bool probe_mode(const std::filesystem::path& host, std::wstring_view mode,
     const auto info_root = info_plist.root();
     const auto info_features = info_root &&
         plist_integer(info_plist, *info_root, "features") == full_features;
+    const auto audio_fields_absent = !video_only || (info_root &&
+        !info_plist.dictionary_value(*info_root, "audioFormats") &&
+        !info_plist.dictionary_value(*info_root, "audioLatencies"));
     const auto info_device = info_root &&
         plist_string(info_plist, *info_root, "deviceID") == device_id &&
         plist_string(info_plist, *info_root, "macAddress") == device_id;
@@ -988,11 +1048,14 @@ bool probe_mode(const std::filesystem::path& host, std::wstring_view mode,
         plist_integer(info_plist, *display, "heightPixels") == height &&
         plist_integer(info_plist, *display, "maxFPS") == fps &&
         plist_integer(info_plist, *display, "refreshRate") == fps;
-    const auto media_route_passed = !route_address ||
-        probe_media_route(process.dwProcessId, raop_port, *route_address, pipe_capture);
+    in_addr loopback{};
+    loopback.s_addr = htonl(INADDR_LOOPBACK);
+    const auto media_route_passed = (!route_address && !event_mode) ||
+        probe_media_route(process.dwProcessId, raop_port, route_address.value_or(loopback), pipe_capture,
+            event_mode, full_features, video_only);
     auto passed = connected && server_status && info_status && server_features &&
         device_valid && info_plist.valid() && info_features && info_device &&
-        info_name && info_display && media_route_passed;
+        info_name && info_display && audio_fields_absent && media_route_passed;
 
     SetEvent(stop_event);
     const auto exited = WaitForSingleObject(process.hProcess, 10000) == WAIT_OBJECT_0;
@@ -1033,7 +1096,14 @@ int wmain(int argc, wchar_t** argv) {
         std::wstring_view(argv[2]) == L"--media-route";
     const auto avc_diagnostic_only = argc == 3 &&
         std::wstring_view(argv[2]) == L"--avc-only";
-    if (argc != 2 && !media_route_only && !avc_diagnostic_only) return 2;
+    const auto no_audio_diagnostic = argc == 3 &&
+        (std::wstring_view(argv[2]) == L"--no-audio" ||
+            std::wstring_view(argv[2]) == L"--no-audio-event" ||
+            std::wstring_view(argv[2]) == L"--video-only-capabilities");
+    const auto hot_audio_event = argc == 3 && std::wstring_view(argv[2]) == L"--hot-audio-event";
+    const auto withdraw_raop_event = argc == 3 && std::wstring_view(argv[2]) == L"--withdraw-raop-event";
+    if (argc != 2 && !media_route_only && !avc_diagnostic_only && !no_audio_diagnostic &&
+        !hot_audio_event && !withdraw_raop_event) return 2;
     WSADATA winsock{};
     if (WSAStartup(MAKEWORD(2, 2), &winsock) != 0) return 2;
     constexpr std::array variables{
@@ -1042,6 +1112,11 @@ int wmain(int argc, wchar_t** argv) {
         L"IPHONE_MIRROR_AIRPLAY_NAME", L"IPHONE_MIRROR_AIRPLAY_DEVICE_ID",
         L"IPHONE_MIRROR_AIRPLAY_PAIRING_SEED", L"IPHONE_MIRROR_AIRPLAY_PUBLIC_KEY",
         L"IPHONE_MIRROR_DIAGNOSTIC_MIRROR_AVC_ONLY",
+        L"IPHONE_MIRROR_DIAGNOSTIC_MIRROR_NO_AUDIO",
+        L"IPHONE_MIRROR_DIAGNOSTIC_MIRROR_AUDIO_EVENT",
+        L"IPHONE_MIRROR_DIAGNOSTIC_WITHDRAW_RAOP",
+        L"IPHONE_MIRROR_DIAGNOSTIC_RAOP_WITHDRAWN",
+        L"IPHONE_MIRROR_DIAGNOSTIC_VIDEO_ONLY_CAPABILITIES",
     };
     bool environment_clean{true};
     for (const auto* variable : variables) {
@@ -1049,6 +1124,36 @@ int wmain(int argc, wchar_t** argv) {
             GetEnvironmentVariableW(variable, nullptr, 0) == 0 && environment_clean;
     }
     const auto host = std::filesystem::absolute(argv[1]);
+    if (hot_audio_event || withdraw_raop_event) {
+        const auto discovery_enabled = !withdraw_raop_event ||
+            SetEnvironmentVariableW(L"IPHONE_MIRROR_DIAGNOSTIC_WITHDRAW_RAOP", L"1") != FALSE;
+        const auto passed = environment_clean && discovery_enabled &&
+            SetEnvironmentVariableW(L"IPHONE_MIRROR_DIAGNOSTIC_MIRROR_AUDIO_EVENT", L"1") != FALSE &&
+            probe_mode(host, L"mirror", 0x5A7FFEE6U, 0x4005A7FFEE6ULL,
+                std::nullopt, 1280, 720, 30, withdraw_raop_event ? 3 : 2);
+        WSACleanup();
+        return passed ? 0 : 1;
+    }
+    if (no_audio_diagnostic) {
+        const auto video_only = std::wstring_view(argv[2]) == L"--video-only-capabilities";
+        const auto verify_event = video_only || std::wstring_view(argv[2]) == L"--no-audio-event";
+        const auto event_enabled = !verify_event ||
+            SetEnvironmentVariableW(L"IPHONE_MIRROR_DIAGNOSTIC_MIRROR_AUDIO_EVENT", L"1") != FALSE;
+        const auto enabled = SetEnvironmentVariableW(
+            L"IPHONE_MIRROR_DIAGNOSTIC_MIRROR_NO_AUDIO", L"1") != FALSE;
+        const auto video_only_enabled = !video_only || SetEnvironmentVariableW(
+            L"IPHONE_MIRROR_DIAGNOSTIC_VIDEO_ONLY_CAPABILITIES", L"1") != FALSE;
+        const auto passed = environment_clean && event_enabled && enabled && video_only_enabled &&
+            probe_mode(host, L"mirror", 0x5A7FFCE6U, 0x4005A7FFCE6ULL,
+                std::nullopt, 1280, 720, 30, verify_event, video_only) &&
+            probe_mode(host, L"combined", 0x5A7FFCE6U, 0x4005A7FFCE6ULL,
+                std::nullopt, 1280, 720, 30, 0, video_only) &&
+            probe_mode(host, L"media", 0x5A7FFE73U, 0x5A7FFE73ULL);
+        WSACleanup();
+        if (!passed) return 1;
+        std::cout << "Wireless no-audio diagnostic protocol smoke passed; media profile unchanged\n";
+        return 0;
+    }
     if (avc_diagnostic_only) {
         const auto enabled = SetEnvironmentVariableW(
             L"IPHONE_MIRROR_DIAGNOSTIC_MIRROR_AVC_ONLY", L"1") != FALSE;

@@ -221,6 +221,74 @@ class StreamingTests(unittest.IsolatedAsyncioTestCase):
         first.close.assert_awaited_once()
         other.close.assert_awaited_once()
 
+    async def test_wireless_cryptex_mount_reconnects_with_fresh_inventory_without_usb(self):
+        s = self.session()
+        before, early, after = (SimpleNamespace(close=AsyncMock()) for _ in range(3))
+        pending = iter((before, early, after))
+        visited = []
+
+        async def discover(**kwargs):
+            service = next(pending)
+            kwargs['on_verified'](service)
+            return [service]
+
+        @contextlib.asynccontextmanager
+        async def tunnel(service):
+            yield service
+
+        async def connect(service):
+            visited.append(service)
+            if service is before:
+                self.assertFalse(s._session_ready.is_set())
+                rsd = SimpleNamespace(product_version='27.2.1', peer_info={'Services': {}})
+                await s._prepare_wireless_ddi_if_needed(rsd)
+            self.assertTrue(s._wireless_ddi_prepared)
+            if service is early:
+                raise b.BridgePrerequisiteError('touch_surface_unavailable', 'HID still registering')
+            s._session_ready.set()
+
+        with patch.object(b, 'iter_remote_paired_identifiers', return_value=['phone']), \
+             patch.object(b, 'get_remote_pairing_tunnel_services', side_effect=discover) as discovery, \
+             patch.object(b, 'prepare_cryptex_ddi', AsyncMock(return_value='verified')) as mount, \
+             patch.object(b, 'HID_SERVICE_REGISTRATION_RETRY_SECONDS', 0), \
+             patch.object(s, '_prepare_ddi_for_remote_pairing', AsyncMock()) as usb, \
+             patch.object(s, '_bounded_tunnel', tunnel), patch.object(s, '_run_observed_tunnel', connect):
+            await asyncio.wait_for(s._connect_via_remote_pairing(), 2)
+        self.assertEqual([before, early, after], visited)
+        self.assertEqual(3, discovery.await_count)
+        mount.assert_awaited_once()
+        usb.assert_not_awaited()
+        before.close.assert_awaited_once()
+
+    async def test_wireless_upload_timeout_retries_once_on_a_fresh_route(self):
+        s = self.session()
+        endpoints = [SimpleNamespace(close=AsyncMock()) for _ in range(2)]
+        candidates = iter(endpoints)
+
+        async def discover(**kwargs):
+            selected = next(candidates)
+            kwargs['on_verified'](selected)
+            return [selected]
+
+        @contextlib.asynccontextmanager
+        async def tunnel(service):
+            yield service
+
+        error = b.BridgePrerequisiteError('developer_image_upload_timeout', 'Timed out uploading')
+        with patch.object(b, 'iter_remote_paired_identifiers', return_value=['phone']), \
+             patch.object(b, 'get_remote_pairing_tunnel_services', side_effect=discover) as discovery, \
+             patch.object(s, '_bounded_tunnel', tunnel), \
+             patch.object(s, '_run_observed_tunnel', AsyncMock(side_effect=error)) as observed, \
+             patch.object(s, '_prepare_ddi_for_remote_pairing', AsyncMock()) as usb:
+            with self.assertRaises(b.BridgePrerequisiteError) as raised:
+                await asyncio.wait_for(s._connect_via_remote_pairing(), 2)
+        self.assertIs(error, raised.exception)
+        self.assertEqual(2, discovery.await_count)
+        self.assertEqual(endpoints, [call.args[0] for call in observed.await_args_list])
+        usb.assert_not_awaited()
+        for endpoint in endpoints:
+            endpoint.close.assert_awaited_once()
+
     async def test_discovery_and_network_lookup_start_together(self):
         s = self.session()
         network_started, cancelled = asyncio.Event(), asyncio.Event()

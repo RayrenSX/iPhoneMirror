@@ -75,6 +75,7 @@ internal static class ElevatedDriverHost
         bool? serviceExistedBefore = null;
         Mutex? mutex = null;
         var lockTaken = false;
+        var mutationStarted = false;
         try
         {
             if (!IsAdministrator())
@@ -92,14 +93,14 @@ internal static class ElevatedDriverHost
             cancellation.Checkpoint();
 
             var target = ValidateTarget(instanceId, expectedSerial,
-                requirePresent: kind is not DriverOperationKind.Uninstall,
-                allowParentChange: kind is DriverOperationKind.ParentRepair or DriverOperationKind.Uninstall);
+                kind);
             log.WriteEvent("target_validated",
                 ("device", DriverLogger.DescribeDevice(target)));
 
             if (kind == DriverOperationKind.ParentRepair)
             {
                 var consent = ParentDriverConsent.Decode(arguments[5])!;
+                mutationStarted = true;
                 var parentResult = RunParentChange(target, consent, operationId, paths.LogPath, log, cancellation.Checkpoint);
                 WriteResult(paths.ResultPath, parentResult);
                 log.WriteEvent("parent_change_completed", ("success", parentResult.Success),
@@ -125,6 +126,7 @@ internal static class ElevatedDriverHost
                 ("snapshot", DriverLogger.DescribePath(backupPath)));
 
             cancellation.Checkpoint();
+            mutationStarted = true;
             if (kind is DriverOperationKind.Install or DriverOperationKind.Repair)
             {
                 log.WriteEvent("filter_install_start", ("operation_kind", kind));
@@ -174,21 +176,24 @@ internal static class ElevatedDriverHost
         {
             log.WriteException("operation_failed", error,
                 ("elapsed_ms", timer.ElapsedMilliseconds));
-            log.WriteEvent("rollback_start", ("snapshot_entries", snapshot?.Length ?? 0),
-                ("created_system_files", createdSystemFiles.Count),
-                ("replaced_system_files", replacedSystemFiles.Count));
-            var rollbackComplete = kind == DriverOperationKind.ParentRepair
-                ? false
-                : RollBack(snapshot, serviceExistedBefore, createdSystemFiles,
+            string message;
+            if (kind == DriverOperationKind.ParentRepair)
+                message = mutationStarted ? "ParentChangeRecoveryNeeded" : "ParentChangeRejected";
+            else if (!mutationStarted)
+                message = "Driver operation was rejected before any system change. " + error.Message;
+            else
+            {
+                log.WriteEvent("rollback_start", ("snapshot_entries", snapshot?.Length ?? 0),
+                    ("created_system_files", createdSystemFiles.Count),
+                    ("replaced_system_files", replacedSystemFiles.Count));
+                var rollbackComplete = RollBack(snapshot, serviceExistedBefore, createdSystemFiles,
                     replacedSystemFiles, log);
-            log.WriteEvent("rollback_completed", ("complete", rollbackComplete),
-                ("elapsed_ms", timer.ElapsedMilliseconds));
-            var message = kind == DriverOperationKind.ParentRepair
-                ? "ParentChangeRecoveryNeeded"
-                : rollbackComplete
+                log.WriteEvent("rollback_completed", ("complete", rollbackComplete),
+                    ("elapsed_ms", timer.ElapsedMilliseconds));
+                message = rollbackComplete
                     ? "Driver operation failed and all captured state was restored. " + error.Message
-                    : "Driver operation failed and rollback was incomplete. Review the operation log. " +
-                      error.Message;
+                    : "Driver operation failed and rollback was incomplete. Review the operation log. " + error.Message;
+            }
             try
             {
                 WriteResult(paths.ResultPath, new DriverOperationResult(false, false, message,
@@ -208,7 +213,7 @@ internal static class ElevatedDriverHost
     }
 
     private static AppleDeviceRecord ValidateTarget(string instanceId, string expectedSerial,
-        bool requirePresent, bool allowParentChange)
+        DriverOperationKind kind)
     {
         var actualSerial = DriverConstants.NormalizeSerial(
             instanceId[(instanceId.LastIndexOf('\\') + 1)..]);
@@ -218,13 +223,15 @@ internal static class ElevatedDriverHost
 
         var target = new DeviceCatalog().FindExact(instanceId, expectedSerial)
             ?? throw new InvalidOperationException("The selected Apple parent device no longer exists.");
-        if (!string.Equals(target.Service, "usbccgp", StringComparison.OrdinalIgnoreCase) &&
-            !allowParentChange)
+        if ((kind is DriverOperationKind.Install or DriverOperationKind.Repair) &&
+            !DriverOperationSafety.CanApplyCaptureFilter(target, kind))
             throw new InvalidOperationException(
-                $"Unexpected Apple parent service: {target.Service}. No changes were made.");
-        if (requirePresent && !target.IsPresent)
+                $"The selected device is not ready for {kind}. Service={target.Service}, " +
+                $"present={target.IsPresent}, started={target.IsStarted}, problem={target.ProblemCode}, " +
+                $"filter_registered={target.HasLibUsb0Filter}.");
+        if (kind == DriverOperationKind.ParentRepair && !target.IsPresent)
             throw new InvalidOperationException(
-                "The selected Apple device is not connected and healthy.");
+                "The selected Apple device is not connected.");
         return target;
     }
 
@@ -263,22 +270,22 @@ internal static class ElevatedDriverHost
                     target.InstanceId, backup, logPath, reboot);
             }
 
-            ParentDriverNative? TryOpen(bool composite, bool installedOnly)
+            ParentDriverNative? TryOpen(bool installedOnly)
             {
-                try { return new ParentDriverNative(target.InstanceId, composite, installedOnly); }
+                try { return new ParentDriverNative(target.InstanceId, installedOnly); }
                 catch (Exception error) when (error is System.ComponentModel.Win32Exception or IOException or UnauthorizedAccessException)
                 {
                     log.WriteException("parent_candidate_source_failed", error,
-                        ("composite", composite), ("installed_only", installedOnly));
+                        ("installed_only", installedOnly));
                     return null;
                 }
             }
-            using var original = TryOpen(false, true);
-            using var candidates = TryOpen(consent.Driver!.IsComposite, false);
-            var selected = consent.Driver;
-            if (candidates?.Contains(selected) != true && original?.Contains(selected) != true)
-                throw new InvalidOperationException("The selected driver is no longer available for this device.");
+            using var original = TryOpen(installedOnly: true);
+            using var candidates = TryOpen(installedOnly: false);
+            var selected = consent.Driver!;
             var previous = original?.Choices.FirstOrDefault(choice => ParentDriverChange.BindingMatches(target, choice));
+            if (candidates?.Contains(selected) != true && previous?.SameDriver(selected) != true)
+                throw new InvalidOperationException("The selected driver is no longer available for this device.");
             bool Install(ParentDriverChoice choice)
             {
                 log.WriteEvent("parent_binding_start", ("inf", choice.InfPath),
@@ -291,8 +298,10 @@ internal static class ElevatedDriverHost
                     var deadline = DateTime.UtcNow.AddSeconds(20);
                     do
                     {
-                        if (ReadCurrent() is { } current && ParentDriverChange.BindingMatches(current, choice) &&
-                            (ReferenceEquals(choice, previous) || current.IsHealthy)) break;
+                        if (ReadCurrent() is { } current &&
+                            (ReferenceEquals(choice, previous)
+                                ? ParentDriverChange.WasRestored(current, target, choice)
+                                : current.IsHealthy && ParentDriverChange.BindingMatches(current, choice))) break;
                         Thread.Sleep(250);
                     } while (DateTime.UtcNow < deadline);
                 }

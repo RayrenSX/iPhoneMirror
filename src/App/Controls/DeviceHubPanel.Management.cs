@@ -26,6 +26,7 @@ internal sealed partial class DeviceHubPanel
     private readonly HashSet<string> _missingIcons = [];
     private bool _iconsQueued;
     private bool _iconRefreshPending;
+    private (DeviceViewModel Device, HubRow[] Rows, CancellationToken Token)? _pendingIconBatch;
     private static readonly string[] PinyinBoundaries = ["阿", "八", "擦", "大", "额", "发", "嘎", "哈", "几", "卡", "拉", "妈", "拿", "哦", "趴", "七", "然", "撒", "塌", "挖", "西", "丫", "杂"];
     private static readonly CompareInfo PinyinComparison = CultureInfo.GetCultureInfo("zh-CN").CompareInfo;
 
@@ -204,6 +205,18 @@ internal sealed partial class DeviceHubPanel
         await op.Call("launch", new { bundleId = app.Id });
         StatusText.Text = F("PanelLaunched", app.Title);
     }
+    private async Task CloseSelectedAppAsync(Operation op, HubRow? app)
+    {
+        if (app is null || !_ready || Option(AppFilter) == "processes") return;
+        var result = await op.Call("close_app", new { bundleId = app.Id });
+        var status = Text(result, "status");
+        StatusText.Text = status switch
+        {
+            "signal-sent" => F("PanelAppCloseRequested", app.Title),
+            "not-running" => F("PanelAppNotRunning", app.Title),
+            _ => throw new InvalidOperationException($"Unexpected close app status: {status}")
+        };
+    }
     internal Func<Window?, string, bool> ConfirmMetalHudRestart { private get; set; } =
         (owner, body) => owner is not null && AppPromptWindow.ConfirmDestructive(
             L("PanelRestartMetalHud"), body, L("PanelRestartMetalHud"), owner);
@@ -242,78 +255,84 @@ internal sealed partial class DeviceHubPanel
     private static string IconKey(DeviceViewModel device, HubRow app) => device.Udid + ":" + app.Id + ":" + Text(app.Data, "version");
     private void QueueIcons()
     {
-        if (_disposed || !_active || !_ready || _busy || _iconsQueued || _page != 1 || Option(AppFilter) == "processes" || _device is null) return;
-        if (!_iconOperation.IsCompleted) { _iconRefreshPending = true; return; }
+        if (_disposed || !_active || !_ready || _busy || _page != 1 || Option(AppFilter) == "processes" || _device is null) return;
+        if (_iconsQueued) { _iconRefreshPending = true; return; }
         _iconRefreshPending = false;
-        var device = _device; var generation = _generation;
-        _icons?.Dispose(); _icons = CancellationTokenSource.CreateLinkedTokenSource(_context.Token);
+        if (_icons is null || _icons.IsCancellationRequested)
+        {
+            _icons?.Dispose();
+            _icons = CancellationTokenSource.CreateLinkedTokenSource(_context.Token);
+        }
+        var device = _device;
         var token = _icons.Token;
         // Only fetch visible rows. Scrolling schedules another bounded batch.
         _iconsQueued = true;
-        Dispatcher.BeginInvoke(() =>
-        {
-            _iconsQueued = false;
-            if (token.IsCancellationRequested || _busy || generation != _generation) return;
-            var visible = AppsList.Items.Cast<HubRow>().Where(row =>
-                AppsList.ItemContainerGenerator.ContainerFromItem(row) is ListBoxItem item && item.IsVisible &&
-                item.TranslatePoint(new Point(), AppsList).Y is var y && y >= -60 && y < AppsList.ActualHeight).Take(16).ToArray();
-            if (visible.Length == 0) visible = AppsList.Items.Cast<HubRow>().Take(10).ToArray();
-            _iconOperation = FetchIconsAsync(visible);
-            _ = ResumeIconsAsync(_iconOperation);
-        }, DispatcherPriority.Background);
+        _ = Dispatcher.BeginInvoke(() => { _ = LoadVisibleCacheAsync(); }, DispatcherPriority.Background);
 
-        async Task ResumeIconsAsync(Task pending)
+        async Task LoadVisibleCacheAsync()
         {
-            await pending;
-            if (_iconRefreshPending && !_disposed)
-                _ = Dispatcher.BeginInvoke(QueueIcons, DispatcherPriority.Background);
+            try
+            {
+                token.ThrowIfCancellationRequested();
+                if (Option(AppFilter) == "processes") return;
+                _iconRefreshPending = false;
+                var visible = AppsList.Items.Cast<HubRow>().Where(row =>
+                    AppsList.ItemContainerGenerator.ContainerFromItem(row) is ListBoxItem item && item.IsVisible &&
+                    item.TranslatePoint(new Point(), AppsList).Y is var y && y >= -60 && y < AppsList.ActualHeight).Take(16).ToArray();
+                if (visible.Length == 0) visible = AppsList.Items.Cast<HubRow>().Take(10).ToArray();
+
+                await Task.WhenAll(visible.Where(row => row.Icon is null).Select(LoadCachedIconAsync));
+                token.ThrowIfCancellationRequested();
+                if (_iconRefreshPending || Option(AppFilter) == "processes") return;
+
+                _pendingIconBatch = (device, visible.Where(row => row.Icon is null).ToArray(), token);
+                if (_iconOperation.IsCompleted) _iconOperation = FetchPendingIconsAsync();
+            }
+            catch (OperationCanceledException) { }
+            finally
+            {
+                _iconsQueued = false;
+                if (_iconRefreshPending) QueueIcons();
+            }
         }
 
-        async Task FetchIconsAsync(HubRow[] rows)
+        async Task LoadCachedIconAsync(HubRow row)
         {
-            using var concurrency = new SemaphoreSlim(4, 4);
-            using var remote = new SemaphoreSlim(1, 1);
-            await Task.WhenAll(rows.Select(async row =>
-            {
-                var entered = false;
-                try
-                {
-                    await concurrency.WaitAsync(token); entered = true;
-                    await FetchIconAsync(row);
-                }
-                catch (OperationCanceledException) { }
-                finally { if (entered) concurrency.Release(); }
-            }));
+            var key = IconKey(device, row);
+            if (!_iconCache.TryGetValue(key, out var bitmap))
+                bitmap = await TryLoadCachedIconAsync(key, token);
+            token.ThrowIfCancellationRequested();
+            if (bitmap is not null && row.Icon is null) SetIcon(row, key, bitmap);
+        }
+    }
 
-            async Task FetchIconAsync(HubRow row)
+    private async Task FetchPendingIconsAsync()
+    {
+        while (_pendingIconBatch is { } batch)
+        {
+            _pendingIconBatch = null;
+            var (device, rows, token) = batch;
+            foreach (var row in rows)
             {
-                if (token.IsCancellationRequested || _busy || generation != _generation) return;
+                if (_pendingIconBatch is not null || token.IsCancellationRequested || Option(AppFilter) == "processes") break;
                 var key = IconKey(device, row);
-                if (row.Icon is not null || _missingIcons.Contains(key)) return;
+                if (row.Icon is not null || _missingIcons.Contains(key)) continue;
+                if (_iconCache.TryGetValue(key, out var cached))
+                {
+                    SetIcon(row, key, cached);
+                    continue;
+                }
                 try
                 {
-                    var bitmap = await TryLoadCachedIconAsync(key, token);
-                    if (bitmap is null)
-                    {
-                        // The management bridge admits one request at a time.
-                        // Disk reads may overlap; phone requests keep that contract.
-                        await remote.WaitAsync(token);
-                        try
-                        {
-                            var response = await _request(device, "get_app_icon", new { bundleId = row.Id }, token);
-                            token.ThrowIfCancellationRequested();
-                            var encoded = Text(response, "data");
-                            if (encoded.Length > 3 * 1024 * 1024) throw new InvalidDataException("Oversized app icon.");
-                            bitmap = await Task.Run(() => DecodeIcon(Convert.FromBase64String(encoded)), token);
-                        }
-                        finally { remote.Release(); }
-                        await SaveCachedIconAsync(key, bitmap, token);
-                    }
+                    // Only the phone requests share the bridge's single admission slot.
+                    var response = await _request(device, "get_app_icon", new { bundleId = row.Id }, token);
                     token.ThrowIfCancellationRequested();
-                    if (generation != _generation) return;
-                    if (_iconCache.Count >= 256) _iconCache.Remove(_iconCache.Keys.First());
-                    _iconCache[key] = bitmap;
-                    await Dispatcher.InvokeAsync(() => { if (generation == _generation) row.Icon = bitmap; });
+                    var encoded = Text(response, "data");
+                    if (encoded.Length > 3 * 1024 * 1024) throw new InvalidDataException("Oversized app icon.");
+                    var bitmap = await Task.Run(() => DecodeIcon(Convert.FromBase64String(encoded)), token);
+                    token.ThrowIfCancellationRequested();
+                    SetIcon(row, key, bitmap);
+                    await SaveCachedIconAsync(key, bitmap, token);
                 }
                 catch (OperationCanceledException) { }
                 catch { if (!token.IsCancellationRequested) _missingIcons.Add(key); }
@@ -321,18 +340,28 @@ internal sealed partial class DeviceHubPanel
         }
     }
 
-    private async Task<ImageSource?> TryLoadCachedIconAsync(string key, CancellationToken token)
+    private void SetIcon(HubRow row, string key, ImageSource bitmap)
+    {
+        if (_iconCache.Count >= 256 && !_iconCache.ContainsKey(key)) _iconCache.Remove(_iconCache.Keys.First());
+        _iconCache[key] = bitmap;
+        row.Icon = bitmap;
+    }
+
+    private Task<ImageSource?> TryLoadCachedIconAsync(string key, CancellationToken token)
     {
         var path = IconCachePath(key);
-        if (!File.Exists(path)) return null;
-        try
+        return Task.Run<ImageSource?>(() =>
         {
-            var bytes = await File.ReadAllBytesAsync(path, token);
-            if (bytes.Length == 0 || bytes.Length > 512 * 1024) return null;
-            return await Task.Run(() => DecodeIcon(bytes), token);
-        }
-        catch (OperationCanceledException) { throw; }
-        catch { return null; }
+            try
+            {
+                using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
+                if (file.Length == 0 || file.Length > 512 * 1024) return null;
+                var bytes = new byte[(int)file.Length];
+                file.ReadExactly(bytes);
+                return DecodeIcon(bytes);
+            }
+            catch { return null; }
+        }, token);
     }
 
     private async Task SaveCachedIconAsync(string key, ImageSource bitmap, CancellationToken token)
@@ -481,14 +510,8 @@ internal sealed partial class DeviceHubPanel
     {
         if (!_initialized || _disposed || _loadingDocumentScopes) return;
         RenewContext();
-        var generation = _generation;
         FilePath.Text = "/"; _listedFilePath = ""; _fileNext = null; FilesList.ItemsSource = null;
         FilesEmpty.Visibility = Visibility.Collapsed;
-        _busy = true;
-        UpdateConnection();
-        await StopDocumentMappingAsync();
-        if (_disposed || generation != _generation) return;
-        _busy = false;
         UpdateConnection();
         if (_active && _ready) await RefreshAsync();
     }

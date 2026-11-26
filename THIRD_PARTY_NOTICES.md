@@ -1,13 +1,26 @@
 # Third-party notices
 
 This file describes third-party material intentionally included in the source
-tree or standard release payload. It was checked against project version
-`1.8.5-pre4` and unreleased source changes on 2026-11-05. Optional components and
-package contents depend on the build options; use the notices and manifests from
+tree or standard release payload for the local v1.8.5-pre7 build. Optional components
+and package contents depend on the build options. Use the notices and manifests from
 the particular release when inspecting a downloaded package. Each component
 remains under its upstream license.
 The root GNU General Public License v3.0 only applies to original iPhoneMirror
 material and does not replace, narrow or relicense any component listed below.
+
+## IPA signing engine
+
+The optional IPA signing worker includes selected Python modules from
+[iPASide](https://github.com/pwnapplehat/iPASide), revision
+`cd27ac986a2f048a7075f3d15ab8587ae4ac8730`, under the MIT license.
+Copyright (c) 2026 iPASide Contributors. The full license and original file
+hashes are in `tools/ipaside_engine/LICENSE` and `UPSTREAM.json`, and ship in
+`tools/_internal/ipaside_engine/` with the bridge. Local modifications isolate
+and protect cached state with Windows DPAPI, avoid automatic certificate
+revocation, and include nested Watch app provisioning. Its signer documents
+the Tetherless formats it implements in the individual modules. The integration
+uses `srp` (MIT), `requests` (Apache-2.0), `wsproto` (MIT), and the bridge's
+existing cryptography dependencies.
 
 ## Device frame artwork
 

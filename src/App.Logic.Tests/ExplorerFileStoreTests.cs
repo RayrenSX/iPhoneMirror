@@ -310,7 +310,7 @@ internal static class ExplorerFileStoreTests
         errorCode = "FILE_ACCESS_DENIED";
         await Expect<UnauthorizedAccessException>(() => failures.MakeDirectoryAsync("new", default));
         errorCode = "CONTROL_LOCKED";
-        await Expect<IOException>(() => failures.MakeDirectoryAsync("new", default));
+        await Expect<IOException>(() => failures.MakeDirectoryAsync("busy", default));
         Require(attempts == 4, "A device mutation was automatically retried.");
     }
 

@@ -7,7 +7,7 @@ typeof(DirectUsbInputBridge).GetField("_requestedUdid", flags)!.SetValue(bridge,
 var line = typeof(DirectUsbInputBridge).GetMethod("HandleLine", flags)!;
 void Emit(string json) => line.Invoke(bridge, [json]);
 void Assert(bool condition, string label) { if (!condition) throw new Exception(label); Console.WriteLine("PASS " + label); }
-const string ready = """{"event":"ready","udid":"device-test","transport":"usb","rateHz":120,"gateOpen":true,"authMode":"direct"}""";
+const string ready = """{"event":"ready","protocol":2,"udid":"device-test","transport":"usb","rateHz":120,"gateOpen":true,"authMode":"direct"}""";
 Emit(ready); Assert(bridge.IsReady, "initial validated readiness");
 Emit(ready.Replace("device-test", "wrong-device"));
 Assert(!bridge.IsReady && !bridge.GateOpen, "mismatched replacement ready closes stale input gate");

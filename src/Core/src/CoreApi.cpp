@@ -458,6 +458,7 @@ bool valid_image_adjustments(float brightness, float contrast,
 }
 
 bool valid_capture_option_extensions(const iPhoneMirror::CaptureOptions& options) noexcept {
+    // Retired value 2 remains accepted for older callers and maps to native.
     return options.reserved[2] <= 2 && options.reserved[3] <= 2 &&
         options.reserved[4] <= 2 &&
         valid_video_preferences(options.reserved[0], options.reserved[1], 0);
@@ -474,7 +475,7 @@ iPhoneMirror::capture::CapturePreferences preferences_from_options(
         .usb_requested_width = options.reserved[0],
         .usb_requested_height = options.reserved[1],
         .usb_projection_mode = static_cast<iPhoneMirror::capture::UsbProjectionMode>(
-            options.reserved[2]),
+            options.reserved[2] == 2 ? 1U : options.reserved[2]),
         .decoder_preference = static_cast<iPhoneMirror::media::DecoderPreference>(
             options.reserved[3]),
         .color_output_preference = static_cast<iPhoneMirror::media::ColorOutputPreference>(
@@ -1006,8 +1007,14 @@ std::int32_t IM_CALL im_get_environment(iPhoneMirror::EnvironmentInfo* environme
     if (!environment || environment->struct_size != sizeof(iPhoneMirror::EnvironmentInfo)) {
         return fail(iPhoneMirror::Result::InvalidArgument, L"EnvironmentInfo 结构版本不匹配");
     }
-    std::scoped_lock lock(state_mutex);
-    if (!initialized) return fail(iPhoneMirror::Result::NotInitialized, L"核心尚未初始化");
+    std::shared_lock initialization_lock(initialization_mutex);
+    {
+        // Service/PnP/socket queries can take hundreds of milliseconds. UI
+        // receiver-status polling shares state_mutex, so holding it here
+        // stalls the dispatcher even when discovery runs on a worker thread.
+        std::scoped_lock lock(state_mutex);
+        if (!initialized) return fail(iPhoneMirror::Result::NotInitialized, L"核心尚未初始化");
+    }
     try {
         const auto info = device_manager.environment();
         environment->api_version = iPhoneMirror::ApiVersion;
@@ -1870,7 +1877,7 @@ std::int32_t IM_CALL im_session_attach_preview(iPhoneMirror::SessionHandle handl
                 const auto locked = weak.lock();
                 if (!locked) return nullptr;
                 std::shared_lock lock(locked->lifecycle_mutex);
-                return locked->capture ? locked->capture->latest_frame() : nullptr;
+                return locked->capture ? locked->capture->next_render_frame() : nullptr;
             });
         {
             std::shared_lock lifecycle_lock(context->lifecycle_mutex);
@@ -2030,6 +2037,24 @@ std::int32_t IM_CALL im_session_set_audio_volume(iPhoneMirror::SessionHandle han
         return fail(iPhoneMirror::Result::InvalidArgument, L"Session is stopped");
     context->preferences.audio_volume = volume;
     context->capture->set_audio_volume(volume);
+    return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
+}
+
+std::int32_t IM_CALL im_session_set_audio_playback_preferences(
+    iPhoneMirror::SessionHandle handle, std::uint32_t buffer, std::int32_t sync,
+    std::int32_t device_output) {
+    if (buffer > 3 || sync < 0 || sync > 1 || device_output < 0 || device_output > 1)
+        return fail(iPhoneMirror::Result::InvalidArgument, L"Invalid audio playback preferences");
+    auto context = find_multi_session(handle);
+    if (!context) return fail(iPhoneMirror::Result::InvalidArgument, L"Unknown session handle");
+    std::unique_lock lock(context->lifecycle_mutex);
+    if (!context->capture || context->stopped)
+        return fail(iPhoneMirror::Result::InvalidArgument, L"Session is stopped");
+    auto* wired = dynamic_cast<iPhoneMirror::capture::CaptureSession*>(context->capture.get());
+    if (device_output && !wired)
+        return fail(iPhoneMirror::Result::InvalidArgument, L"Device audio output requires a USB capture session");
+    context->capture->set_audio_playback_preferences(buffer, sync != 0);
+    if (wired) wired->set_device_audio_route(device_output != 0);
     return static_cast<std::int32_t>(iPhoneMirror::Result::Ok);
 }
 

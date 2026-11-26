@@ -1,6 +1,6 @@
 # 错误弹窗与确认弹窗目录
 
-> 本表按当前代码实际入口整理。控制类错误统一显示在独立的“反向控制状态”窗口中。
+本表按 v1.8.5-pre7 的界面入口整理。控制类错误显示在独立的「反向控制状态」窗口。排查步骤见[使用指南](USER_GUIDE.md#常见问题)。
 
 ## 反向控制错误
 
@@ -30,7 +30,7 @@
 | 触控认证门关闭 | remote_control_gate_unavailable/closed | 反向控制状态窗口 | 未确认触控认证，反控未启动 | gate 状态 |
 | HID 触控服务缺失 | universal HID service 或 no such service | 反向控制状态窗口 | 保持解锁并信任此电脑后重试 | service inventory |
 | 触控面缺失 | touch_surface_unavailable | 反向控制状态窗口 | CoreDevice 未发布 mainTouchscreen | surface/service 列表 |
-| iOS 路径不支持 | remote_control_unsupported_ios 或 9021 | 反向控制状态窗口 | 重启 iPhone，仍失败时使用蓝牙控制 | 9021/认证路径 |
+| iOS 路径不支持 | remote_control_unsupported_ios | 反向控制状态窗口 | 按实际错误检查设备服务或使用蓝牙控制；单独 9021 不能判定触控不支持 | 认证路径与 mainTouchscreen 验证 |
 | 设备未找到 | apple_device_not_found 或发现失败 | 反向控制状态窗口 | 重新插拔、解锁、信任或先 USB 配对 | UDID/mux/Bonjour |
 | USB mux 断开 | socket broken 或 muxexception | 反向控制状态窗口 | 保持解锁并重新插拔数据线 | mux 异常 |
 | 未知控制错误 | 未匹配稳定错误码 | 反向控制状态窗口 | 查看诊断日志后重试 | 原始异常和错误码 |
@@ -46,6 +46,8 @@
 | 停止失败 | teardown 返回失败 | CaptureStatusNoticeWindow | 会话释放和重新连接建议 |
 | 采集恢复失败 | 采集线程无响应或恢复失败 | CaptureRecoveryWindow | 恢复、停止投屏或重新连接建议 |
 | 受保护内容 | native 层报告 protected content | ProtectedContentNoticeWindow | 当前内容受系统保护，无法捕获 |
+| 推荐模式缺少解码组件 | 视频流错误 -2110 | CaptureStatusNoticeWindow | 修复完整组件，或停止后尝试演示兼容模式 |
+| 推荐模式方向服务异常 | 视频流错误 -2111 | CaptureStatusNoticeWindow | 检查方向辅助服务及设备连接，或停止后尝试演示兼容模式 |
 
 ## 应用与配置错误
 

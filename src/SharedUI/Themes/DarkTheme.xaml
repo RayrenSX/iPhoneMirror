@@ -25,6 +25,7 @@
     <SolidColorBrush x:Key="CardBrush" Color="#A6292929"/>
     <SolidColorBrush x:Key="CardHoverBrush" Color="#C42E2E2E"/>
     <SolidColorBrush x:Key="WorkspaceCardBrush" Color="#00FFFFFF"/>
+    <SolidColorBrush x:Key="WorkspaceSidebarBrush" Color="#12FFFFFF"/>
     <SolidColorBrush x:Key="WorkspaceCardHoverBrush" Color="#14FFFFFF"/>
     <SolidColorBrush x:Key="WorkspaceItemBrush" Color="#00FFFFFF"/>
     <SolidColorBrush x:Key="WorkspaceItemSelectedBrush" Color="#28479EF5"/>
@@ -110,9 +111,11 @@
     <SolidColorBrush x:Key="PreviewMutedTextBrush" Color="#FFB8B8BD"/>
     <SolidColorBrush x:Key="CaptureStartBrush" Color="#FF0A67D0"/>
     <SolidColorBrush x:Key="CaptureStartHoverBrush" Color="#FF0A5FAF"/>
+    <SolidColorBrush x:Key="CaptureStartPressedBrush" Color="#FF084F94"/>
     <SolidColorBrush x:Key="CaptureStartBorderBrush" Color="#FF78BAFF"/>
     <SolidColorBrush x:Key="CaptureStopBrush" Color="#FFC9363E"/>
     <SolidColorBrush x:Key="CaptureStopHoverBrush" Color="#FFB92F38"/>
+    <SolidColorBrush x:Key="CaptureStopPressedBrush" Color="#FFA12730"/>
     <SolidColorBrush x:Key="CaptureStopBorderBrush" Color="#FFFF979C"/>
     <SolidColorBrush x:Key="CaptureActionTextBrush" Color="#FFFFFFFF"/>
 

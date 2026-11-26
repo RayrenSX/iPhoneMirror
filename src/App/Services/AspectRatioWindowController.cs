@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using PixelRect = System.Drawing.Rectangle;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Threading;
@@ -28,10 +29,14 @@ internal sealed class AspectRatioWindowController : IDisposable
     private HwndSource? _source;
     private nint _handle;
     private double _aspectRatio;
+    private double? _interactiveAspectRatio;
+    private PixelRect _boundsBeforeInteraction;
+    private double? _preferredAutomaticArea;
     private bool _disposed;
     private DispatcherOperation? _queuedResize;
     internal bool AutomaticResizeEnabled { get; set; } = true;
     internal bool KeepPositionOnAutomaticResize { get; set; }
+    internal Func<PixelRect, PixelRect, bool, PixelRect>? PlaceAutomaticBounds { get; set; }
 
     internal AspectRatioWindowController(Window window, uint sourceWidth, uint sourceHeight)
     {
@@ -78,6 +83,28 @@ internal sealed class AspectRatioWindowController : IDisposable
     }
 
     internal void Reflow() => QueueResize(fitToWorkArea: false);
+
+    internal void BeginInteractiveResize()
+    {
+        _interactiveAspectRatio ??= _aspectRatio;
+        if (GetWindowRect(_handle, out var bounds)) _boundsBeforeInteraction = ToPixelRect(bounds);
+    }
+
+    internal void EndInteractiveResize()
+    {
+        if (_interactiveAspectRatio is not { } previous) return;
+        _interactiveAspectRatio = null;
+        if (PlaceAutomaticBounds is not null && GetWindowRect(_handle, out var result))
+        {
+            var bounds = ToPixelRect(result);
+            if (bounds.Size != _boundsBeforeInteraction.Size)
+            {
+                GetFrameSize(out var frameWidth, out var frameHeight);
+                _preferredAutomaticArea = ClientArea(bounds, frameWidth, frameHeight, GetDpiScale());
+            }
+        }
+        if (Math.Abs(previous - _aspectRatio) >= 0.00001) Reflow();
+    }
 
     // The native renderer is waiting to present the frame that changed the ratio.
     internal void ApplyPendingResize()
@@ -137,20 +164,26 @@ internal sealed class AspectRatioWindowController : IDisposable
 
     private bool ResizeWindowToAspect(bool fitToWorkArea)
     {
-        if (_disposed || _handle == 0 || !AutomaticResizeEnabled || !_canResize() ||
+        if (_disposed || _handle == 0 || !AutomaticResizeEnabled || _interactiveAspectRatio is not null || !_canResize() ||
             !GetWindowRect(_handle, out var current) || !TryGetWorkArea(out var workArea)) return false;
 
         GetFrameSize(out var frameWidth, out var frameHeight);
-        var workWidth = Math.Max(1, workArea.Right - workArea.Left);
-        var workHeight = Math.Max(1, workArea.Bottom - workArea.Top);
+        var workWidth = Math.Max(1, workArea.Right - workArea.Left - frameWidth);
+        var workHeight = Math.Max(1, workArea.Bottom - workArea.Top - frameHeight);
+        var dpiScale = GetDpiScale();
         double clientWidth;
         double clientHeight;
 
         if (fitToWorkArea)
         {
             clientWidth = workWidth * InitialWorkAreaFraction;
-            clientHeight = clientWidth / _aspectRatio;
             var maxHeight = workHeight * InitialWorkAreaFraction;
+            if (PlaceAutomaticBounds is not null)
+            {
+                clientWidth = Math.Min(workWidth * 0.70, 960 * dpiScale);
+                maxHeight = Math.Min(workHeight * 0.78, 840 * dpiScale);
+            }
+            clientHeight = clientWidth / _aspectRatio;
             if (clientHeight > maxHeight)
             {
                 clientHeight = maxHeight;
@@ -164,8 +197,14 @@ internal sealed class AspectRatioWindowController : IDisposable
             // of unexpectedly making the preview much larger or smaller.
             var currentClientWidth = Math.Max(1, current.Right - current.Left - frameWidth);
             var currentClientHeight = Math.Max(1, current.Bottom - current.Top - frameHeight);
-            var currentArea = (double)currentClientWidth * currentClientHeight;
-            clientHeight = Math.Sqrt(currentArea / _aspectRatio);
+            if (PlaceAutomaticBounds is not null &&
+                Math.Abs(currentClientWidth - currentClientHeight * _aspectRatio) <= Math.Max(1, _aspectRatio) &&
+                current.Left >= workArea.Left && current.Top >= workArea.Top &&
+                current.Right <= workArea.Right && current.Bottom <= workArea.Bottom)
+                return true;
+            var preferredArea = PlaceAutomaticBounds is not null && _preferredAutomaticArea is { } area
+                ? area * dpiScale * dpiScale : (double)currentClientWidth * currentClientHeight;
+            clientHeight = Math.Sqrt(preferredArea / _aspectRatio);
             clientWidth = clientHeight * _aspectRatio;
 
             var scaleDown = Math.Min(1.0, Math.Min(
@@ -175,8 +214,6 @@ internal sealed class AspectRatioWindowController : IDisposable
             clientHeight *= scaleDown;
         }
 
-        var dpi = GetDpiForWindow(_handle);
-        var dpiScale = dpi == 0 ? 1.0 : dpi / 96.0;
         var minClientWidth = Math.Max(1.0, _minWidthDips * dpiScale - frameWidth);
         var minClientHeight = Math.Max(1.0, _minHeightDips * dpiScale - frameHeight);
 
@@ -202,9 +239,29 @@ internal sealed class AspectRatioWindowController : IDisposable
         var top = Math.Clamp(keepPosition ? current.Top : centerY - targetHeight / 2,
             workArea.Top, Math.Max(workArea.Top, workArea.Bottom - targetHeight));
 
-        return SetWindowPos(_handle, 0, left, top, targetWidth, targetHeight,
+        var target = new PixelRect(left, top, targetWidth, targetHeight);
+        if (PlaceAutomaticBounds is { } place)
+            target = place(PixelRect.FromLTRB(workArea.Left, workArea.Top, workArea.Right, workArea.Bottom),
+                target, fitToWorkArea);
+        var applied = target == ToPixelRect(current) ||
+            SetWindowPos(_handle, 0, target.Left, target.Top, target.Width, target.Height,
             SwpNoActivate | SwpNoZOrder);
+        if (fitToWorkArea && applied && PlaceAutomaticBounds is not null)
+            _preferredAutomaticArea = ClientArea(target, frameWidth, frameHeight, dpiScale);
+        return applied;
     }
+
+    private double GetDpiScale()
+    {
+        var dpi = GetDpiForWindow(_handle);
+        return dpi == 0 ? 1.0 : dpi / 96.0;
+    }
+
+    private static PixelRect ToPixelRect(WindowRect bounds) =>
+        PixelRect.FromLTRB(bounds.Left, bounds.Top, bounds.Right, bounds.Bottom);
+
+    private static double ClientArea(PixelRect bounds, int frameWidth, int frameHeight, double dpiScale) =>
+        (double)Math.Max(1, bounds.Width - frameWidth) * Math.Max(1, bounds.Height - frameHeight) / (dpiScale * dpiScale);
 
     private nint WindowProcedure(nint hwnd, int message, nint wParam, nint lParam,
         ref bool handled)
@@ -237,6 +294,7 @@ internal sealed class AspectRatioWindowController : IDisposable
 
     private void ConstrainSizingRectangle(int edge, ref WindowRect rectangle)
     {
+        var aspect = _interactiveAspectRatio ?? _aspectRatio;
         GetFrameSize(out var frameWidth, out var frameHeight);
         var outerWidth = Math.Max(1, rectangle.Right - rectangle.Left);
         var outerHeight = Math.Max(1, rectangle.Bottom - rectangle.Top);
@@ -253,8 +311,8 @@ internal sealed class AspectRatioWindowController : IDisposable
         // proportional height had already grown beyond the monitor. Derive a
         // ratio-compatible maximum from the current work area so the dragged
         // dimension stops when either screen axis is exhausted.
-        var minAspectWidth = Math.Max(minClientWidth, minClientHeight * _aspectRatio);
-        var minAspectHeight = minAspectWidth / _aspectRatio;
+        var minAspectWidth = Math.Max(minClientWidth, minClientHeight * aspect);
+        var minAspectHeight = minAspectWidth / aspect;
         var maxAspectWidth = double.PositiveInfinity;
         if (TryGetWorkArea(out var workArea))
         {
@@ -263,12 +321,12 @@ internal sealed class AspectRatioWindowController : IDisposable
             var maxClientHeight = Math.Max(1.0,
                 workArea.Bottom - workArea.Top - frameHeight);
             maxAspectWidth = Math.Max(minAspectWidth,
-                Math.Min(maxClientWidth, maxClientHeight * _aspectRatio));
+                Math.Min(maxClientWidth, maxClientHeight * aspect));
         }
-        var maxAspectHeight = maxAspectWidth / _aspectRatio;
+        var maxAspectHeight = maxAspectWidth / aspect;
 
-        var heightFromWidth = clientWidth / _aspectRatio;
-        var widthFromHeight = clientHeight * _aspectRatio;
+        var heightFromWidth = clientWidth / aspect;
+        var widthFromHeight = clientHeight * aspect;
         var widthDriven = edge is 1 or 2 ||
             (edge is 4 or 5 or 7 or 8 &&
              Math.Abs(heightFromWidth - clientHeight) / clientHeight <=
@@ -279,12 +337,12 @@ internal sealed class AspectRatioWindowController : IDisposable
         if (widthDriven)
         {
             targetClientWidth = Math.Clamp(clientWidth, minAspectWidth, maxAspectWidth);
-            targetClientHeight = targetClientWidth / _aspectRatio;
+            targetClientHeight = targetClientWidth / aspect;
         }
         else
         {
             targetClientHeight = Math.Clamp(clientHeight, minAspectHeight, maxAspectHeight);
-            targetClientWidth = targetClientHeight * _aspectRatio;
+            targetClientWidth = targetClientHeight * aspect;
         }
 
         var targetOuterWidth = Math.Max(1, (int)Math.Round(targetClientWidth) + frameWidth);

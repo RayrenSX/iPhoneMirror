@@ -66,7 +66,7 @@ internal static partial class Program
         {
             Settle();
             Check(settings.Visibility == (visible ? Visibility.Visible : Visibility.Collapsed), "Wrong final visibility.");
-            Check(Math.Abs(settings.Width - (visible ? 362 : 0)) < 0.01, "Wrong final width.");
+            Check(Math.Abs(settings.Width - (visible ? WorkspaceRevealPanel.DefaultRightContentWidth : 0)) < 0.01, "Wrong final width.");
             Check(settings.Opacity == 1 && !settings.HasAnimatedProperties, "Residual opacity/width clock.");
             Check(((FrameworkElement)window.FindName("DevicePanel")).Opacity == 1 &&
                   ((FrameworkElement)window.FindName("MirroringPanel")).Opacity == 1, "Residual page opacity.");
@@ -80,7 +80,7 @@ internal static partial class Program
         settings.SizeChanged += firstReveal;
         try { Settings(true); Final(true); }
         finally { settings.SizeChanged -= firstReveal; }
-        Check(firstRevealWidths.Any(width => width > 0 && width < 361),
+        Check(firstRevealWidths.Any(width => width > 0 && width < WorkspaceRevealPanel.DefaultRightContentWidth - 1),
             "Expansion skipped its intermediate geometry: " + string.Join(",", firstRevealWidths));
         var stableWidth = content.ActualWidth;
         var sizes = new List<double>();
@@ -102,7 +102,8 @@ internal static partial class Program
             AdvanceDispatcher(TimeSpan.FromMilliseconds(12));
         }
         Settings(true); Left("Devices"); Final(true);
-        Check(left.Visibility == Visibility.Visible && Math.Abs(left.Width - 300) < 0.01, "Concurrent left panel lost state.");
+        Check(left.Visibility == Visibility.Visible && Math.Abs(left.Width - WorkspaceRevealPanel.DefaultLeftContentWidth) < 0.01,
+            "Concurrent left panel lost state.");
 
         Console.WriteLine($"Lifecycle {mode}: theme and language changes.");
         foreach (var language in new[] { "zh-CN", "en-US", "zh-HK", "zh-TW" })

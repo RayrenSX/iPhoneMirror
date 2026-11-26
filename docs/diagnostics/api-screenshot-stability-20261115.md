@@ -47,12 +47,10 @@ Python 相关测试共 183 项通过：mux 流 16、有线恢复 52、反控逻�
 
 交付目录的首次启动抽检在未发截图时遇到 iPad USB 读取失败，随后重试投屏报 12 秒无帧。用户确认期间刚拔过数据线，重新接线后，iPad 投屏和反控均恢复。该次中断单独保留，不计入截图压力测试；不能把它当作截图触发断线的证据。
 
-高频截图阶段交付版的三台设备联合抽检通过。该阶段应用 SHA-256 为 `6D5F23BE9BF765745D18ABD3716E5ACAF9FCED8F64DE5B29FBEBFCEFD31FC7A1`，桥接程序 SHA-256 为 `AC16E505701CC79528F47841C9298563FDE0301508D1CE05DDC097550C5338E1`。桥接完整运行时清单校验通过。原始统计和交付校验信息保留在 `outputs/diagnostics/api-screenshot-delivery-retry/`；其他压力场景统计位于 `outputs/diagnostics/api-screenshot-reassembly/` 和 `outputs/diagnostics/api-screenshot-complete/`。后续交付增加了[自动恢复最后一次完整重试](wired-final-retry-20261115.md)，应用校验值以该阶段的交付记录为准。
+高频截图阶段交付版的三台设备联合抽检通过。该阶段应用 SHA-256 为 `6D5F23BE9BF765745D18ABD3716E5ACAF9FCED8F64DE5B29FBEBFCEFD31FC7A1`，桥接程序 SHA-256 为 `AC16E505701CC79528F47841C9298563FDE0301508D1CE05DDC097550C5338E1`。桥接完整运行时清单校验通过。原始统计和交付校验信息保留在 `outputs/diagnostics/api-screenshot-delivery-retry/`；其他压力场景统计位于 `outputs/diagnostics/api-screenshot-reassembly/` 和 `outputs/diagnostics/api-screenshot-complete/`。后续交付增加了[有线恢复复审](../WIRED_RECOVERY_REAUDIT.md)，应用校验值以该阶段的交付记录为准。
 
 ## 范围
 
 本地覆盖三台设备，不等同于已经复现并验证用户的 10–15 台设备、USB 集线器和长期运行环境。保留诊断和复测脚本，便于在该环境中核对是否还有丢字节、坏包、自动恢复或投屏重连。
 
 当前构建来自本仓库 `main` 的整合工作区，交付目录为 `outputs/iPhoneMirror-main`。测试进程已正常退出，临时截图限额从 30 恢复为原来的 5 次/秒，API 持久配置仍为关闭；只移除了新增的测试 iPad 绑定，保留原有三个绑定及其他现有配置。多设备客户复测时需要按实际请求量调整截图限额，15 台各每秒一次截图需要至少 15 次/秒的预算。
-
-验证期间清理了约 29 GB 历史构建产物，当前 C 盘可用空间约 34 GB。约 355 MB 的重复发布暂存文件删除被自动审批策略拦截，已保留，没有改用其他方式删除。

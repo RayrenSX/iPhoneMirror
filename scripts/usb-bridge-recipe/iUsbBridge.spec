@@ -4,12 +4,16 @@ import sys
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_submodules, collect_data_files, copy_metadata
 
+sys.path.insert(0, str(Path(SPECPATH) / 'src'))
+
 hiddenimports = []
 # Analyse imports from our bridge, not every upstream CLI/service. Collecting
 # all of pymobiledevice3 pulls in screenshot/video tooling (PyAV and Pillow)
 # which the HID bridge does not use. Keep the lazy tunnel/media gate below.
 hiddenimports += collect_submodules('qh3')
 hiddenimports += collect_submodules('srptools')
+hiddenimports += collect_submodules('srp')
+hiddenimports += collect_submodules('ipaside_engine')
 hiddenimports += collect_submodules('construct')
 hiddenimports += collect_submodules('cryptography')
 hiddenimports += collect_submodules('developer_disk_image')
@@ -56,6 +60,9 @@ hiddenimports = existing_modules(hiddenimports)
 
 datas = []
 datas += [(str(Path(SPECPATH) / 'src' / 'device_hub_contract.json'), '.')]
+datas += [(str(Path(SPECPATH) / 'src' / 'ipaside_engine' / 'certs'), 'ipaside_engine/certs')]
+datas += [(str(Path(SPECPATH) / 'src' / 'ipaside_engine' / 'LICENSE'), 'ipaside_engine')]
+datas += [(str(Path(SPECPATH) / 'src' / 'ipaside_engine' / 'UPSTREAM.json'), 'ipaside_engine')]
 datas += collect_data_files('pymobiledevice3')
 datas += collect_data_files('qh3')
 datas += collect_data_files('developer_disk_image')

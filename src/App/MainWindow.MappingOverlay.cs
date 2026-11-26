@@ -8,7 +8,6 @@ public partial class MainWindow
 {
     private readonly Dictionary<nint, KeyboardMappingOverlayWindow> _mappingOverlays = [];
     private MappingPositionPick? _mappingPick;
-    private bool _mappingRestoreSettings;
 
     private List<MappingPreviewSurface> MappingSurfaces()
     {
@@ -23,8 +22,12 @@ public partial class MainWindow
                 _viewModel.AppliedBluetoothPortraitMouseDirection, _viewModel.AppliedBluetoothLandscapeMouseDirection,
                 _viewModel.AppliedBluetoothMouseReverseHorizontal, _viewModel.AppliedBluetoothMouseReverseVertical);
         if (MainPreviewHost.IsVisible && MainPreviewHost.WindowHandle != 0 && _windowSource is not null)
+        {
+            var frame = GetMainPreviewDeviceFrame();
             result.Add(Surface(MainPreviewHost.WindowHandle, _windowSource.Handle,
-                _viewModel.SourceVideoWidth, _viewModel.SourceVideoHeight, 0));
+                _viewModel.SourceVideoWidth, _viewModel.SourceVideoHeight, 0) with
+                { Frame = frame.Frame, FrameRotation = frame.Rotation });
+        }
         var independent = _secondaryMirrors.GetWindowHandle(device.Udid);
         if (independent != 0 && _secondaryMirrors.TryGetControlGeometry(device.Udid, out var width, out var height, out var rotation))
         {
@@ -42,22 +45,25 @@ public partial class MainWindow
         if (surface is null) return Localization.LocalizationService.Get("MappingPickNoPreview");
         EndMappingKeyCapture();
         CancelMappedGesture();
-        _mappingRestoreSettings = _isSettingsPanelVisible;
-        SetSettingsPanelVisible(false);
         _mappingPick = new(entry, surface, result =>
         {
             _mappingPick = null;
-            if (_mappingRestoreSettings && !_mappingClosing) SetSettingsPanelVisible(true);
-            _mappingRestoreSettings = false;
-            if (!_mappingSettings.Enabled) _mappingTimer?.Stop();
+            if (!_mappingSettings.HasActiveMappings) _mappingTimer?.Stop();
             if (!_mappingClosing) completed(result);
             RefreshMappingStatus();
             RefreshMappingOverlays();
         });
         _mappingTimer?.Start();
         RefreshMappingOverlays();
-        if (_mappingPick is not null && _mappingOverlays.TryGetValue(surface.Window, out var overlay))
-            overlay.BeginPick(_mappingPick);
+        if (_mappingPick is { } pick)
+        {
+            if (!_mappingOverlays.TryGetValue(surface.Window, out var overlay) || !overlay.IsVisible)
+            {
+                pick.Completed(null);
+                return Localization.LocalizationService.Get("MappingPickNoPreview");
+            }
+            overlay.BeginPick(pick);
+        }
         RefreshMappingStatus();
         return null;
     }
@@ -72,7 +78,7 @@ public partial class MainWindow
 
     private void RefreshMappingOverlays()
     {
-        var surfaces = _mappingSettings.Enabled || _mappingPick is not null ? MappingSurfaces() : [];
+        var surfaces = _mappingSettings.HasActiveMappings || _mappingPick is not null ? MappingSurfaces() : [];
         if (_mappingPick is { } pick && !surfaces.Contains(pick.Surface))
         {
             CancelMappingPositionPick();
@@ -86,10 +92,10 @@ public partial class MainWindow
         }
         foreach (var surface in surfaces)
         {
-            if (!_mappingOverlays.TryGetValue(surface.Window, out var overlay))
+            if (!_mappingOverlays.TryGetValue(surface.Window, out var overlay) || overlay.IsClosed)
             {
                 overlay = new KeyboardMappingOverlayWindow(surface);
-                _mappingOverlays.Add(surface.Window, overlay);
+                _mappingOverlays[surface.Window] = overlay;
             }
             overlay.Update(surface, _mappingSettings.Enabled ? _mappingSettings.Mappings : []);
         }

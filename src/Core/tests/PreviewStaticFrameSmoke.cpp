@@ -15,6 +15,7 @@
 #include <filesystem>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -92,6 +93,116 @@ struct TestWindow {
     HWND handle{};
     ~TestWindow() { if (handle) DestroyWindow(handle); }
 };
+
+void test_main_preview_corners(const RECT& work, const wchar_t* window_class) {
+    const auto instance = GetModuleHandleW(nullptr);
+    TestWindow background{CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+        window_class, L"Main preview test background", WS_POPUP | WS_VISIBLE,
+        work.left + 30, work.top + 30, 480, 420, nullptr, nullptr, instance, nullptr)};
+    require(background.handle != nullptr, "Cannot create main preview background");
+    TestWindow window{CreateWindowExW(WS_EX_NOREDIRECTIONBITMAP, L"STATIC", L"Main preview test",
+        WS_CHILD | WS_VISIBLE, 10, 10, 162, 350, background.handle, nullptr, instance, nullptr)};
+    require(window.handle != nullptr, "Cannot create main preview child");
+    WNDPROC transparent_child = [](HWND child, UINT message, WPARAM wparam, LPARAM lparam) -> LRESULT {
+        if (message == WM_ERASEBKGND) return 1;
+        if (message == WM_PAINT) {
+            ValidateRect(child, nullptr);
+            return 0;
+        }
+        return DefWindowProcW(child, message, wparam, lparam);
+    };
+    require(SetWindowLongPtrW(window.handle, GWLP_WNDPROC,
+        reinterpret_cast<LONG_PTR>(transparent_child)) != 0, "Cannot subclass main preview child");
+    constexpr auto property = L"iPhoneMirrorMainPreview";
+    require(SetPropW(window.handle, property, reinterpret_cast<HANDLE>(1)) != FALSE,
+        "Cannot configure main preview child");
+
+    auto frame = std::make_shared<DecodedFrame>();
+    frame->width = frame->stride = 108;
+    frame->height = 234;
+    frame->timestamp_100ns = 1;
+    frame->color.range = iPhoneMirror::coremedia::ColorRange::Full;
+    frame->nv12.assign(frame->width * frame->height, 100);
+    frame->nv12.resize(frame->width * frame->height * 3 / 2, 128);
+    D3D11PreviewRenderer preview(window.handle, [frame] { return frame; });
+    preview.set_color_output_preference(iPhoneMirror::media::ColorOutputPreference::ForceSdrToneMap);
+
+    const auto check_corners = [&](int width, int height, int left, int top, int picture_width,
+        int picture_height, int expected) {
+        BITMAPINFO info{};
+        info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        info.bmiHeader.biWidth = width;
+        info.bmiHeader.biHeight = -height;
+        info.bmiHeader.biPlanes = 1;
+        info.bmiHeader.biBitCount = 32;
+        info.bmiHeader.biCompression = BI_RGB;
+        POINT origin{};
+        require(ClientToScreen(window.handle, &origin) != FALSE, "Cannot locate main preview pixels");
+        const auto screen = GetDC(nullptr);
+        const auto memory = CreateCompatibleDC(screen);
+        void* pixels{};
+        const auto bitmap = CreateDIBSection(screen, &info, DIB_RGB_COLORS, &pixels, nullptr, 0);
+        const auto previous_bitmap = SelectObject(memory, bitmap);
+        const auto release_capture = [&] {
+            SelectObject(memory, previous_bitmap);
+            DeleteObject(bitmap);
+            DeleteDC(memory);
+            ReleaseDC(nullptr, screen);
+        };
+        if (!screen || !memory || !bitmap || !previous_bitmap) {
+            release_capture();
+            throw std::runtime_error("Cannot create main preview pixel buffer");
+        }
+        std::string diagnostic;
+        const auto pixel = [&](int x, int y) { return static_cast<const std::uint8_t*>(pixels)[(y * width + x) * 4 + 2]; };
+        const auto end = std::chrono::steady_clock::now() + 3s;
+        do {
+            pump_for(20ms);
+            if (sample_owned_pixel(window.handle, 0.5, 0.5, diagnostic) < 0 ||
+                !BitBlt(memory, 0, 0, width, height, screen, origin.x, origin.y, SRCCOPY)) continue;
+            GdiFlush();
+            const auto right = left + picture_width - 1;
+            const auto bottom = top + picture_height - 1;
+            bool good = std::abs(pixel(left, height / 2) - expected) <= 8 &&
+                std::abs(pixel(right, height / 2) - expected) <= 8;
+            for (unsigned corner = 0; corner < 4; ++corner) {
+                const auto x = [&](int offset) { return (corner & 1) ? right - offset : left + offset; };
+                const auto y = [&](int offset) { return (corner & 2) ? bottom - offset : top + offset; };
+                good = good && pixel(x(0), y(0)) > 245;
+                int blended{};
+                for (int row = 1; row < 18 && good; ++row)
+                    for (int column = 1; column < 42; ++column) {
+                        const auto sample = pixel(x(column), y(row));
+                        if (sample > expected + 12 && sample < 243) ++blended;
+                        if (sample < expected - 8) good = false;
+                    }
+                good = good && blended >= 3;
+            }
+            if (good) { release_capture(); return; }
+        } while (std::chrono::steady_clock::now() < end);
+        const auto corner = pixel(left, top);
+        const auto left_pixel = pixel(left, height / 2);
+        const auto right_pixel = pixel(left + picture_width - 1, height / 2);
+        release_capture();
+        throw std::runtime_error(std::format(
+            "Main preview {}x{} has a black edge, opaque corner, or missing antialiasing: {} "
+            "corner={} side={}/{} expected={}", width, height, diagnostic, corner,
+            left_pixel, right_pixel, expected));
+    };
+
+    preview.set_corner_profile(0.14346F, 2.4694F);
+    const auto baseline = wait_for_pixel(window.handle, 100, "Main preview content");
+    check_corners(162, 350, 0, 0, 162, 350, baseline);
+    require(SetWindowPos(window.handle, nullptr, 0, 0, 206, 350,
+        SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE) != FALSE, "Cannot resize main preview child");
+    for (const bool limited : {false, true}) {
+        preview.set_render_size_limit(limited ? 72 : 0, limited ? 156 : 0);
+        preview.set_corner_profile(0.1959F, 2.6304F);
+        check_corners(206, 350, 22, 0, 162, 350, baseline);
+    }
+    RemovePropW(window.handle, property);
+    std::cout << "Main preview child: four composited corner gradients and clean side edges for iPhone 12 mini and iPhone 17.\n";
+}
 
 void check_rotated_quadrants(HWND window, const std::string& stage, int turns) {
     // Source quadrants have different gray levels so clockwise/counterclockwise
@@ -208,17 +319,23 @@ void test_static_rotation(HWND window, D3D11PreviewRenderer& preview,
     preview.set_device_frame(island_art);
     preview.set_phone_frame(true);
     preview.set_rotation(0);
-    SetWindowPos(window, nullptr, 0, 0, 240, 120, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    // At this scale the first pixel outside the hidden-sensor rectangle
+    // samples both the last sensor texel and the first clear screen texel.
+    constexpr int landscape_width = 244, landscape_height = 122;
+    SetWindowPos(window, nullptr, 0, 0, landscape_width, landscape_height,
+        SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
     std::int64_t timestamp = 10;
     std::uint64_t landscape_run = 0;
     for (const bool limited : {false, true}) {
         preview.set_render_size_limit(limited ? 160 : 0, limited ? 80 : 0);
-        const auto show_landscape = [&](int source_side, int expected_side, std::uint64_t run) {
+        const auto show_landscape = [&](int source_side, int expected_side, std::uint64_t run,
+                                        std::optional<unsigned> physical_turns = std::nullopt) {
             auto landscape = std::make_shared<DecodedFrame>();
             landscape->width = landscape->stride = 224;
             landscape->height = 112;
             landscape->timestamp_100ns = (timestamp += 500'000);
             landscape->wireless_landscape_run = run;
+            landscape->device_orientation_turns = physical_turns;
             landscape->color.range = iPhoneMirror::coremedia::ColorRange::Full;
             landscape->nv12.resize(224 * 112 * 3 / 2, 128);
             std::fill_n(landscape->nv12.begin(), 224 * 112, std::uint8_t{200});
@@ -242,8 +359,25 @@ void test_static_rotation(HWND window, D3D11PreviewRenderer& preview,
             require(((expected_side == 3 || source_side == 3) ? left >= 0 && left < 35 : left > 140) &&
                     ((expected_side == 1 || source_side == 1) ? right >= 0 && right < 35 : right > 140),
                 name + ": extra or missing landscape cutout " + diagnostic);
+            if (expected_side == 0 && source_side == 0) {
+                const auto screen = sample_owned_pixel(window, 0.5, 0.5, diagnostic);
+                require(screen > 140, name + ": test picture is unavailable " + diagnostic);
+                for (int y : {43, 53, 61, 68, 78}) {
+                    for (int x = 217; x <= 222; ++x) {
+                        const auto edge = sample_owned_pixel(window, (x + 0.5) / landscape_width,
+                            (y + 0.5) / landscape_height, diagnostic);
+                        require(std::abs(edge - screen) <= 2, std::format(
+                            "{}: hidden landscape sensor left a line at {},{} (gray {}, expected {}) {}",
+                            name, x, y, edge, screen, diagnostic));
+                    }
+                }
+            }
         };
         for (const int side : {3, 1, 0}) show_landscape(side, side, 0);
+        // A screen with no baked-in sensor pixels must still show the notch
+        // on either side when capture supplies the physical orientation.
+        show_landscape(0, 3, 0, 3);
+        show_landscape(0, 1, 0, 1);
         show_landscape(1, 0, ++landscape_run);
         preview.request_refresh();
         pump_for(50ms);
@@ -267,6 +401,10 @@ void test_static_rotation(HWND window, D3D11PreviewRenderer& preview,
         show_landscape(1, 0, landscape_run);
         show_landscape(1, 1, landscape_run);
         show_landscape(0, 1, landscape_run);
+        show_landscape(1, 3, landscape_run, 3);
+        show_landscape(0, 0, landscape_run);
+        show_landscape(3, 0, landscape_run);
+        show_landscape(3, 3, landscape_run);
     }
     preview.set_rotation(0);
     preview.set_phone_frame(false);
@@ -719,6 +857,7 @@ int run_preview_static_frame_smoke(bool retry_only) {
         RECT work{};
         require(SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0) != FALSE,
             "Cannot locate the test work area");
+        if (!retry_only) test_main_preview_corners(work, type.lpszClassName);
         for (const bool composition : {false, true})
             run_surface(composition, work, type.lpszClassName, retry_only);
         UnregisterClassW(type.lpszClassName, type.hInstance);

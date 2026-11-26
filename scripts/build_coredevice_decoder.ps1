@@ -21,7 +21,11 @@ $bash = Join-Path $MsysRoot 'usr/bin/bash.exe'
 if (-not (Test-Path -LiteralPath $bash)) { throw 'MSYS2 UCRT64 is required (gcc, make, patch, nasm, python)' }
 $unixRepo = '/' + $repo.Replace('\', '/').Replace(':', '').TrimStart('/')
 $unixSource = '/' + $source.Replace('\', '/').Replace(':', '').TrimStart('/')
-if (-not (Select-String -LiteralPath (Join-Path $source 'libavcodec/hevc/hevcdec.c') -SimpleMatch 'iPhoneMirror: dimensions')) {
+$patcher = Join-Path $PSScriptRoot 'patch_coredevice_ffmpeg.py'
+$upstreamPatch = Join-Path $repo 'third_party/rplayhub/ffmpeg-rvra.patch'
+$stamp = Join-Path $source '.iphonemirror-rvra'
+$patchKey = ((Get-FileHash -LiteralPath $patcher, $upstreamPatch -Algorithm SHA256).Hash -join '.')
+if (-not (Test-Path -LiteralPath $stamp) -or (Get-Content -LiteralPath $stamp -Raw).Trim() -ne $patchKey) {
     # Reset only these known cache inputs after any interrupted patch attempt.
     tar -xf $archive -C $cache 'ffmpeg-8.1.2/libavcodec/hevc/hevcdec.c' 'ffmpeg-8.1.2/libavcodec/hevc/hevcdec.h'
     if ($LASTEXITCODE) { throw 'FFmpeg patch input extraction failed' }
@@ -29,9 +33,10 @@ if (-not (Select-String -LiteralPath (Join-Path $source 'libavcodec/hevc/hevcdec
     $oldPath = $env:PATH
     try {
         $env:PATH = (Join-Path $MsysRoot 'usr/bin') + ';' + $oldPath
-        & $Python (Join-Path $PSScriptRoot 'patch_coredevice_ffmpeg.py') $source
+        & $Python $patcher $source
         if ($LASTEXITCODE) { throw 'RVRA patch failed' }
     } finally { $env:PATH = $oldPath }
+    Set-Content -LiteralPath $stamp -Value $patchKey -Encoding ascii
 }
 & $bash -lc 'bash "$1" "$2"' -- "$unixRepo/scripts/build_coredevice_decoder.sh" $unixSource
 if ($LASTEXITCODE) { throw 'CoreDevice decoder build failed' }

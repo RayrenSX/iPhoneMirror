@@ -17,6 +17,8 @@ public partial class ShortcutSettingsWindow : IPhoneMirror.UI.Controls.RoundedWi
     private string _statusText = string.Empty;
     public ObservableCollection<ShortcutBindingRow> Rows { get; } = [];
     public ObservableCollection<ShortcutBindingSection> Sections { get; } = [];
+    public bool ShowBoundOnly => ShortcutFilterBound?.IsChecked == true;
+    public bool ShowSettingShortcutSection => !ShowBoundOnly || SettingRows.Any(row => row.IsBound);
 
     internal ShortcutSettingsWindow(
         IReadOnlyDictionary<BluetoothShortcutAction, KeyboardShortcut> shortcuts,
@@ -44,12 +46,21 @@ public partial class ShortcutSettingsWindow : IPhoneMirror.UI.Controls.RoundedWi
                 section = new ShortcutBindingSection(category);
                 Sections.Add(section);
             }
-            section.Rows.Add(row);
+            section.Add(row);
         }
         InitializeComponent();
         PreviewHotkeysAllow.Text = hotkeys.Allow ?? "";
         PreviewHotkeysBlock.Text = hotkeys.Block ?? "";
         DataContext = this;
+        InitializeWindowsHotkeyCapture();
+        void OnFilterChecked(object sender, RoutedEventArgs e)
+        {
+            OnPropertyChanged(nameof(ShowBoundOnly));
+            OnPropertyChanged(nameof(ShowSettingShortcutSection));
+            ShortcutListScrollViewer.ScrollToTop();
+        }
+        ShortcutFilterAll.Checked += OnFilterChecked;
+        ShortcutFilterBound.Checked += OnFilterChecked;
         LocalizationService.LanguageChanged += OnLanguageChanged;
         Closed += (_, _) => LocalizationService.LanguageChanged -= OnLanguageChanged;
     }
@@ -225,7 +236,18 @@ public sealed class ShortcutBindingSection : INotifyPropertyChanged
 
     internal ShortcutBindingCategory Category { get; }
     public ObservableCollection<ShortcutBindingRow> Rows { get; } = [];
+    public bool HasBoundRows => Rows.Any(row => row.IsBound);
     public string Title { get; private set; } = string.Empty;
+
+    internal void Add(ShortcutBindingRow row)
+    {
+        Rows.Add(row);
+        row.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(ShortcutBindingRow.IsBound))
+                PropertyChanged?.Invoke(this, new(nameof(HasBoundRows)));
+        };
+    }
 
     internal void RefreshTitle()
     {

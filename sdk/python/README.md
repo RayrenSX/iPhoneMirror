@@ -1,7 +1,8 @@
 # iPhoneMirror Python SDK and stdio MCP
 
-Uses the existing authenticated IPv4 loopback API. Python 3.10+; the base SDK has
-no external dependencies. MCP uses the official `mcp` Python package.
+[简体中文 SDK 与 MCP 说明](../../docs/zh-CN/SDK.md)
+
+The examples target the local iPhoneMirror v1.8.5-pre7 Automation API. The SDK requires Python 3.10+ and has no external base dependencies. The stdio server uses the official `mcp` Python package. [Automation API reference](../../docs/api/README.md)
 
 ```powershell
 python -m pip install -e ./sdk/python
@@ -12,8 +13,9 @@ $env:IPHONEMIRROR_API_URL = 'http://127.0.0.1:17890'
 ```
 
 Enable Automation API in Developer tools and choose a device from its returned
-list. Preparation may need unlock/trust, Developer Mode, a matching personalized
-DDI and an existing device binding. First-time DDI preparation can take minutes.
+list. USB/wireless touch control requires iOS/iPadOS 17.4+, unlock/trust,
+Developer Mode, a matching DDI, device binding and successful service validation.
+First-time DDI preparation can take minutes; the OS version alone is insufficient.
 
 ```python
 from iphonemirror import Client
@@ -49,7 +51,7 @@ prepare the device in the desktop UI before starting automated MCP sessions.
 
 Neither SDK nor MCP starts a network listener or connects directly to the phone.
 
-The expanded Device Hub provides 36 MCP tools and matching SDK methods:
+The MCP server registers 36 tools across device selection, capture, input, and device management. Device Hub methods in the SDK include
 device_info, capabilities, tunnel_info, list_apps (with include flags), app_icon,
 processes, terminate, install_app, uninstall_app, profiles, install_profile,
 remove_profile, settings, get_setting, set_setting, set_location, clear_location,
@@ -81,7 +83,8 @@ phone.start_logs() returns streamId; pass it to phone.poll_logs(stream_id, curso
 and finish with phone.stop_logs(stream_id). Poll within 60 seconds to retain the
 subscription; dropped messages are reported.
 
-See the [feature matrix](../../docs/RPLAYHUB_FEATURE_MATRIX.zh-CN.md) for scope and
-real-device validation boundaries.
+See [device-management capabilities and limits](../../docs/en/USER_GUIDE.md#device-management).
+Offline protocol tests do not establish successful installation, removal, power
+or location changes on a real phone; verify those actions separately on the intended device.
 
-Live CoreDevice mirroring and encoded-stream recording were removed after device testing failed to establish a usable video stream. Their API routes, SDK methods and MCP tools are no longer exposed. Existing USB/AirPlay capture and recording remain available.
+The experimental CoreDevice mirroring entry is available in the desktop app. The SDK and MCP continue to use the existing USB/AirPlay capture and recording APIs.

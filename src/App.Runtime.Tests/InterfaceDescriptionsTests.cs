@@ -117,6 +117,9 @@ internal static partial class Program
             InteractionAssert(vm.HideInterfaceDescriptions && JsonSerializer.Deserialize<UpdateSettings>("{}")!.HideInterfaceDescriptions,
                 "New/legacy settings must preserve the current compact appearance.");
             KeyboardCall(owner, "SetSettingsPanelVisible", true);
+            // The shared AirPlay form instantiates its template when the projection tab is first shown.
+            ((RadioButton)owner.FindName("ProjectionSettingsTab")).IsChecked = true;
+            DrainDispatcher(); owner.UpdateLayout();
             ((RadioButton)owner.FindName("ApplicationSettingsTab")).IsChecked = true;
             app.IsUiPreviewMode = false;
             owner.MinWidth = 600;

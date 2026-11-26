@@ -1,7 +1,7 @@
 <UserControl x:Class="IPhoneMirror.App.Windows.MappingWizard.ParameterStep"
  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
  <UserControl.Resources><BooleanToVisibilityConverter x:Key="VisibleWhen"/></UserControl.Resources>
- <StackPanel MaxWidth="400" VerticalAlignment="Center">
+ <StackPanel MaxWidth="400" VerticalAlignment="Top">
   <StackPanel x:Name="DirectionPanel" Visibility="{Binding IsSwipe, Converter={StaticResource VisibleWhen}}">
    <TextBlock Text="{DynamicResource MappingSwipeDirection}" Style="{StaticResource DetailLabel}"/>
    <ComboBox x:Name="DirectionBox" DisplayMemberPath="Label" SelectedValuePath="Value" AutomationProperties.Name="{DynamicResource MappingSwipeDirection}"/>

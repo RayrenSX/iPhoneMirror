@@ -23,7 +23,7 @@ public partial class PreviewToolbarSettingsWindow : IPhoneMirror.UI.Controls.Rou
     private readonly Func<PreviewToolbarSettings, bool> _save;
     private readonly PreviewToolbarSettings _baseline;
     private readonly ObservableCollection<ToolbarRow> _rows = [];
-    private readonly Dictionary<string, (System.Windows.Controls.Button Button, System.Windows.Controls.TextBlock Status)> _library = [];
+    private readonly Dictionary<string, (System.Windows.Controls.Button Button, IPhoneMirror.App.Controls.ThemedSymbolIcon Status)> _library = [];
     private int _selectionRevision;
     private bool _refreshing;
     internal PreviewToolbarSettings Draft { get; private set; }
@@ -95,17 +95,30 @@ public partial class PreviewToolbarSettingsWindow : IPhoneMirror.UI.Controls.Rou
     {
         foreach (var action in _catalog)
         {
-            var button = new System.Windows.Controls.Button { Width = 266, Margin = new Thickness(0, 0, 8, 8),
-                Padding = new Thickness(10), HorizontalContentAlignment = HorizontalAlignment.Left,
-                Style = (Style)FindResource("SecondaryButton"), Tag = action.Id };
-            var content = new StackPanel { Orientation = Orientation.Horizontal };
-            content.Children.Add(new IPhoneMirror.App.Controls.ThemedSymbolIcon { Symbol = action.Symbol, FontSize = 20, VerticalAlignment = VerticalAlignment.Center });
-            var labels = new StackPanel { Margin = new Thickness(10, 0, 0, 0) };
-            labels.Children.Add(new System.Windows.Controls.TextBlock { Text = action.Name, TextWrapping = TextWrapping.Wrap, MaxWidth = 200 });
-            var status = new System.Windows.Controls.TextBlock { Opacity = .6, FontSize = 11, Margin = new Thickness(0, 3, 0, 0) };
-            labels.Children.Add(status);
-            content.Children.Add(labels); button.Content = content;
+            var button = new System.Windows.Controls.Button { Style = (Style)EditorRoot.FindResource("LibraryItemStyle"), Tag = action.Id };
+            var content = new Grid();
+            content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            content.ColumnDefinitions.Add(new ColumnDefinition());
+            content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var icon = new IPhoneMirror.App.Controls.ThemedSymbolIcon
+            {
+                Symbol = action.Symbol, FontSize = 18, VerticalAlignment = VerticalAlignment.Center
+            };
+            icon.SetBinding(Control.ForegroundProperty, new System.Windows.Data.Binding(nameof(Control.Foreground)) { Source = button });
+            var label = new System.Windows.Controls.TextBlock
+            {
+                Text = action.Name, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(10, 0, 8, 0)
+            };
+            var status = new IPhoneMirror.App.Controls.ThemedSymbolIcon { FontSize = 17, VerticalAlignment = VerticalAlignment.Center };
+            Grid.SetColumn(label, 1);
+            Grid.SetColumn(status, 2);
+            content.Children.Add(icon);
+            content.Children.Add(label);
+            content.Children.Add(status);
+            button.Content = content;
             System.Windows.Automation.AutomationProperties.SetAutomationId(button, "Toolbar.Add." + action.Id);
+            System.Windows.Automation.AutomationProperties.SetName(button, action.Name);
             button.Click += (_, _) =>
             {
                 if (!CanEdit) return;
@@ -122,7 +135,11 @@ public partial class PreviewToolbarSettingsWindow : IPhoneMirror.UI.Controls.Rou
         {
             var present = Draft.Items.Contains(id);
             item.Button.IsEnabled = !present;
-            item.Status.Text = T(present ? "Added" : "Add");
+            var status = T(present ? "Added" : "Add");
+            item.Status.Symbol = present ? SymbolRegular.Checkmark20 : SymbolRegular.Add20;
+            item.Status.SetResourceReference(Control.ForegroundProperty, present ? "MutedTextBrush" : "AccentBrush");
+            item.Button.ToolTip = status;
+            System.Windows.Automation.AutomationProperties.SetItemStatus(item.Button, status);
         }
     }
     private void FocusSelectedItem() => Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, () =>
@@ -165,6 +182,7 @@ public partial class PreviewToolbarSettingsWindow : IPhoneMirror.UI.Controls.Rou
         {
             LibraryPanel.Visibility = Visibility.Visible; LibraryToggle.IsChecked = true;
             LibraryToggle.Focus();
+            UpdateEditorPlacement();
         }
     }
     internal void MoveItem(string id, int delta)
@@ -219,7 +237,7 @@ public partial class PreviewToolbarSettingsWindow : IPhoneMirror.UI.Controls.Rou
         {
             if (_dragId is not null) EndToolbarDrag(cancel: true);
             else if (_focusMoving && !_focusExiting) ExitFocusedEditor(false);
-            else if (LibraryPanel.Visibility == Visibility.Visible) { LibraryPanel.Visibility = Visibility.Collapsed; LibraryToggle.IsChecked = false; LibraryToggle.Focus(); }
+            else if (LibraryPanel.Visibility == Visibility.Visible) OnLibrary(sender, e);
             else ExitFocusedEditor(false);
             e.Handled = true;
         }

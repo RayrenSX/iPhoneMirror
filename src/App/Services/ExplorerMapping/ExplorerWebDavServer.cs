@@ -135,7 +135,7 @@ internal sealed class ExplorerWebDavServer : IAsyncDisposable
                     throw new HttpFailure(405, new() { ["Allow"] = _store.IsReadOnly ? ReadMethods : WriteMethods });
                 if (request.Length > MaximumBody || request.Method != "PROPFIND" && request.Length != 0) throw new HttpFailure(413);
                 await ContinueAsync(output, request, cancellation).ConfigureAwait(false);
-                var entry = await DeviceAsync(token => _store.StatAsync(path, token), cancellation).ConfigureAwait(false);
+                var entry = await DeviceAsync(token => request.Method == "PROPFIND" ? _store.StatAsync(path, token) : _store.StatFreshAsync(path, token), cancellation).ConfigureAwait(false);
                 if (entry is null) throw new HttpFailure(404);
                 ValidateEntry(entry, path);
                 if (request.Method == "PROPFIND")
@@ -160,8 +160,12 @@ internal sealed class ExplorerWebDavServer : IAsyncDisposable
                             child.Path.Length == prefix.Length || child.Path[prefix.Length..].Contains('/'))
                             throw new IOException("Invalid directory child.");
                     }
+                    var wantsStorage = query.NamesOnly || query.Names?.Any(name => name == Dav + "quota-available-bytes" || name == Dav + "quota-used-bytes") == true;
+                    var storage = entry.IsDirectory && wantsStorage
+                        ? await DeviceAsync(token => _store.GetStorageAsync(token), cancellation).ConfigureAwait(false) : null;
+                    if (storage is not null && !storage.IsValid) throw new IOException("Invalid phone storage capacity.");
                     var xml = new XElement(Dav + "multistatus", new XAttribute(XNamespace.Xmlns + "D", Dav),
-                        new[] { entry }.Concat(children).Select(item => PropertyResponse(item, query)));
+                        new[] { entry }.Concat(children).Select(item => PropertyResponse(item, query, storage)));
                     var body = XmlBytes(xml);
                     if (body.Length > 16 * 1024 * 1024) throw new HttpFailure(507);
                     await ResponseAsync(output, 207, body, cancellation,
@@ -256,8 +260,9 @@ internal sealed class ExplorerWebDavServer : IAsyncDisposable
         if (!await _mutation.WaitAsync(TimeSpan.FromSeconds(35), cancellation).ConfigureAwait(false)) throw new HttpFailure(503);
         try
         {
-            var entry = await DeviceAsync(token => _store.StatAsync(path, token), cancellation).ConfigureAwait(false);
+            var entry = await DeviceAsync(token => _store.StatFreshAsync(path, token), cancellation).ConfigureAwait(false);
             if (entry is not null) ValidateEntry(entry, path);
+            if (entry?.IsReadOnly == true && request.Method != "UNLOCK") throw new HttpFailure(403);
             CheckPreconditions(request, entry);
             if (request.Method is "LOCK" or "UNLOCK")
             {
@@ -316,10 +321,11 @@ internal sealed class ExplorerWebDavServer : IAsyncDisposable
                     if (destination == path || destination!.StartsWith(path + "/", StringComparison.Ordinal)) throw new HttpFailure(403);
                     var overwrite = request.Headers.GetValueOrDefault("Overwrite", "T");
                     if (overwrite is not ("T" or "F")) throw new HttpFailure(400);
-                    var target = await DeviceAsync(token => _store.StatAsync(destination!, token), cancellation).ConfigureAwait(false);
+                    var target = await DeviceAsync(token => _store.StatFreshAsync(destination!, token), cancellation).ConfigureAwait(false);
                     if (target is not null)
                     {
                         ValidateEntry(target, destination!);
+                        if (target.IsReadOnly) throw new HttpFailure(403);
                         if (overwrite == "F") throw new HttpFailure(412);
                     }
                     await RequireParentAsync(destination!, cancellation).ConfigureAwait(false);
@@ -457,8 +463,9 @@ internal sealed class ExplorerWebDavServer : IAsyncDisposable
     private async Task RequireParentAsync(string path, CancellationToken cancellation)
     {
         var parent = ParentPath(path);
-        var entry = await DeviceAsync(token => _store.StatAsync(parent, token), cancellation).ConfigureAwait(false);
+        var entry = await DeviceAsync(token => _store.StatFreshAsync(parent, token), cancellation).ConfigureAwait(false);
         if (entry is not { IsDirectory: true }) throw new HttpFailure(409);
+        if (entry.IsReadOnly) throw new HttpFailure(403);
         ValidateEntry(entry, parent);
     }
     private static string ParentPath(string path) => path.LastIndexOf('/') is var slash && slash >= 0 ? path[..slash] : "";
@@ -587,9 +594,14 @@ internal sealed class ExplorerWebDavServer : IAsyncDisposable
             (entry.Path.Length > 0 && entry.Path.Split('/').Any(string.IsNullOrEmpty))) throw new IOException("Invalid file metadata.");
     }
 
-    private XElement PropertyResponse(ExplorerFileEntry entry, PropertyQuery query)
+    private XElement PropertyResponse(ExplorerFileEntry entry, PropertyQuery query, ExplorerStorageInfo? storage)
     {
-        var properties = Properties(entry);
+        var properties = Properties(entry).ToList();
+        if (entry.IsDirectory && storage is not null)
+        {
+            properties.Add(new(Dav + "quota-available-bytes", storage.AvailableBytes.ToString(CultureInfo.InvariantCulture)));
+            properties.Add(new(Dav + "quota-used-bytes", storage.UsedBytes.ToString(CultureInfo.InvariantCulture)));
+        }
         var selected = query.Names ?? properties.Select(property => property.Name).ToArray();
         var found = selected.Select(name => properties.FirstOrDefault(property => property.Name == name))
             .Where(property => property is not null).Select(property => query.NamesOnly ? new XElement(property!.Name) : property!);
@@ -613,11 +625,11 @@ internal sealed class ExplorerWebDavServer : IAsyncDisposable
         new(Windows + "Win32LastAccessTime", (entry.WindowsProperties?.LastAccessTime ?? entry.Modified).UtcDateTime.ToString("R", CultureInfo.InvariantCulture)),
         new(Windows + "Win32LastModifiedTime", entry.Modified.UtcDateTime.ToString("R", CultureInfo.InvariantCulture)),
         new(Windows + "Win32FileAttributes", ((entry.WindowsProperties?.Win32Attributes ?? 0) | (entry.IsDirectory ? 0x10u : 0)).ToString("x8", CultureInfo.InvariantCulture)),
-        _store.IsReadOnly ? new(Dav + "supportedlock") : new(Dav + "supportedlock", new XElement(Dav + "lockentry",
+        _store.IsReadOnly || entry.IsReadOnly ? new(Dav + "supportedlock") : new(Dav + "supportedlock", new XElement(Dav + "lockentry",
             new XElement(Dav + "lockscope", new XElement(Dav + "exclusive")), new XElement(Dav + "locktype", new XElement(Dav + "write")))),
         _locks.Discovery(entry.Path),
         new(Dav + "current-user-privilege-set", new XElement(Dav + "privilege", new XElement(Dav + "read")),
-            _store.IsReadOnly ? null : new XElement(Dav + "privilege", new XElement(Dav + "write")))
+            _store.IsReadOnly || entry.IsReadOnly ? null : new XElement(Dav + "privilege", new XElement(Dav + "write")))
     ];
     private string HrefByPath(string path) => _rootPath + string.Join('/', path.Split('/').Select(Uri.EscapeDataString));
     private string Href(ExplorerFileEntry entry) => HrefByPath(entry.Path) +

@@ -4,6 +4,7 @@
 #include "DlnaRenderer.h"
 #include "HttpUrl.h"
 #include "HostCommon.h"
+#include "../../third_party/airplay-server/patches/airplay-mirror-codec-policy.h"
 
 #include <Windows.h>
 #include <bcrypt.h>
@@ -516,6 +517,10 @@ class AirPlayCallback final : public IAirServerCallback {
 public:
     explicit AirPlayCallback(IpcWriter& writer) : writer_(writer) {}
 
+    int take_audio_discovery_request() noexcept {
+        return audio_discovery_request_.exchange(0);
+    }
+
     void connected(const char* remote_name, const char* remote_device_id) override {
         iPhoneMirror::wireless::MessageHeader header;
         header.type = iPhoneMirror::wireless::MessageType::Connected;
@@ -896,6 +901,12 @@ public:
                 else fields.remove_prefix(separator + 1);
             }
             if (valid && fields.empty()) {
+                if (numbers[0] == 40 && numbers[1] == 3) {
+                    if (numbers[2] == 3 && numbers[3] == 1 && numbers[4] == 1)
+                        audio_discovery_request_.store(1);
+                    else if (numbers[2] == 4)
+                        audio_discovery_request_.store(-1);
+                }
                 diagnostic(std::format("video_diag event={} values={},{},{},{},{},{}",
                     numbers[0], numbers[1], numbers[2], numbers[3], numbers[4], numbers[5], numbers[6]));
                 if (numbers[0] == 34) {
@@ -1117,6 +1128,7 @@ public:
 
 private:
     IpcWriter& writer_;
+    std::atomic_int audio_discovery_request_{};
     std::mutex playback_mutex_;
     // Mask the tick count to 48 bits before shifting so the high bits are not
     // truncated, keeping the command ids distinct from mirror_volume_command_id_.
@@ -1163,7 +1175,7 @@ bool set_airplay_environment(std::wstring_view name,
     return SetEnvironmentVariableW(wide_name.c_str(), wide_value.c_str()) != FALSE;
 }
 
-std::wstring stable_airplay_device_id(bool media_only) {
+std::wstring stable_airplay_device_id(std::string_view profile) {
     wchar_t computer[MAX_COMPUTERNAME_LENGTH + 1]{};
     DWORD length = static_cast<DWORD>(std::size(computer));
     if (!GetComputerNameW(computer, &length)) {
@@ -1176,7 +1188,6 @@ std::wstring stable_airplay_device_id(bool media_only) {
         hash ^= static_cast<std::uint8_t>(computer[index]);
         hash *= 1099511628211ULL;
     }
-    const std::string_view profile = media_only ? "airplay-video-v1" : "airplay-compat-v3";
     for (const auto byte : profile) {
         hash ^= static_cast<std::uint8_t>(byte);
         hash *= 1099511628211ULL;
@@ -1431,7 +1442,21 @@ int wmain(int argc, wchar_t** argv) {
         receiver_mode == L"combined" ? L"combined" : L"mirror";
     const auto effective_receiver_name = receiver_name_wide.empty()
         ? std::wstring(L"iPhoneMirror AirPlay") : receiver_name_wide;
-    const auto device_id = stable_airplay_device_id(std::wstring_view(effective_mode) == L"media");
+    const auto media_only = std::wstring_view(effective_mode) == L"media";
+    const auto mirror_no_audio = !media_only && iphone_mirror_diagnostic_mirror_flag_enabled(
+        L"IPHONE_MIRROR_DIAGNOSTIC_MIRROR_NO_AUDIO");
+    const auto audio_event = !media_only && iphone_mirror_diagnostic_mirror_flag_enabled(
+        L"IPHONE_MIRROR_DIAGNOSTIC_MIRROR_AUDIO_EVENT");
+    const auto withdraw_raop = audio_event && !mirror_no_audio &&
+        iphone_mirror_diagnostic_mirror_flag_enabled(L"IPHONE_MIRROR_DIAGNOSTIC_WITHDRAW_RAOP");
+    const auto video_only_capabilities = mirror_no_audio &&
+        iphone_mirror_diagnostic_mirror_flag_enabled(L"IPHONE_MIRROR_DIAGNOSTIC_VIDEO_ONLY_CAPABILITIES");
+    const std::string_view identity_profile = media_only ? "airplay-video-v1" :
+        video_only_capabilities ? "airplay-phone-audio-video-only-v2" :
+        withdraw_raop ? "airplay-phone-audio-withdraw-v1" :
+        audio_event ? (mirror_no_audio ? "airplay-phone-audio-cold-v1" : "airplay-phone-audio-hot-v1") :
+        mirror_no_audio ? "airplay-no-audio-experiment-v1" : "airplay-compat-v3";
+    const auto device_id = stable_airplay_device_id(identity_profile);
     const auto pairing_seed = stable_airplay_pairing_seed(device_id);
     if (pairing_seed.empty()) {
         writer.send_text(iPhoneMirror::wireless::MessageType::Log,
@@ -1485,6 +1510,9 @@ int wmain(int argc, wchar_t** argv) {
     const auto stop_server = reinterpret_cast<StopServer>(GetProcAddress(library, StopExport));
     const auto set_playback_state_callback = reinterpret_cast<SetPlaybackStateCallback>(
         GetProcAddress(library, "fgServerSetPlaybackStateCallback"));
+    using SetAudioDiscovery = int (__cdecl*)(void*, int);
+    const auto set_audio_discovery = reinterpret_cast<SetAudioDiscovery>(
+        GetProcAddress(library, "fgServerSetAudioDiscoveryWithdrawn"));
     if (!start_server || !stop_server) {
         writer.send_text(iPhoneMirror::wireless::MessageType::Log,
             "wireless_host airplay_exports_missing");
@@ -1499,11 +1527,11 @@ int wmain(int argc, wchar_t** argv) {
     auto receiver_name = utf8(effective_receiver_name);
     writer.send_text(iPhoneMirror::wireless::MessageType::Log,
         std::format("wireless_host server_start receiver_fp={} capability={}x{}@{} "
-            "mode={} raop_port={} airplay_port={} dlna_port={} dlna_ssdp_port={}",
+            "mode={} raop_port={} airplay_port={} dlna_port={} dlna_ssdp_port={} mirror_no_audio={} audio_event={} video_only_capabilities={}",
             anonymous_label(receiver_name), capability_width,
             capability_height, capability_fps,
             utf8(effective_mode), raop_port, airplay_port, dlna_port,
-            dlna_ssdp_port).c_str());
+            dlna_ssdp_port, mirror_no_audio, audio_event, video_only_capabilities).c_str());
     const auto server = start_server(receiver_name.c_str(), raop_port, airplay_port, &callback);
     if (!server) {
         writer.send_text(iPhoneMirror::wireless::MessageType::Log,
@@ -1616,6 +1644,7 @@ int wmain(int argc, wchar_t** argv) {
     std::string wait_reason = wait_count == 0 ? "no_wait_handles" : "unknown";
     DWORD wait_error = ERROR_SUCCESS;
     const auto wait_started = std::chrono::steady_clock::now();
+    bool audio_discovery_withdrawn = false;
     if (stop_event_error != ERROR_SUCCESS || parent_error != ERROR_SUCCESS) {
         writer.send_text(iPhoneMirror::wireless::MessageType::Log,
             std::format("wireless_host wait_handles stop_event={} stop_error={} "
@@ -1625,6 +1654,15 @@ int wmain(int argc, wchar_t** argv) {
     while (wait_count != 0) {
         const auto result = WaitForMultipleObjects(wait_count, waits, FALSE, 50);
         if (result == WAIT_TIMEOUT) {
+            if (withdraw_raop && set_audio_discovery) {
+                const int request = callback.take_audio_discovery_request();
+                if (request != 0 && (request > 0) != audio_discovery_withdrawn) {
+                    const bool changed = set_audio_discovery(server, request > 0) != 0;
+                    if (changed) audio_discovery_withdrawn = request > 0;
+                    writer.send_text(iPhoneMirror::wireless::MessageType::Log,
+                        std::format("wireless_host audio_discovery withdraw={} changed={}", request > 0, changed));
+                }
+            }
             if (!dlna_started && std::chrono::steady_clock::now() >= next_dlna_retry) {
                 dlna_started = start_dlna();
                 next_dlna_retry = std::chrono::steady_clock::now() + std::chrono::seconds(5);

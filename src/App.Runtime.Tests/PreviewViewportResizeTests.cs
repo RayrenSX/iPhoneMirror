@@ -60,6 +60,11 @@ internal static partial class Program
                 }
                 if (!live)
                 {
+                    // Test an unconstrained resize even when Windows restores
+                    // the fixture onto a narrow, scaled secondary display.
+                    window.Left = SystemParameters.WorkArea.Left + 40;
+                    window.Top = SystemParameters.WorkArea.Top + 40;
+                    DrainDispatcher(); window.UpdateLayout();
                     SetKeyboardField(vm, "_isCapturing", true);
                     SetKeyboardField(vm, "_sourceVideoWidth", 1082u);
                     SetKeyboardField(vm, "_sourceVideoHeight", 2340u);

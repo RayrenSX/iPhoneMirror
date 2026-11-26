@@ -4,7 +4,7 @@
 
 iPhoneMirror is currently a public preview. Security fixes are provided only for
 the latest [published release](https://github.com/RayrenSX/iPhoneMirror/releases)
-and the current `main` branch. A source-tree test version is not necessarily published.
+and the current `main` branch. The current local source version is v1.8.5-pre7. [pre7 release notes](docs/en/RELEASE_NOTES.md)
 
 | Version | Supported |
 |---|---|

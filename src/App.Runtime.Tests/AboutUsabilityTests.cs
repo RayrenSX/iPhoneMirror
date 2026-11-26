@@ -45,6 +45,34 @@ internal static partial class Program
         {
             about.Show();
             AdvanceDispatcher(TimeSpan.FromMilliseconds(150));
+            var originalStore = KeyboardField(app, "_settingsStore");
+            var originalSettings = app.UpdateSettings.Clone();
+            var updatePath = Path.Combine(Path.GetFullPath(output), "update-options.json");
+            var updateStore = new UpdateSettingsStore(updatePath);
+            try
+            {
+                SetKeyboardField(app, "_settingsStore", updateStore);
+                app.IsUiPreviewMode = false;
+                about.CheckOnStartup = false;
+                about.AutoDownload = true;
+                about.AllowMirrorFallback = true;
+                about.NotifyStableReleases = false;
+                about.NotifyPrereleaseReleases = true;
+                var saved = updateStore.Load();
+                InteractionAssert(!saved.CheckOnStartup && saved.AutoDownload && saved.AllowMirrorFallback &&
+                    !saved.NotifyStableReleases && saved.NotifyPrereleaseReleases && about.IsVisible,
+                    "All five update preferences must persist while About is still open.");
+                SetKeyboardField(app, "_settingsStore", new UpdateSettingsStore(Path.Combine(updatePath, "blocked.json")));
+                about.AutoDownload = false;
+                InteractionAssert(about.AutoDownload && about.UpdateStatus == LocalizationService.Get("SetupSaveFailed"),
+                    "Failed update settings writes must restore the last preference and show feedback.");
+            }
+            finally
+            {
+                app.IsUiPreviewMode = true;
+                app.RestoreUpdateSettings(originalSettings);
+                SetKeyboardField(app, "_settingsStore", originalStore);
+            }
             var log = (TextBox)about.FindName("LiveLogTextBox");
             var timer = (DispatcherTimer)KeyboardField(about, "_logTimer");
             var entries = string.Join('\n', Enumerable.Range(0, 50).Select(index =>

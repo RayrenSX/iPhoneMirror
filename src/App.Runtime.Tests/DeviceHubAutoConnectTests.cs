@@ -129,7 +129,7 @@ internal static partial class Program
             vm.SelectedDevice = first; Drain();
             Verify(secondAttempt.Token.IsCancellationRequested, "Changing selection must cancel the previous connection scope.");
             delayed.SetResult(); Finish(); delayed = null;
-            Verify(!reads.Contains(second.Udid) && Find<TextBlock>("DeviceNameText").Text == first.Name && Find<Grid>("Pages").IsEnabled,
+            Verify(!reads.Contains(second.Udid) && ReferenceEquals(KeyboardField(panel, "_device"), first) && Find<Grid>("Pages").IsEnabled,
                 "A late connection response must not read or populate another device.");
 
             delayed = new(TaskCreationOptions.RunContinuationsAsynchronously); behavior = token => delayed.Task.WaitAsync(token);

@@ -12,6 +12,8 @@ Profiles are grouped into:
   iPhones, and Dynamic Island iPhones;
 - rounded iPad Pro, Air, mini, and all-screen base iPad displays.
 
+Recent supported iPhones use model-specific fits from the checked-in screen masks, rather than all sharing one Dynamic Island curve. See the [model review](diagnostics/recent-iphone-corners-20261117.md) for fitting inputs and limits. Unknown future identifiers still use the conservative family fallback described below; that does not grant them a matching phone-frame asset.
+
 The renderer stores radius as a fraction of the short edge, so rotation and
 window resizing cannot change the physical-looking proportions. A curve
 exponent drives an anti-aliased superellipse in the D3D11 pixel shader. The WPF
@@ -32,7 +34,7 @@ publishes device-specific Product Bezel artwork in its Design Resources:
 Apple does **not** publish a numeric physical display-corner radius or a CAD
 equation in those specifications. The coefficients in this project are
 therefore rendering-match profiles visually fitted by device family, not
-claimed Apple hardware/CAD measurements. No Apple artwork is redistributed.
+claimed Apple hardware/CAD measurements. Current frame assets and their individual provenance are documented in [device frames](device-frames.md); this curve description does not replace their source notices.
 
 Unknown future `iPhoneN,M` and `iPadN,M` identifiers inherit their modern
 family profile. A stream with no ProductType uses conservative phone/tablet

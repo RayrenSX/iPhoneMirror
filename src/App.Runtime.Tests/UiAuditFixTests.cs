@@ -61,11 +61,63 @@ internal static partial class Program
             Func<Task<IReadOnlyList<BluetoothClientInfo>>> failRefresh = () => Task.FromException<IReadOnlyList<BluetoothClientInfo>>(new IOException("Synthetic refresh failure"));
             var failedPicker = AuditFixWindow("BluetoothClientBindingWindow", main, "Audit phone", clients, null, failRefresh, unbind);
             failedPicker.Show();
-            AuditFixCall(failedPicker, "OnRefreshClick", failedPicker, new RoutedEventArgs());
+            var refreshButton = (Button)failedPicker.FindName("RefreshDevicesButton");
+            Check(refreshButton.IsVisible && refreshButton.IsEnabled && Equals(refreshButton.Content, failedPicker.FindResource("BluetoothClientBindingRefresh")),
+                "Bluetooth binding must offer a labeled refresh action.");
+            refreshButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             AdvanceDispatcher(TimeSpan.FromMilliseconds(50));
             Check(((TextBlock)failedPicker.FindName("FeedbackText")).Text.Contains("Could not refresh"), "Bluetooth failure must be visible.");
             Check((bool)failedPicker.GetType().GetProperty("CanRefresh")!.GetValue(failedPicker)!, "Refresh must be retryable.");
             failedPicker.Close();
+
+            var pendingSearch = new TaskCompletionSource<IReadOnlyList<BluetoothClientInfo>>();
+            var searches = 0;
+            Func<Task<IReadOnlyList<BluetoothClientInfo>>> search = () => { searches++; return pendingSearch.Task; };
+            var pairing = AuditFixWindow("BluetoothConnectionWindow", main, "Audit phone", search, unbind, false);
+            pairing.Show();
+            var findDevices = (Button)pairing.FindName("FindDevicesButton");
+            var pairingFeedback = (TextBlock)pairing.FindName("FeedbackText");
+            findDevices.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            findDevices.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Check(searches == 1 && !findDevices.IsEnabled &&
+                Equals(pairingFeedback.Text, pairing.FindResource("DeviceBindingBluetoothSearching")),
+                "Pairing search must show progress and prevent repeated queries.");
+            pendingSearch.SetResult([]);
+            AdvanceDispatcher(TimeSpan.FromMilliseconds(50));
+            Check(pairing.IsVisible && findDevices.IsEnabled &&
+                Equals(pairingFeedback.Text, pairing.FindResource("DeviceBindingBluetoothNoneFound")) &&
+                !app.Windows.Cast<Window>().Any(w => w.GetType() == picker),
+                "An empty Bluetooth search must leave the pairing instructions open with retry feedback.");
+
+            pendingSearch = new();
+            findDevices.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            pendingSearch.SetException(new IOException("Synthetic pairing search failure"));
+            AdvanceDispatcher(TimeSpan.FromMilliseconds(50));
+            Check(pairing.IsVisible && findDevices.IsEnabled &&
+                Equals(pairingFeedback.Text, pairing.FindResource("DeviceBindingBluetoothSearchFailed")),
+                "Bluetooth pairing search errors must stay visible and allow retry.");
+
+            pendingSearch = new();
+            findDevices.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            pairing.Close();
+            pendingSearch.SetResult(clients);
+            AdvanceDispatcher(TimeSpan.FromMilliseconds(50));
+            Check(!app.Windows.Cast<Window>().Any(w => w.GetType() == picker),
+                "Closing the pairing page must ignore a late Bluetooth result.");
+
+            var paired = AuditFixWindow("BluetoothConnectionWindow", main, "Audit phone", refresh, unbind, false);
+            paired.Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, () =>
+            {
+                paired.Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, () =>
+                {
+                    var devicePicker = app.Windows.Cast<Window>().SingleOrDefault(w => w.GetType() == picker);
+                    if (devicePicker is null) paired.Close();
+                    else AuditFixCall(devicePicker, "OnConfirmClick", devicePicker, new RoutedEventArgs());
+                });
+                ((Button)paired.FindName("FindDevicesButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            });
+            Check(paired.ShowDialog() == true && Equals(paired.Tag, "AUDIT-ID"),
+                "A paired device must proceed to the existing picker and return the user's confirmed selection.");
 
             AuditFixType("Windows.ShortcutSettingsWindow").GetMethod("ShowDeveloperPreview", InteractionMembers)!.Invoke(null, [main]);
             var shortcut = app.Windows.Cast<Window>().Single(w => w.GetType().Name == "ShortcutSettingsWindow");

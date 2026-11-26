@@ -25,6 +25,8 @@ public partial class App : Application
     private CompactLaunchChannel? _compactLaunchChannel;
     private int _remoteShutdownRequested;
     private bool _startupUpdateCheckStarted;
+    private bool _settingsSessionStarted;
+    private bool _settingsReadFailed;
 
     internal UpdateSettings UpdateSettings { get; private set; } = new();
 
@@ -65,14 +67,9 @@ public partial class App : Application
         {
             DiagnosticLogger.Info("lifecycle", "startup_begin",
                 ("arguments", e.Args.Length));
-            LocalizationService.Initialize();
             LaunchOptions = CompactLaunchOptions.Parse(e.Args);
             AutomationBackground = LaunchOptions.AutomationBackground;
             AppIdentity.Initialize();
-            UpdateSettings = _settingsStore.Load();
-            AppProxyPolicy.Apply(UpdateSettings.NetworkProxy);
-            RefreshInterfaceDescriptionVisibility();
-            ThemeService.Apply(UpdateSettings.Theme);
             EventManager.RegisterClassHandler(typeof(Window), FrameworkElement.LoadedEvent,
                 new RoutedEventHandler((sender, _) =>
                 {
@@ -94,6 +91,7 @@ public partial class App : Application
                 }
                 DiagnosticLogger.Info("lifecycle", "instance_conflict_detected",
                     ("owns_primary", _singleInstanceCoordinator.OwnsPrimaryInstance));
+                LoadStartupSettings(primaryInstance: false);
                 ShutdownMode = ShutdownMode.OnExplicitShutdown;
                 var conflictWindow = new InstanceConflictWindow(_singleInstanceCoordinator);
                 AppIdentity.Attach(conflictWindow);
@@ -106,6 +104,7 @@ public partial class App : Application
                 }
             }
 
+            LoadStartupSettings(primaryInstance: true);
             _singleInstanceCoordinator.StartShutdownListener(OnRemoteShutdownRequested);
             ShutdownMode = ShutdownMode.OnLastWindowClose;
             StartupDiagnostics.ValidateRequiredRuntime();
@@ -142,6 +141,19 @@ public partial class App : Application
             Shutdown(-1);
         }
     }
+
+    private void LoadStartupSettings(bool primaryInstance)
+    {
+        UpdateSettings = _settingsStore.Load(out _settingsReadFailed, persistMigrations: primaryInstance);
+        LocalizationService.Initialize(UpdateSettings.Language, primaryInstance ? SaveLanguagePreference : null);
+        AppProxyPolicy.Apply(UpdateSettings.NetworkProxy);
+        RefreshInterfaceDescriptionVisibility();
+        ThemeService.Apply(UpdateSettings.Theme);
+        _settingsSessionStarted = primaryInstance;
+    }
+
+    private bool SaveLanguagePreference(string language) =>
+        TrySetUpdatePreference(settings => settings.Language, (settings, value) => settings.Language = value, language);
 
     private void OnRemoteShutdownRequested()
     {
@@ -271,6 +283,7 @@ public partial class App : Application
     internal bool SaveUpdateSettings()
     {
         if (IsUiPreviewMode) return true;
+        if (_settingsReadFailed) return false;
         try
         {
             _settingsStore.Save(UpdateSettings);
@@ -281,6 +294,17 @@ public partial class App : Application
             DiagnosticLogger.Exception("settings", "save_failed", error);
             return false;
         }
+    }
+
+    internal bool TrySetUpdatePreference<T>(Func<UpdateSettings, T> read, Action<UpdateSettings, T> write, T value)
+    {
+        var settings = UpdateSettings;
+        var previous = read(settings);
+        if (EqualityComparer<T>.Default.Equals(previous, value)) return true;
+        write(settings, value);
+        if (SaveUpdateSettings()) return true;
+        write(settings, previous);
+        return false;
     }
 
     internal void RestoreUpdateSettings(UpdateSettings snapshot)
@@ -304,7 +328,8 @@ public partial class App : Application
             return;
         }
 
-        _ = SaveUpdateSettings();
+        // A launcher dismissed during an instance conflict has only read a snapshot.
+        if (_settingsSessionStarted && !_settingsReadFailed) _ = SaveUpdateSettings();
         ThemeService.Shutdown();
         try { _releaseClient?.Dispose(); }
         catch (Exception error)

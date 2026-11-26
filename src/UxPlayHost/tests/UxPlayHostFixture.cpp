@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -110,6 +111,16 @@ int wmain(int argc, wchar_t** argv) {
     const auto video = pipe_location(video_sink);
     const auto audio = pipe_location(argument_value(argc, argv, L"-as"));
     if (video.empty() || audio.empty()) return 2;
+    std::array<wchar_t, 256> acknowledgement_name{};
+    const auto name_length = GetEnvironmentVariableW(L"IPHONE_MIRROR_UXPLAY_SMOKE_ACK",
+        acknowledgement_name.data(), static_cast<DWORD>(acknowledgement_name.size()));
+    if (name_length == 0 || name_length >= acknowledgement_name.size()) return 9;
+    const std::unique_ptr<void, decltype(&CloseHandle)> acknowledgement(
+        OpenEventW(SYNCHRONIZE, FALSE, acknowledgement_name.data()), CloseHandle);
+    if (!acknowledgement) return 9;
+    const auto received = [&] {
+        return WaitForSingleObject(acknowledgement.get(), 4000) == WAIT_OBJECT_0;
+    };
     auto video_pipe = connect_pipe(video);
     const auto audio_pipe = connect_pipe(audio);
     if (video_pipe == INVALID_HANDLE_VALUE || audio_pipe == INVALID_HANDLE_VALUE) {
@@ -160,9 +171,11 @@ int wmain(int argc, wchar_t** argv) {
     // provisional identity used for the first video/audio packets.
     const std::string y4m_header = "YUV4MPEG2 W334 H720 F30:1 Ip A0:0 C420mpeg2\nFRAME\n";
     const auto video_written = write_all(video_pipe, y4m_header.data(), y4m_header.size()) &&
-        write_all(video_pipe, frame.data(), frame.size());
+        write_all(video_pipe, frame.data(), frame.size()) && received();
     // Continuous pipe: landscape with a different byte count, then portrait.
-    bool rotation_written = true;
+    // Wait for each observation so the host's newest-frame queue cannot
+    // intentionally coalesce frames that the test expects to see separately.
+    bool rotation_written = video_written;
     for (const auto [w, h] : {std::pair{960U, 540U}, std::pair{334U, 720U}}) {
         std::vector<std::uint8_t> rotated(static_cast<std::size_t>(w) * h * 3U / 2U, 0x40);
         for (unsigned int row = 0; row < h; ++row)
@@ -175,20 +188,16 @@ int wmain(int argc, wchar_t** argv) {
         // Deliberately fragment the replacement header across pipe writes.
         rotation_written = rotation_written && write_all(video_pipe, header.data(), 7) &&
             write_all(video_pipe, header.data() + 7, header.size() - 7) &&
-            write_all(video_pipe, rotated.data(), rotated.size());
+            write_all(video_pipe, rotated.data(), rotated.size()) && received();
     }
-    const auto audio_written = write_all(audio_pipe, pcm.data(), pcm.size());
-    FlushFileBuffers(video_pipe);
-    FlushFileBuffers(audio_pipe);
-    Sleep(200);
+    const auto audio_written = rotation_written && write_all(audio_pipe, pcm.data(), pcm.size()) && received();
     // Match FDH2/UxPlay's stable, user-facing connection log format.
     DWORD ignored{};
     const char connection[] =
         "connection request from Fixture iPhone (iPhone14,2) with deviceID = fixture-id\n";
-    WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), connection,
-        static_cast<DWORD>(sizeof(connection) - 1), &ignored, nullptr);
-    Sleep(400);
+    const auto identity_written = audio_written && WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), connection,
+        static_cast<DWORD>(sizeof(connection) - 1), &ignored, nullptr) && received();
     CloseHandle(video_pipe);
     CloseHandle(audio_pipe);
-    return video_written && rotation_written && audio_written ? 0 : 4;
+    return identity_written ? 0 : 4;
 }

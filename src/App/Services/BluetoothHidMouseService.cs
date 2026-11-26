@@ -1482,6 +1482,16 @@ internal sealed class BluetoothHidMouseService : IAsyncDisposable
         await SendNavigationControlAsync(NavigationMenu, canSend).ConfigureAwait(false);
     }
 
+    internal bool CanSendSystemShortcutTo(string deviceUdid, string clientId, bool navigation) =>
+        IsAdvertising && !HasTransportFailure &&
+        string.Equals(_targetDeviceUdid, deviceUdid, StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(TargetClientId, clientId, StringComparison.OrdinalIgnoreCase) &&
+        (navigation ? HasTargetSubscriber(_navigationReport) :
+            IsKeyboardReady && HasTargetSubscriber(_consumerReport));
+
+    internal Task SendIphoneHomeNavigationAsync(Func<bool> canSend) =>
+        SendNavigationControlAsync(NavigationMenu, canSend);
+
     internal Task SendIphoneAppSwitcherAsync(string? expectedTargetDeviceUdid,
         Func<bool>? canSend = null)
     {

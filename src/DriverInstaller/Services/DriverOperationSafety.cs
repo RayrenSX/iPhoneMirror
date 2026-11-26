@@ -27,6 +27,20 @@ internal static class DriverOperationSafety
     internal static bool NeedsHealthCheck(DriverOperationKind kind, bool initiallyPresent) =>
         kind != DriverOperationKind.Uninstall || initiallyPresent;
 
+    internal static bool IsFilterReady(AppleDeviceRecord device, LibUsbStackStatus stack) =>
+        IsCaptureFilterConfigured(device) && stack.ServiceInstalled && stack.ServiceRunning && stack.FilesMatch;
+
+    internal static bool IsCaptureFilterConfigured(AppleDeviceRecord device) =>
+        device.IsHealthy && device.IsCaptureParent && device.HasLibUsb0Filter;
+
+    internal static bool CanApplyCaptureFilter(AppleDeviceRecord device, DriverOperationKind kind) =>
+        device.IsPresent && device.IsCaptureParent && kind switch
+        {
+            DriverOperationKind.Install => device.IsHealthy,
+            DriverOperationKind.Repair => device.HasLibUsb0Filter,
+            _ => false,
+        };
+
     internal static bool IsReconnectComplete(AppleDeviceRecord? device,
         DriverOperationKind kind, ParentDriverChoice? expectedDriver = null) =>
         device is { IsHealthy: true } && kind switch
@@ -34,7 +48,7 @@ internal static class DriverOperationSafety
             DriverOperationKind.Uninstall => !device.HasLibUsb0Filter,
             DriverOperationKind.ParentRepair => expectedDriver is null ||
                 ParentDriverChange.BindingMatches(device, expectedDriver),
-            _ => device.IsCaptureParent && device.HasLibUsb0Filter,
+            _ => IsCaptureFilterConfigured(device),
         };
 
     internal static string[] RemoveDeviceArguments(string instanceId, int windowsBuild) =>

@@ -1,6 +1,7 @@
 """Audit first-party UI resources and generate the complete multilingual matrix.
 
 Run: python scripts/audit_localization.py [--write-report]
+Reports: work/diagnostics/localization/LOCALIZATION-AUDIT.md (ignored output).
 No third-party dependencies. Does not run the driver cleanup script or touch devices.
 """
 from __future__ import annotations
@@ -339,73 +340,34 @@ def cell(value):
 
 
 def write_report(catalogs, references, inventory, errors, warnings):
-    changes_path = ROOT/'docs/localization-audit-changes.json'
-    changes = json.loads(changes_path.read_text(encoding='utf-8')) if changes_path.exists() else {}
-    labels = {'缺失翻译':'❌ 缺失', '错误翻译':'❌ 含义不一致', '语义不一致':'❌ 含义不一致',
-              '占位符问题':'❌ 占位符不一致', '术语不一致':'❌ 术语不一致', '可读性问题':'⚠️ 需要优化'}
-    counts = Counter(category for issue in changes.values() for category in issue['categories'])
-    lines = ['# 多语言文字一致性审计表', '', '审计日期：2026-10-03。新增独立台湾繁体中文资源。', '',
-             '## 审查范围', '',
-             '支持语言：简体中文（zh-CN）、香港繁体中文（zh-HK）、台湾繁体中文（zh-TW）、英文（en-US）。', '',
-             f'扫描 {len(inventory)} 个第一方源码/脚本文件，核对主程序、驱动管理器的八份语言字典、WPF XAML、C# 提示/错误、独立驱动清理脚本，以及安装器有效语言资源。', '',
-             '主程序覆盖主窗口、设备绑定、蓝牙/有线/无线控制、所有设置与状态窗口、采集恢复、截图、录制、推流、虚拟摄像头、更新、关于、诊断和开发者预览。', '',
-             '语言无关内容（产品名、协议、键名、单位、尺寸、路径、设备自报名称）保持原样。原生库、FFmpeg、Windows 返回的原始诊断及结构化日志事件/字段是技术数据，保留原文用于排错。开发/构建脚本、测试断言、第三方代码和许可证不作为应用 UI 字典翻译。台湾完整更新日志另行校验版本、条目、代码标记及链接；两个串流测试网页也纳入资源表。', '',
-             '硬编码表逐项列出保留的 XAML 品牌、协议、数字、符号和单位；node 是 XML 文档中的节点序号。启动故障的两条消息及五个备用标签均有独立四语回退：它们必须在语言字典加载失败时仍然可用。安装器的更新记录、卸载快捷方式也纳入对应表。', '',
-             '## 问题统计', '', '| 分类 | 受影响条目数（可重叠） |','| --- | ---: |']
-    for category in ('缺失翻译','错误翻译','语义不一致','占位符问题','术语不一致','可读性问题'):
-        lines.append(f'| {category} | {counts[category]} |')
-    lines += ['', f'确认并修复的问题条目：{len(changes)}。问题状态表示**修改前**；表内四语为**修改后**。未发现问题的资源标为“✅ 完全一致”。', '',
-              '缺失翻译按硬编码消息/资源 Key 计数，不按缺少的语言单元格重复计数。静态未发现引用不等于已废弃，全部保留并列出，避免误删外部或动态调用。', '',
-              '## 多语言对照', '']
-    for project,catalog in catalogs.items():
-        lines += [f'### {project}', '', '| Key / 位置 | 简体中文 | 繁體中文（香港） | 繁體中文（台灣） | English | 日本語 | 状态（修改前 → 修改后） | 修改内容 / 使用情况 |', '| --- | --- | --- | --- | --- | --- | --- | --- |']
-        for key in sorted(set().union(*(set(v) for v in catalog.values()))):
-            issue = changes.get(project+'/'+key)
-            status = '✅ 完全一致'
-            note = '保留'
-            if issue:
-                status = '、'.join(dict.fromkeys(labels[c] for c in issue['categories']))+' → ✅ 已修复'
-                note = '；'.join(issue['reasons'])
-            if project in references and key not in references[project]:
-                note += '；静态未发现引用，保留待后续调用核对'
-            if project == 'Hardcoded':
-                note = '品牌、协议、数字、符号或单位；四语通用，保留'
-            elif project == 'StartupFallback':
-                note = '语言字典无法加载时的独立四语回退，保留'
-            elif project == 'Launcher':
-                note += '；独立 CMD 启动器无语言字典，异常时同时显示三语回退'
-            elif project == 'Installer' and key in {'Messages/BeveledLabel', 'Messages/HelpTextNote', 'Messages/AboutSetupNote', 'Messages/TranslatorNote'}:
-                note += '；可选语言包备注/标签，允许为空或按语言不同'
-            lines.append('| '+' | '.join(cell(v) for v in [key, *(catalog[lang].get(key,'[缺失]') for lang in LANGUAGES), status, note])+' |')
+    # Generated matrices are build evidence, not maintained user documentation.
+    from datetime import datetime, timezone
+    report_dir = ROOT/'work/diagnostics/localization'
+    report_dir.mkdir(parents=True, exist_ok=True)
+    checked_at = datetime.now(timezone.utc).isoformat(timespec='seconds')
+    languages = '、'.join(LANGUAGES)
+    lines = ['# 多语言资源检查', '', f'生成时间（UTC）：{checked_at}', '',
+             f'扫描 {len(inventory)} 个第一方源码/脚本文件。语言：{languages}。', '',
+             '本表反映当前源码中的资源值与静态检查；不代表翻译语义、真实界面排版或设备行为已验收。', '',
+             '## 多语言对照', '']
+    for project, catalog in catalogs.items():
+        lines += [f'### {project}', '',
+                  '| Key / 位置 | 简体中文 | 繁體中文（香港） | 繁體中文（台灣） | English | 日本語 |',
+                  '| --- | --- | --- | --- | --- | --- |']
+        for key in sorted(set().union(*(set(values) for values in catalog.values()))):
+            values = [key, *(catalog.get(lang, {}).get(key, '[缺失]') for lang in LANGUAGES)]
+            lines.append('| ' + ' | '.join(cell(value) for value in values) + ' |')
         lines.append('')
-    code_issues = {key: issue for key, issue in changes.items() if key.startswith('Code/')}
-    if code_issues:
-        lines += ['### 代码调用对应关系', '', '| Key / 位置 | 简体中文 | 繁體中文（香港） | 繁體中文（台灣） | English | 日本語 | 状态（修改前 → 修改后） | 修改内容 |', '| --- | --- | --- | --- | --- | --- | --- | --- |']
-        for key, issue in code_issues.items():
-            status = '、'.join(dict.fromkeys(labels[c] for c in issue['categories']))+' → ✅ 已修复'
-            values = issue.get('values', {})
-            lines.append('| '+' | '.join(cell(v) for v in [key, *(values.get(lang, '见对应资源 Key') for lang in LANGUAGES), status, '；'.join(issue['reasons'])])+' |')
-        lines.append('')
-    lines += ['## 代码位置与修改前记录', '', '| Key / 位置 | 修改前文字 | 修改说明 | 当前调用位置 |', '| --- | --- | --- | --- |']
-    for key, issue in sorted(changes.items()):
-        before='；'.join(f'{lang}: {value}' for lang,value in issue.get('before',{}).items() if value is not None)
-        if not before: before='原为代码硬编码；对应源码变更见工作区 diff'
-        locations = '；'.join(issue.get('locations', [])) or '见 Key 所指文件或资源字典'
-        lines.append('| '+' | '.join(cell(v) for v in (key,before,'；'.join(issue['reasons']), locations))+' |')
-    lines += ['', '## 静态未发现引用的资源', '',
-              '以下是保守的字面引用扫描结果，可能包含动态拼接、外部窗口或预留入口；没有据此删除资源。', '']
+    lines += ['## 静态未发现引用的资源', '',
+              '动态拼接和外部调用可能无法被静态扫描识别，不能仅据此删除资源。', '']
     for project, used in references.items():
-        keys = sorted(set(catalogs[project]['en-US'])-used)
-        lines += [f'- {project}：{len(keys)} 项。'+', '.join('`'+key+'`' for key in keys)]
-    lines += ['', '## 完整性检查', '', f'- XML、Key、空值、占位符、文件过滤器、动态状态资源及脚本哈希：{len(errors)} 项错误。',
-              '- 安装器使用本地固定版本 Inno Setup 语言包叠加项目覆盖项核对；未修改上游语言包。',
-              '- 换行保留语义分段，不要求不同语言标点和句法逐字相同。',
-              '- 同时核对位置/命名占位符、printf 占位符以及安装器参数。']
-    for message in errors + warnings: lines.append('- '+message)
-    lines += ['', '台湾新增语言的构建、运行时格式化、语言切换及 UI 布局验证见 [LOCALIZATION-TAIWAN.md](LOCALIZATION-TAIWAN.md)；早期三语审查见 [LOCALIZATION-VALIDATION.md](LOCALIZATION-VALIDATION.md)。', '',
-              '## 扫描文件清单', '']
-    lines += ['- `'+p.relative_to(ROOT).as_posix()+'`' for p in inventory]
-    (ROOT/'docs/LOCALIZATION-AUDIT.md').write_text('\n'.join(lines)+'\n',encoding='utf-8')
+        keys = sorted(set(catalogs[project].get('en-US', {}))-used)
+        lines.append(f'- {project}：{len(keys)} 项。' + ', '.join('`'+key+'`' for key in keys))
+    lines += ['', '## 检查结果', '', f'- 错误：{len(errors)}；提醒：{len(warnings)}。']
+    lines += ['- '+message for message in errors + warnings]
+    lines += ['', '## 扫描文件', '']
+    lines += ['- `'+path.relative_to(ROOT).as_posix()+'`' for path in inventory]
+    (report_dir/'LOCALIZATION-AUDIT.md').write_text('\n'.join(lines)+'\n', encoding='utf-8')
 
 
 if __name__ == '__main__':

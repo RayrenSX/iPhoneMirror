@@ -6,7 +6,13 @@ namespace IPhoneMirror.App.Services.ExplorerMapping;
 // An implementation must reject symlinks and recheck the expected snapshot for
 // every read; the server never caches a complete phone file on the computer.
 internal sealed record ExplorerFileEntry(string Path, string Name, bool IsDirectory,
-    long Length, DateTimeOffset Modified, ExplorerFileProperties? WindowsProperties = null);
+    long Length, DateTimeOffset Modified, ExplorerFileProperties? WindowsProperties = null, bool IsReadOnly = false);
+
+internal sealed record ExplorerStorageInfo(long TotalBytes, long AvailableBytes)
+{
+    internal bool IsValid => TotalBytes > 0 && AvailableBytes >= 0 && AvailableBytes <= TotalBytes;
+    internal long UsedBytes => TotalBytes - AvailableBytes;
+}
 
 // Windows-specific metadata belongs to the mapped filesystem. Backends must
 // persist supported properties before reporting a successful PROPPATCH. The
@@ -18,7 +24,11 @@ internal sealed record ExplorerFileProperties(DateTimeOffset? CreationTime = nul
 internal interface IExplorerFileStore
 {
     bool IsReadOnly => true;
+    Task<ExplorerStorageInfo?> GetStorageAsync(CancellationToken cancellation) => Task.FromResult<ExplorerStorageInfo?>(null);
     Task<ExplorerFileEntry?> StatAsync(string path, CancellationToken cancellation);
+    // Directory previews may be cached. Content headers and mutations must use
+    // a live snapshot, even when the displayed tree came from a previous run.
+    Task<ExplorerFileEntry?> StatFreshAsync(string path, CancellationToken cancellation) => StatAsync(path, cancellation);
     Task<IReadOnlyList<ExplorerFileEntry>> ListAsync(string path, CancellationToken cancellation);
     Task<ReadOnlyMemory<byte>> ReadAsync(ExplorerFileEntry expected, long offset, int count,
         CancellationToken cancellation);

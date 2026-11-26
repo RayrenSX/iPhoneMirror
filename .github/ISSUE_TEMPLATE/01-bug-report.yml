@@ -17,8 +17,8 @@ body:
     id: version
     attributes:
       label: 软件版本｜App version
-      description: 从「关于」页复制完整版本号，并说明安装版或便携版。Copy the full version from About and specify installer or portable.
-      placeholder: v1.8.5-pre3，安装版｜installer
+      description: 从「关于」复制含提交后缀的完整版本号，并注明安装版、便携版或本地构建。Copy the full version from About, including the commit suffix if shown, and specify Setup, portable ZIP, or local build.
+      placeholder: 从「关于」复制版本，注明 Setup / ZIP / local build｜Copy from About
     validations:
       required: true
   - type: dropdown
@@ -39,6 +39,7 @@ body:
       options:
         - USB 有线投屏与设备发现｜USB mirroring and device discovery
         - AirPlay 无线投屏与接收器发现｜AirPlay mirroring and receiver discovery
+        - 已配对无线发现与 CoreDevice 投屏｜Paired-wireless discovery and CoreDevice video
         - USB 或 Wi-Fi 反向控制｜USB or Wi-Fi reverse control
         - 蓝牙反向控制与配对｜Bluetooth reverse control and pairing
         - 驱动安装与设置助手｜Driver installation and setup
@@ -46,6 +47,9 @@ body:
         - 音频与麦克风｜Audio and microphone
         - 录屏与保存｜Recording and saving
         - 直播与 OBS 输出｜Live streaming and OBS output
+        - 应用、文件与资源管理器映射｜Apps, files and Explorer mapping
+        - IPA 签名与安装｜IPA signing and installation
+        - HTTP API、Python SDK 与 MCP｜HTTP API, Python SDK and MCP
         - 界面、窗口与快捷键｜Interface, windows and shortcuts
         - 更新、下载或其他问题｜Updates, downloads or other issues
     validations:

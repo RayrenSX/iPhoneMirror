@@ -1,6 +1,6 @@
 # USB 反控组件来源与许可证说明
 
-本页描述桥接器构建来源和主要依赖，不替代各组件完整许可证。iPhoneMirror 自有代码的
+本页描述 iPhoneMirror v1.8.5-pre7 随附桥接器的构建来源及主要依赖。具体许可义务见各组件完整文本。iPhoneMirror 自有代码的
 GPL-3.0-only 不会自动改变独立桥接器或第三方代码的许可。
 
 ## iUsbBridge 与 USBMux 代码来源
@@ -40,7 +40,7 @@ GPL-3.0-only 不会自动改变独立桥接器或第三方代码的许可。
 - 用途: SRP-6a、X25519/Ed25519、ChaCha20Poly1305
 - 来源: https://github.com/pyca/cryptography
 
-## srptools
+## srptools（传递依赖）
 - 许可证: MIT
 - 用途: SRP-6a 协议
 - 来源: https://github.com/idomir/srptools
@@ -50,9 +50,9 @@ GPL-3.0-only 不会自动改变独立桥接器或第三方代码的许可。
 - 用途: 二进制协议解析
 - 来源: https://github.com/construct/construct
 
-## frida 17.17.0
-- 许可证: Frida 自有许可证 (非分发依赖，仅用于逆向分析)
-- 用途: 动态追踪 sidecar 行为（分析阶段使用，不包含在最终交付中）
+## 签名工作进程依赖
+
+当前配方另固定 `srp==1.0.22`、`requests==2.34.2` 和 `wsproto==1.3.2`，供 IPA 签名工作进程使用。许可与引擎来源统一见[第三方声明](../THIRD_PARTY_NOTICES.md#ipa-signing-engine)。Frida 属于历史分析工具，不是当前交付依赖，不在这里列为运行时组件。
 
 ## pyinstaller 6.21.0
 - 许可证: GPL-2.0-or-later (with bootloader exception)
