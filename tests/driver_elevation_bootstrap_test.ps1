@@ -46,7 +46,7 @@ try {
     }
 
     $start = New-IsolatedDriverStartInfo $destination $target '--sentinel'
-    $expected = @('SystemRoot', 'WINDIR', 'PATH', 'PSModulePath', 'TEMP', 'TMP',
+    $expected = @('SystemRoot', 'WINDIR', 'PATH', 'PATHEXT', 'PSModulePath', 'TEMP', 'TMP',
         'DOTNET_BUNDLE_EXTRACT_BASE_DIR')
     if ($start.EnvironmentVariables.Count -ne $expected.Count) {
         throw 'The driver environment inherited unexpected variables.'
@@ -56,6 +56,7 @@ try {
     }
     if ($start.FileName -ne $destination -or $start.WorkingDirectory -ne $target -or
         $start.UseShellExecute -or $start.EnvironmentVariables['PATH'] -ne [Environment]::SystemDirectory -or
+        $start.EnvironmentVariables['PATHEXT'] -cne '.EXE' -or
         $start.EnvironmentVariables['DOTNET_BUNDLE_EXTRACT_BASE_DIR'] -ne (Join-Path $target 'runtime')) {
         throw 'The driver start information can escape its staging directory.'
     }
