@@ -4,7 +4,7 @@
     }
 
     $notesDirectory = Join-Path $Root 'docs/releases'
-    $generatedContent = '(?mi)^##[ \t]+(?:Release assets|发布资产|發行資產)[ \t]*\r?$|<!-- release-(?:assets|notes):'
+    $generatedContent = '(?mi)^##[ \t]+(?:Release assets|发布资产|發行資產)[ \t]*\r?$|<!-- (?:release-(?:assets|notes)|iphonemirror-localized-notes):'
     $translations = [ordered]@{}
     foreach ($language in @('zh-CN', 'zh-HK', 'zh-TW', 'ja-JP')) {
         $path = Join-Path $notesDirectory "$Tag.$language.md"
@@ -32,7 +32,13 @@
     return @{ English = $english; Translations = $translations }
 }
 
-function Format-PublicReleaseNotes([string]$English, [string]$Repository, [string]$Tag) {
+function Format-PublicReleaseNotes([hashtable]$Sources, [string]$Repository, [string]$Tag) {
     $chinese = "https://github.com/$Repository/blob/$Tag/docs/releases/$Tag.zh-CN.md"
-    return $English + "`n`n<!-- release-notes:translation-link -->`n[简体中文发布说明]($chinese)"
+    # GitHub hides the comment when rendering Markdown. The API returns it
+    # with the release metadata, so update windows need no separate requests.
+    $json = ConvertTo-Json -InputObject $Sources.Translations -Compress
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($json))
+    if ($encoded.Length -gt 64kb) { throw "Localized notes for $Tag exceed 64 KiB when encoded." }
+    return $Sources.English + "`n`n<!-- release-notes:translation-link -->`n[简体中文发布说明]($chinese)" +
+        "`n`n<!-- iphonemirror-localized-notes:v1`n$encoded`n-->"
 }

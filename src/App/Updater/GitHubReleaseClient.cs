@@ -133,7 +133,6 @@ internal sealed class GitHubReleaseClient : IDisposable
 {
     private const long MaximumUpdateBytes = 2L * 1024 * 1024 * 1024;
     private const int MaximumReleaseListCharacters = 4 * 1024 * 1024;
-    private const int MaximumReleaseNotesCharacters = 1024 * 1024;
     private const int MaximumChecksumCharacters = 1024 * 1024;
     private const int MirrorProbeBytes = 256 * 1024;
     private static readonly TimeSpan CandidatePingWindow = TimeSpan.FromSeconds(5);
@@ -358,108 +357,6 @@ internal sealed class GitHubReleaseClient : IDisposable
         throw new HttpRequestException(
             LocalizationService.Get("UpdateEndpointsUnavailable"), lastError);
     }
-
-    internal async Task<ReleaseInfo> EnrichReleaseNotesAsync(ReleaseInfo release,
-        CancellationToken cancellationToken = default)
-    {
-        var language = LocalizationService.EffectiveCulture.Name;
-        var needsTranslation = LocalizedReleaseNotes.TranslationLanguages.Contains(language) &&
-            !release.LocalizedNotes.ContainsKey(language);
-        var taggedNotes = ReadTaggedNotesAsync(release.TagName,
-            $"docs/releases/{release.TagName}.md", cancellationToken);
-        var translation = needsTranslation
-            ? GetLocalizedReleaseNotesAsync(release.TagName, language, cancellationToken)
-            : Task.FromResult(default(ReleaseNoteLookup));
-        await Task.WhenAll(taggedNotes, translation);
-
-        release = release with { TaggedBody = (await taggedNotes).Body };
-        var localized = await translation;
-        if (needsTranslation && !localized.Retryable)
-        {
-            var notes = new Dictionary<string, string?>(release.LocalizedNotes, StringComparer.Ordinal)
-            {
-                [language] = localized.Body,
-            };
-            release = release with { LocalizedNotes = notes };
-        }
-        return release;
-    }
-
-    internal async Task<ReleaseNoteLookup> GetLocalizedReleaseNotesAsync(string tag, string language,
-        CancellationToken cancellationToken)
-    {
-        if (!LocalizedReleaseNotes.TranslationLanguages.Contains(language)) return default;
-
-        var notes = await ReadTaggedNotesAsync(tag, $"docs/releases/{tag}.{language}.md", cancellationToken);
-        if (notes.Body is not null || language != LocalizationService.TraditionalChineseTaiwan)
-            return notes;
-
-        var changelog = await ReadTaggedNotesAsync(tag, "CHANGELOG.zh-TW.md", cancellationToken);
-        var legacyBody = changelog.Body is null ? null : LocalizedReleaseNotes.FindSection(changelog.Body, tag);
-        return new(legacyBody, legacyBody is null && (notes.Retryable || changelog.Retryable));
-    }
-
-    internal readonly record struct ReleaseNoteLookup(string? Body, bool Retryable);
-
-    private async Task<ReleaseNoteLookup> ReadTaggedNotesAsync(string tag, string path,
-        CancellationToken cancellationToken)
-    {
-        var escapedTag = Uri.EscapeDataString(tag);
-        var escapedPath = string.Join('/', path.Split('/').Select(Uri.EscapeDataString));
-        var rawUri = new Uri($"https://raw.githubusercontent.com/RayrenSX/iPhoneMirror/{escapedTag}/{escapedPath}");
-        try
-        {
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeout.CancelAfter(TimeSpan.FromSeconds(5));
-            using var rawTimeout = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token);
-            rawTimeout.CancelAfter(TimeSpan.FromSeconds(3));
-            try
-            {
-                return new(await FetchTaggedNotesAsync(rawUri, false, rawTimeout.Token), false);
-            }
-            catch (Exception error) when (
-                error is OperationCanceledException && !timeout.IsCancellationRequested ||
-                error is HttpRequestException { StatusCode: null or HttpStatusCode.Forbidden or
-                    HttpStatusCode.TooManyRequests or >= HttpStatusCode.InternalServerError })
-            {
-                var apiUri = new Uri("https://api.github.com/repos/RayrenSX/iPhoneMirror/contents/" +
-                    $"{escapedPath}?ref={escapedTag}");
-                var body = await FetchTaggedNotesAsync(apiUri, true, timeout.Token);
-                return new(body, body is null);
-            }
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
-        catch (Exception error) when (error is HttpRequestException or OperationCanceledException or InvalidDataException)
-        {
-            DiagnosticLogger.Exception("updater", "release_notes_unavailable", error,
-                ("release", tag), ("path", path));
-            return new(null, true);
-        }
-    }
-
-    private async Task<string?> FetchTaggedNotesAsync(Uri uri, bool useApi,
-        CancellationToken cancellationToken)
-    {
-        using var request = new HttpRequestMessage(HttpMethod.Get, uri);
-        if (useApi)
-            request.Headers.Accept.ParseAdd("application/vnd.github.raw+json");
-        using var response = await _httpClient.SendAsync(request,
-            HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-        if (response.RequestMessage?.RequestUri != uri)
-            throw new InvalidDataException(LocalizationService.Get("UpdateUntrustedNotesRedirect"));
-        if (response.StatusCode == HttpStatusCode.NotFound) return null;
-        response.EnsureSuccessStatusCode();
-        if (useApi && !string.Equals(response.Content.Headers.ContentType?.MediaType,
-                "application/vnd.github.raw+json", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidDataException("GitHub did not return raw release notes.");
-        var text = await ReadReleaseNotesAsync(response.Content, cancellationToken);
-        return string.IsNullOrWhiteSpace(text) ? null : text.Trim();
-    }
-
-    private static async Task<string> ReadReleaseNotesAsync(HttpContent content,
-        CancellationToken cancellationToken) =>
-        await ReadBoundedTextAsync(content, MaximumReleaseNotesCharacters,
-            "The release notes are unexpectedly large.", cancellationToken);
 
     private async Task<string> ReadReleaseListAsync(Uri endpoint,
         CancellationToken cancellationToken)

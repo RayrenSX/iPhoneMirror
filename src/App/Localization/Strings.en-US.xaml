@@ -1090,7 +1090,6 @@
     <system:String x:Key="ControlProgressSkipped">Skipped</system:String>
     <system:String x:Key="ControlProgressPending">Pending</system:String>
     <system:String x:Key="ReleaseNotesEmpty">No release notes were provided.</system:String>
-    <system:String x:Key="ReleaseNotesLoading">Loading release notes…</system:String>
     <system:String x:Key="ControlStageStopping">Disconnecting control</system:String>
     <system:String x:Key="AirPlayEmptyState">On your iPhone, open Control Center, tap Screen Mirroring, then select this PC.</system:String>
     <system:String x:Key="AirPlayWaitingForDevice">Waiting for your iPhone. It will appear here once it connects.</system:String>
@@ -1191,7 +1190,6 @@
     <system:String x:Key="UpdatePackageTooLarge">The update package exceeds the allowed size.</system:String>
     <system:String x:Key="UpdateUntrustedAssetUrl">The update download URL is not trusted.</system:String>
     <system:String x:Key="UpdateUntrustedRedirect">The update service redirected to an untrusted host.</system:String>
-    <system:String x:Key="UpdateUntrustedNotesRedirect">The release notes URL redirected to an untrusted host.</system:String>
     <system:String x:Key="UpdateReleaseListTooLarge">The release list exceeds the allowed size.</system:String>
     <system:String x:Key="UpdateDownloadEndpointsUnavailable">All update download routes are temporarily unavailable.</system:String>
     <system:String x:Key="UpdateChecksumRequired">This release does not provide a trusted SHA-256 value and cannot be installed.</system:String>

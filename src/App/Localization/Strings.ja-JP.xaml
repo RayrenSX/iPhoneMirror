@@ -1090,7 +1090,6 @@
     <system:String x:Key="ControlProgressSkipped">スキップ</system:String>
     <system:String x:Key="ControlProgressPending">待機中</system:String>
     <system:String x:Key="ReleaseNotesEmpty">リリースノートはありません。</system:String>
-    <system:String x:Key="ReleaseNotesLoading">リリースノートを読み込んでいます…</system:String>
     <system:String x:Key="ControlStageStopping">操作を切断中</system:String>
     <system:String x:Key="AirPlayEmptyState">iPhoneでコントロールセンターを開き、「画面ミラーリング」をタップしてこのPCを選択してください。</system:String>
     <system:String x:Key="AirPlayWaitingForDevice">iPhoneの接続を待っています。接続されるとここに表示されます。</system:String>
@@ -1191,7 +1190,6 @@
     <system:String x:Key="UpdatePackageTooLarge">アップデートパッケージが許容サイズを超えています。</system:String>
     <system:String x:Key="UpdateUntrustedAssetUrl">アップデートのダウンロードURLは信頼できません。</system:String>
     <system:String x:Key="UpdateUntrustedRedirect">アップデートサービスが信頼できないホストへリダイレクトしました。</system:String>
-    <system:String x:Key="UpdateUntrustedNotesRedirect">リリースノートのURLが信頼できないホストへリダイレクトしました。</system:String>
     <system:String x:Key="UpdateReleaseListTooLarge">リリース一覧が許容サイズを超えています。</system:String>
     <system:String x:Key="UpdateDownloadEndpointsUnavailable">アップデートのダウンロード経路がすべて一時的に利用できません。</system:String>
     <system:String x:Key="UpdateChecksumRequired">このリリースには信頼できるSHA-256値がないため、インストールできません。</system:String>

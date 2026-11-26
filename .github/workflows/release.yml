@@ -91,7 +91,8 @@ jobs:
           RELEASE_TAG: ${{ steps.version.outputs.tag }}
         run: |
           . ./scripts/ReleaseNotes.ps1
-          Read-ReleaseNoteSources $env:GITHUB_WORKSPACE $env:RELEASE_TAG -RequireTranslations | Out-Null
+          $sources = Read-ReleaseNoteSources $env:GITHUB_WORKSPACE $env:RELEASE_TAG -RequireTranslations
+          Format-PublicReleaseNotes $sources $env:GITHUB_REPOSITORY $env:RELEASE_TAG | Out-Null
 
       - name: Verify all App and Driver localization dictionaries
         shell: pwsh
@@ -293,7 +294,7 @@ jobs:
               throw "The fallback manifest $language notes do not match $env:RELEASE_TAG."
             }
           }
-          $template = Format-PublicReleaseNotes $sources.English $env:GITHUB_REPOSITORY $env:RELEASE_TAG
+          $template = Format-PublicReleaseNotes $sources $env:GITHUB_REPOSITORY $env:RELEASE_TAG
 
           $assetSection = [Collections.Generic.List[string]]::new()
           $assetSection.Add('<!-- release-assets:start -->')

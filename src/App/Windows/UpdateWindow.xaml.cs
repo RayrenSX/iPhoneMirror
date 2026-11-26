@@ -12,7 +12,7 @@ namespace IPhoneMirror.App.Windows;
 
 public partial class UpdateWindow : IPhoneMirror.UI.Controls.RoundedWindow, INotifyPropertyChanged
 {
-    private ReleaseInfo _release;
+    private readonly ReleaseInfo _release;
     private readonly GitHubReleaseClient _client;
     private readonly bool _allowMirrorFallback;
     private readonly bool _readOnlyPreview;
@@ -27,7 +27,6 @@ public partial class UpdateWindow : IPhoneMirror.UI.Controls.RoundedWindow, INot
     private string _speedText = string.Empty;
     private string _updateButtonText;
     private string _displayedReleaseBody = string.Empty;
-    private readonly HashSet<string> _loadingNotes = new(StringComparer.Ordinal);
 
     public event PropertyChangedEventHandler? PropertyChanged;
     public string CurrentVersion => VersionManager.DisplayVersion;
@@ -72,13 +71,11 @@ public partial class UpdateWindow : IPhoneMirror.UI.Controls.RoundedWindow, INot
             OnPropertyChanged(nameof(StatusText));
             OnPropertyChanged(nameof(UpdateButtonText));
             OnPropertyChanged(nameof(ReleaseName));
-            _ = EnsureLocalizedReleaseNotesAsync();
             RefreshReleaseNotes();
         });
         RefreshReleaseNotes();
         Loaded += (_, _) =>
         {
-            _ = EnsureLocalizedReleaseNotesAsync();
             if (autoDownload) _ = DownloadAndInstallAsync();
         };
         Closed += OnClosed;
@@ -86,45 +83,11 @@ public partial class UpdateWindow : IPhoneMirror.UI.Controls.RoundedWindow, INot
 
     private void RefreshReleaseNotes()
     {
-        var language = LocalizationService.EffectiveCulture.Name;
         var body = _readOnlyPreview ? LocalizationService.RefreshText(_release.Body)
-            : _loadingNotes.Contains(language) && LocalizedReleaseNotes.TranslatedBody(_release, language) is null
-                ? LocalizationService.Get("ReleaseNotesLoading")
-                : LocalizedReleaseNotes.Body(_release, language);
+            : LocalizedReleaseNotes.Body(_release);
         if (body.Length > 0 && body == _displayedReleaseBody && ReleaseNotesViewer.Document is not null) return;
         _displayedReleaseBody = body;
         ReleaseNotesViewer.Document = MarkdownFlowDocumentRenderer.Render(body);
-    }
-
-    private async Task EnsureLocalizedReleaseNotesAsync()
-    {
-        var language = LocalizationService.EffectiveCulture.Name;
-        if (_readOnlyPreview || !IsLoaded || _closed ||
-            !LocalizedReleaseNotes.TranslationLanguages.Contains(language) ||
-            _release.LocalizedNotes.ContainsKey(language) || !_loadingNotes.Add(language)) return;
-
-        RefreshReleaseNotes();
-        try
-        {
-            var lookup = await _client.GetLocalizedReleaseNotesAsync(_release.TagName, language, _token);
-            if (_token.IsCancellationRequested || lookup.Retryable) return;
-            var notes = new Dictionary<string, string?>(_release.LocalizedNotes, StringComparer.Ordinal)
-            {
-                [language] = lookup.Body,
-            };
-            _release = _release with { LocalizedNotes = notes };
-        }
-        catch (OperationCanceledException) when (_token.IsCancellationRequested) { }
-        catch (Exception error)
-        {
-            DiagnosticLogger.Exception("updater", "localized_notes_refresh_failed", error,
-                ("release", _release.TagName), ("language", language));
-        }
-        finally
-        {
-            _loadingNotes.Remove(language);
-            if (!_token.IsCancellationRequested) RefreshReleaseNotes();
-        }
     }
 
     private async void OnUpdateClick(object sender, RoutedEventArgs e) =>

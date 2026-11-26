@@ -26,27 +26,16 @@ internal static partial class LocalizedReleaseNotes
 
     internal static string Body(ReleaseInfo release, string language)
     {
-        if (TranslatedBody(release, language) is { } translation) return translation;
-
-        var tagged = LegacyBodies(release.TaggedBody);
-        var published = LegacyBodies(release.Body);
-        return tagged.English ?? published.English ?? tagged.Chinese ?? published.Chinese ?? string.Empty;
-    }
-
-    internal static string? TranslatedBody(ReleaseInfo release, string language)
-    {
-        if (release.LocalizedNotes.TryGetValue(language, out var localized) &&
-            !string.IsNullOrWhiteSpace(localized))
+        if (release.LocalizedNotes.TryGetValue(language, out var localized))
             return localized;
+        if (language == LocalizationService.TraditionalChineseTaiwan &&
+            FindSection(TaiwanChangelog.Value, release.TagName) is { } taiwan)
+            return taiwan;
 
-        return language switch
-        {
-            LocalizationService.TraditionalChineseTaiwan =>
-                FindSection(TaiwanChangelog.Value, release.TagName),
-            LocalizationService.SimplifiedChinese =>
-                LegacyBodies(release.TaggedBody).Chinese ?? LegacyBodies(release.Body).Chinese,
-            _ => null,
-        };
+        var notes = LegacyBodies(release.Body);
+        return language == LocalizationService.SimplifiedChinese
+            ? notes.Chinese ?? notes.English ?? string.Empty
+            : notes.English ?? notes.Chinese ?? string.Empty;
     }
 
     private static (string? English, string? Chinese) LegacyBodies(string? source)

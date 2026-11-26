@@ -2718,6 +2718,7 @@ const string releaseFixture = """
   },
   {
     "tag_name": "v1.3.1",
+    "localized_notes": { "zh-CN": "完整中文说明" },
     "name": "Stable",
     "body": "# Added\nFeature",
     "published_at": "2026-07-27T10:00:00Z",
@@ -2767,7 +2768,7 @@ Equal("日本語", LocalizedReleaseNotes.Body(releaseWithTranslations, "ja-JP"),
 var combinedNotes = releaseWithTranslations with
 {
     Body = "中文说明\r\n\r\n---\r\n\r\n### Added\r\n\r\nEnglish change\r\n\r\n<!-- release-assets:start -->\r\n## 发布资产",
-    LocalizedNotes = new Dictionary<string, string?>(),
+    LocalizedNotes = new Dictionary<string, string>(),
 };
 Equal("中文说明", LocalizedReleaseNotes.Body(combinedNotes, "zh-CN"), "legacy Chinese body excludes English and assets");
 Equal("### Added\r\n\r\nEnglish change", LocalizedReleaseNotes.Body(combinedNotes, "en-US"),
@@ -2776,21 +2777,38 @@ Equal("### Added\r\n\r\nEnglish change", LocalizedReleaseNotes.Body(combinedNote
     "untranslated legacy notes use the English section");
 var legacySummary = combinedNotes with
 {
-    TaggedBody = "中文说明\r\n\r\nv1.8.3 is a maintenance release.\r\n\r\n### Fixed\r\n\r\nEnglish details",
+    Body = "中文说明\r\n\r\nv1.8.3 is a maintenance release.\r\n\r\n### Fixed\r\n\r\nEnglish details",
 };
 Equal("中文说明", LocalizedReleaseNotes.Body(legacySummary, "zh-CN"),
     "older standalone English summaries do not appear in the Chinese body");
 Equal("v1.8.3 is a maintenance release.\r\n\r\n### Fixed\r\n\r\nEnglish details",
     LocalizedReleaseNotes.Body(legacySummary, "en-US"), "older English summaries are retained");
-var publishedEnglish = combinedNotes with
+var publishedTranslations = System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, string>
 {
-    TaggedBody = "仅保存了中文版",
-    Body = "English body\n\n<!-- release-notes:translation-link -->\n[简体中文发布说明](https://github.com)",
-};
-Equal("English body", LocalizedReleaseNotes.Body(publishedEnglish, "en-US"),
-    "the published English body remains available when the tagged file is Chinese-only");
-Equal("仅保存了中文版", LocalizedReleaseNotes.Body(publishedEnglish, "zh-CN"),
-    "the tagged Chinese body remains available independently of the public English body");
+    ["zh-CN"] = "简体更新说明",
+    ["zh-HK"] = "香港更新說明",
+    ["zh-TW"] = "臺灣更新說明",
+    ["ja-JP"] = "日本語の更新情報",
+});
+var encodedTranslations = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(publishedTranslations));
+var publicBody = "English body\n\n<!-- release-notes:translation-link -->\n[简体中文发布说明](https://github.com)" +
+    "\n\n<!-- iphonemirror-localized-notes:v1\n" + encodedTranslations + "\n-->";
+var publicReleaseJson = System.Text.Json.JsonSerializer.Serialize(new[]
+{
+    new { tag_name = "v1.9.0", prerelease = false, body = publicBody },
+});
+var publicRelease = ReleaseParser.ParseLatest(publicReleaseJson, true, false)!;
+Equal("English body", LocalizedReleaseNotes.Body(publicRelease, "en-US"),
+    "the public notes keep the English body and omit generated data from the updater");
+Equal("简体更新说明", LocalizedReleaseNotes.Body(publicRelease, "zh-CN"),
+    "the GitHub release response carries Simplified Chinese without another request");
+Equal("香港更新說明", LocalizedReleaseNotes.Body(publicRelease, "zh-HK"), "GitHub release Hong Kong notes");
+Equal("臺灣更新說明", LocalizedReleaseNotes.Body(publicRelease, "zh-TW"), "GitHub release Taiwan notes");
+Equal("日本語の更新情報", LocalizedReleaseNotes.Body(publicRelease, "ja-JP"), "GitHub release Japanese notes");
+var invalidNotes = ReleaseParser.ParseLatest(
+    publicReleaseJson.Replace(encodedTranslations, "invalid", StringComparison.Ordinal), true, false)!;
+Equal("English body", LocalizedReleaseNotes.Body(invalidNotes, "ja-JP"),
+    "malformed localized data does not hide the default release notes");
 Equal("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     ReleaseParser.FindExpectedSha256(
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  iPhoneMirror-Setup-v1.3.1-x64.exe\n",
@@ -3575,13 +3593,6 @@ try
                 return Task.FromException<HttpResponseMessage>(
                     new HttpRequestException("simulated GitHub API outage"));
             if (host.Equals("raw.githubusercontent.com",
-                    StringComparison.OrdinalIgnoreCase) &&
-                request.RequestUri?.AbsolutePath.Contains("/docs/releases/",
-                    StringComparison.Ordinal) == true)
-                return Task.FromResult(HttpResponse(request,
-                    new StringContent("# Stable release\n\n完整中文说明\n\n### Fixed\n\nFull English notes.",
-                        System.Text.Encoding.UTF8, "text/markdown")));
-            if (host.Equals("raw.githubusercontent.com",
                     StringComparison.OrdinalIgnoreCase))
                 return Task.FromResult(HttpResponse(request,
                     new StringContent(releaseFixture,
@@ -3601,14 +3612,8 @@ try
         "release check falls back to official GitHub Raw metadata when the API fails");
     Sequence(["api.github.com", "raw.githubusercontent.com"], releaseRequests,
         "release metadata lookup does not fetch full notes before version comparison");
-    fallbackRelease = await releaseClient.EnrichReleaseNotesAsync(fallbackRelease!);
-    Equal(true, LocalizedReleaseNotes.Body(fallbackRelease, "zh-CN").Contains("完整中文说明",
-            StringComparison.Ordinal) == true,
-        "fallback metadata keeps the complete tagged Chinese notes available");
-    Equal("### Fixed\n\nFull English notes.", LocalizedReleaseNotes.Body(fallbackRelease, "en-US"),
-        "the same tag also supplies English-only notes");
-    Sequence(["api.github.com", "raw.githubusercontent.com", "raw.githubusercontent.com"], releaseRequests,
-        "release check uses only official GitHub metadata endpoints");
+    Equal("完整中文说明", LocalizedReleaseNotes.Body(fallbackRelease!, "zh-CN"),
+        "fallback manifest includes the selected language without a notes request");
 
     await ThrowsAsync<HttpRequestException>(async () =>
         await releaseClient.GetLatestAsync(new UpdateSettings
@@ -3616,22 +3621,9 @@ try
             AllowMirrorFallback = false,
             NotifyStableReleases = true,
         }), "disabled release mirror fallback does not contact alternate endpoints");
-    Equal(2, releaseRequests.Count(host => host.Equals("raw.githubusercontent.com",
+    Equal(1, releaseRequests.Count(host => host.Equals("raw.githubusercontent.com",
             StringComparison.OrdinalIgnoreCase)),
         "disabled metadata fallback does not add another GitHub Raw request");
-
-    var oversizedNotes = new string('x', 1024 * 1024 + 1);
-    using var oversizedNotesHttpClient = new HttpClient(new StubHttpMessageHandler(
-        (request, _) => Task.FromResult(HttpResponse(request,
-            new StringContent(oversizedNotes, System.Text.Encoding.UTF8,
-                "text/markdown")))));
-    using var oversizedNotesClient = new GitHubReleaseClient(oversizedNotesHttpClient,
-        Path.Combine(updateNetworkRoot, "oversized-notes"));
-    var oversizedNotesRelease = fallbackRelease with { Body = "metadata notes" };
-    var limitedNotesRelease = await oversizedNotesClient.EnrichReleaseNotesAsync(
-        oversizedNotesRelease);
-    Equal("metadata notes", LocalizedReleaseNotes.Body(limitedNotesRelease, "en-US"),
-        "oversized release notes fall back to the bounded metadata body");
 
     var oversizedReleaseList = System.Text.Encoding.UTF8.GetBytes(
         new string('x', 4 * 1024 * 1024 + 1));

@@ -217,7 +217,7 @@ public partial class App : Application
         var release = await ReleaseClient.GetLatestAsync(settings, cancellationToken);
         if (release is null || release.Version <= VersionManager.Current)
             return null;
-        return await ReleaseClient.EnrichReleaseNotesAsync(release, cancellationToken);
+        return release;
     }
 
     internal void ShowAboutWindow(Window owner, MainViewModel mainViewModel,

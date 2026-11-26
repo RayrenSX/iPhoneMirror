@@ -1090,7 +1090,6 @@
     <system:String x:Key="ControlProgressSkipped">已略過</system:String>
     <system:String x:Key="ControlProgressPending">等待中</system:String>
     <system:String x:Key="ReleaseNotesEmpty">未提供更新說明。</system:String>
-    <system:String x:Key="ReleaseNotesLoading">正在載入更新說明…</system:String>
     <system:String x:Key="ControlStageStopping">正在中斷控制連線</system:String>
     <system:String x:Key="AirPlayEmptyState">在 iPhone 上打開控制中心，點一下「螢幕鏡像輸出」，然後選擇這部電腦。</system:String>
     <system:String x:Key="AirPlayWaitingForDevice">正在等待 iPhone 連線，連線後裝置會顯示在這裡。</system:String>
@@ -1191,7 +1190,6 @@
     <system:String x:Key="UpdatePackageTooLarge">更新套件大小超出允許範圍。</system:String>
     <system:String x:Key="UpdateUntrustedAssetUrl">更新下載位址不受信任。</system:String>
     <system:String x:Key="UpdateUntrustedRedirect">更新服務重新導向至不受信任的網站。</system:String>
-    <system:String x:Key="UpdateUntrustedNotesRedirect">更新說明位址重新導向至不受信任的網站。</system:String>
     <system:String x:Key="UpdateReleaseListTooLarge">更新版本清單大小超出允許範圍。</system:String>
     <system:String x:Key="UpdateDownloadEndpointsUnavailable">所有更新下載線路暫時不可用。</system:String>
     <system:String x:Key="UpdateChecksumRequired">此版本未提供可信的 SHA-256 驗證值，無法安裝。</system:String>

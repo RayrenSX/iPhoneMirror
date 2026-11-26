@@ -22,9 +22,8 @@ internal sealed record ReleaseInfo(
     ReleaseAsset? ChecksumAsset)
 {
     internal Uri ReleaseUrl { get; init; } = new($"https://github.com/RayrenSX/iPhoneMirror/releases/tag/{TagName}");
-    internal string? TaggedBody { get; init; }
-    internal IReadOnlyDictionary<string, string?> LocalizedNotes { get; init; } =
-        new Dictionary<string, string?>(StringComparer.Ordinal);
+    internal IReadOnlyDictionary<string, string> LocalizedNotes { get; init; } =
+        new Dictionary<string, string>(StringComparer.Ordinal);
     internal ReleaseAsset? UxPlayAsset { get; init; }
 
     internal ReleaseAsset? PreferredAsset => InstallerAsset ?? ZipAsset;
@@ -36,6 +35,9 @@ internal sealed record ReleaseInfo(
 
 internal static class ReleaseParser
 {
+    private const string LocalizedNotesMarker = "<!-- iphonemirror-localized-notes:v1";
+    private const int MaximumEncodedNotesLength = 64 * 1024;
+
     internal static ReleaseInfo? ParseLatest(string json, bool includeStable,
         bool includePrerelease, bool requireApplicationAsset = false)
     {
@@ -75,12 +77,14 @@ internal static class ReleaseParser
             var published = DateTimeOffset.TryParse(
                 GetOptionalString(element, "published_at"), out var parsedPublished)
                 ? parsedPublished : DateTimeOffset.MinValue;
+            var body = GetOptionalString(element, "body") ?? string.Empty;
+            var translatedNotes = ParseReleaseNotes(element, ref body);
             var releaseInfo = new ReleaseInfo(tag,
                 GetOptionalString(element, "name") ?? tag,
-                GetOptionalString(element, "body") ?? string.Empty,
+                body,
                 published, version, prerelease, installer, zip, checksum)
             {
-                LocalizedNotes = ParseLocalizedNotes(element),
+                LocalizedNotes = translatedNotes,
                 UxPlayAsset = assets.FirstOrDefault(asset =>
                     asset.Name == $"iPhoneMirror-UxPlay-{tag}-win-x64.zip" &&
                     asset.DownloadUri.AbsoluteUri ==
@@ -94,17 +98,47 @@ internal static class ReleaseParser
         return releases.OrderByDescending(release => release.Version).FirstOrDefault();
     }
 
-    private static Dictionary<string, string?> ParseLocalizedNotes(JsonElement release)
+    private static Dictionary<string, string> ParseReleaseNotes(JsonElement release, ref string body)
     {
-        var notes = new Dictionary<string, string?>(StringComparer.Ordinal);
-        if (!release.TryGetProperty("localized_notes", out var element) ||
-            element.ValueKind != JsonValueKind.Object)
-            return notes;
+        var markerIndex = body.IndexOf(LocalizedNotesMarker, StringComparison.Ordinal);
+        var encoded = markerIndex < 0 ? ReadOnlySpan<char>.Empty
+            : body.AsSpan(markerIndex + LocalizedNotesMarker.Length);
+        if (markerIndex >= 0) body = body[..markerIndex].TrimEnd();
+
+        if (release.TryGetProperty("localized_notes", out var notesFromManifest) &&
+            notesFromManifest.ValueKind == JsonValueKind.Object)
+            return ParseLocalizedNotes(notesFromManifest);
+
+        // GitHub returns the public Markdown as release metadata. Its hidden
+        // comment carries the same notes as the fallback update manifest.
+        var end = encoded.IndexOf("-->", StringComparison.Ordinal);
+        if (end > 0)
+        {
+            encoded = encoded[..end].Trim();
+            if (encoded.Length is > 0 and <= MaximumEncodedNotesLength)
+            {
+                try
+                {
+                    using var document = JsonDocument.Parse(Convert.FromBase64String(encoded.ToString()),
+                        new JsonDocumentOptions { MaxDepth = 8 });
+                    return ParseLocalizedNotes(document.RootElement);
+                }
+                catch (FormatException) { }
+                catch (JsonException) { }
+            }
+        }
+        return new(StringComparer.Ordinal);
+    }
+
+    private static Dictionary<string, string> ParseLocalizedNotes(JsonElement element)
+    {
+        var notes = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (element.ValueKind != JsonValueKind.Object) return notes;
 
         foreach (var language in LocalizedReleaseNotes.TranslationLanguages)
         {
             var body = GetOptionalString(element, language);
-            if (!string.IsNullOrWhiteSpace(body)) notes[language] = body;
+            if (!string.IsNullOrWhiteSpace(body)) notes[language] = body.Trim();
         }
         return notes;
     }
