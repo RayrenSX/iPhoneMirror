@@ -195,6 +195,7 @@ internal static partial class Program
                       select (col, row)).FirstOrDefault();
         InteractionAssert(x != 0, $"{context}: preview wheel test could not find a visible point on its native surface.");
         var expected = Services.PreviewCoordinateMapper.Normalize(x, y, width, height, 390, 844)!.Value;
+        var state = KeyboardCall(window, "GetUsbTouchPointerState", KeyboardField(window, "ActiveInputDeviceUdid"))!;
         Controls.PreviewPointerEventArgs? dispatched = null;
         nint hit = 0;
         void Observe(object? sender, Controls.PreviewPointerEventArgs input)
@@ -213,7 +214,8 @@ internal static partial class Program
         {
             var elapsed = System.Diagnostics.Stopwatch.StartNew();
             while (elapsed.Elapsed < TimeSpan.FromSeconds(2) &&
-                !ReadPreviewTouchPackets(packets).Any(p => p.Action == "up"))
+                ((bool)KeyboardField(state, "WheelDraining") ||
+                 !ReadPreviewTouchPackets(packets).Any(p => p.Action == "up")))
                 AdvanceDispatcher(TimeSpan.FromMilliseconds(20));
         }
 
@@ -233,7 +235,8 @@ internal static partial class Program
                     touches.All(p => Math.Abs(p.X - expected.X) < 0.01) &&
                     Math.Abs(touches[0].Y - expected.Y) < 0.01 &&
                     Math.Sign(touches[^1].Y - touches[0].Y) == Math.Sign(delta),
-                    $"{context}: the wheel must drag in both directions starting under the cursor.");
+                    $"{context}: wheel delta {delta} must drag from ({expected.X:F3},{expected.Y:F3}). " +
+                    $"Contacts={string.Join(", ", touches.Select(p => $"{p.Action}({p.X:F3},{p.Y:F3})/{p.Id}"))}.");
             }
 
             if (testGestureTransitions) TestGestureTransitions();
@@ -468,8 +471,11 @@ internal static partial class Program
                     PreviewStyleSendMessage(hwnd, down, mouseData, position);
                     PreviewStyleSendMessage(hwnd, up, mouseData, position);
                     WaitForShortcutCompletion();
-                    InteractionAssert(ReadShortcutPackets(packets).Length == 2,
-                        $"{context}/{button}: holding Ctrl across clicks lost the second shortcut.");
+                    frames = ReadShortcutPackets(packets);
+                    InteractionAssert(frames.Length == 2,
+                        $"{context}/{button}: holding Ctrl across clicks lost the second shortcut. " +
+                        $"Modifiers={router.PressedModifiers}, generation={generation}->{router.Generation}, " +
+                        $"frames={string.Join(';', frames.Select(f => f.GetRawText()))}.");
                     router.RouteEvent(modifier, false, Resolve, (_, _) => { });
                 }
                 else
