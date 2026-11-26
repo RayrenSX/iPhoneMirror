@@ -20,6 +20,7 @@ internal static partial class Program
         var previousHeight = KeyboardField(vm, "_sourceVideoHeight");
         var previousTitle = window.Title;
         var previousShowInTaskbar = window.ShowInTaskbar;
+        var previousTopmost = window.Topmost;
         var main = new WindowInteropHelper(window).Handle;
         nint foreground = main;
         SetKeyboardField(window, "_keyboardForegroundWindow", (Func<nint>)(() => foreground));
@@ -58,6 +59,7 @@ internal static partial class Program
             // event subscription. Only the bridge writer and foreground snapshot
             // are faked; no phone receives input and no global mouse input is used.
             window.ShowInTaskbar = true;
+            window.Topmost = true;
             window.Title = "iPhoneMirror preview pointer regression";
             ActivateMappingTestWindow(window);
             // Use a local focus target that is available in every workspace layout.
@@ -89,6 +91,17 @@ internal static partial class Program
 
             packets.SetLength(0);
             Send(0x0201, x, y);
+            Send(0x0200, x, y + 20);
+            AdvanceDispatcher(TimeSpan.FromMilliseconds(50));
+            Send(0x0202, -10, y);
+            AdvanceDispatcher(TimeSpan.FromMilliseconds(50));
+            touches = ReadPreviewTouchPackets(packets);
+            InteractionAssert(touches.Select(p => p.Action).SequenceEqual(new[] { "down", "move", "up" }) &&
+                touches[^1].X == touches[^2].X && touches[^1].Y == touches[^2].Y,
+                $"{context}: releasing outside the image must lift the touch at its last valid position.");
+
+            packets.SetLength(0);
+            Send(0x0201, x, y);
             PreviewStyleSendMessage(hwnd, 0x001F, 0, 0); // WM_CANCELMODE
             AdvanceDispatcher(TimeSpan.FromMilliseconds(50));
             InteractionAssert(ReadPreviewTouchPackets(packets).Select(p => p.Action)
@@ -104,6 +117,7 @@ internal static partial class Program
             Click();
             InteractionAssert(ReadPreviewTouchPackets(packets).Length == 2,
                 $"{context}: touch must resume after returning to the main window.");
+            TestNativePreviewWheel(window, (Controls.NativePreviewHost)preview, packets, bounds.Right, bounds.Bottom, context);
             TestNativeMouseShortcuts(window, packets, hwnd, x, y, context);
             TestFivePointPreview(window, device, packets, hwnd, context);
             Console.WriteLine($"{context}: native main-preview click, drag, cancellation and focus checks passed.");
@@ -121,8 +135,169 @@ internal static partial class Program
             SetKeyboardField(window, "_keyboardForegroundWindow", foregroundProvider);
             window.Title = previousTitle;
             window.ShowInTaskbar = previousShowInTaskbar;
+            window.Topmost = previousTopmost;
         }
     }
+
+    private static void TestStandaloneNativePreviewWheel(MainWindow window, DeviceViewModel device,
+        MemoryStream packets, string context)
+    {
+        var vm = KeyboardField(window, "_viewModel");
+        var foreground = KeyboardField(window, "_keyboardForegroundWindow");
+        var previousWidth = KeyboardField(vm, "_sourceVideoWidth");
+        var previousHeight = KeyboardField(vm, "_sourceVideoHeight");
+        using var preview = new Controls.NativePreviewHost { CapturePointerInput = true };
+        var surface = new Window
+        {
+            Width = 340, Height = 620, Left = 24, Top = 32,
+            WindowStartupLocation = WindowStartupLocation.Manual, WindowStyle = WindowStyle.None,
+            ResizeMode = ResizeMode.NoResize, Topmost = true, Content = preview,
+        };
+        try
+        {
+            surface.Show();
+            ActivateMappingTestWindow(surface);
+            preview.SetPresentationVisible(true);
+            AdvanceDispatcher(TimeSpan.FromMilliseconds(100));
+            SetKeyboardField(window, "_keyboardForegroundWindow", (Func<nint>)(() => new WindowInteropHelper(window).Handle));
+            SetKeyboardField(vm, "_sourceVideoWidth", 390u);
+            SetKeyboardField(vm, "_sourceVideoHeight", 844u);
+            KeyboardCall(window, "FocusControlDevice", device.Udid, (nint)0);
+            preview.PointerInput += (sender, input) => KeyboardCall(window, "OnControlPointerInput", sender, input);
+            InteractionAssert(PreviewPointerGetClientRect(preview.WindowHandle, out var bounds) && bounds.Right > 10,
+                $"{context}: standalone preview has no usable bounds.");
+            TestNativePreviewWheel(window, preview, packets, bounds.Right, bounds.Bottom, context, testGestureTransitions: true);
+        }
+        finally
+        {
+            surface.Close();
+            SetKeyboardField(window, "_keyboardForegroundWindow", foreground);
+            SetKeyboardField(vm, "_sourceVideoWidth", previousWidth);
+            SetKeyboardField(vm, "_sourceVideoHeight", previousHeight);
+        }
+    }
+
+    private static void TestNativePreviewWheel(MainWindow window, Controls.NativePreviewHost preview, MemoryStream packets,
+        int width, int height, string context, bool testGestureTransitions = false)
+    {
+        var hwnd = preview.WindowHandle;
+        PreviewWheelPoint ToScreen(int clientX, int clientY)
+        {
+            var point = new PreviewWheelPoint { X = clientX, Y = clientY };
+            InteractionAssert(PreviewWheelClientToScreen(hwnd, ref point), $"{context}: preview client origin unavailable.");
+            return point;
+        }
+        // Toolbars can occupy part of the fixture window. Pick a visible point
+        // away from the previous click so the wheel origin test stays meaningful.
+        var (x, y) = (from row in new[] { height / 2, height * 2 / 5, height * 3 / 5 }
+                      from col in new[] { width * 3 / 5, width * 2 / 5 }
+                      where PreviewWheelWindowFromPoint(ToScreen(col, row)) == hwnd
+                      select (col, row)).FirstOrDefault();
+        InteractionAssert(x != 0, $"{context}: preview wheel test could not find a visible point on its native surface.");
+        var expected = Services.PreviewCoordinateMapper.Normalize(x, y, width, height, 390, 844)!.Value;
+        Controls.PreviewPointerEventArgs? dispatched = null;
+        nint hit = 0;
+        void Observe(object? sender, Controls.PreviewPointerEventArgs input)
+        {
+            if (input.Kind == Controls.PreviewPointerKind.Wheel) dispatched = input;
+        }
+        void Wheel(int delta, int clientX, int clientY)
+        {
+            var point = ToScreen(clientX, clientY);
+            hit = PreviewWheelWindowFromPoint(point);
+            PreviewStyleSendMessage(hwnd, 0x020A, (nint)(delta << 16),
+                (nint)((point.Y << 16) | (point.X & 0xffff)));
+        }
+
+        void WaitForRelease()
+        {
+            var elapsed = System.Diagnostics.Stopwatch.StartNew();
+            while (elapsed.Elapsed < TimeSpan.FromSeconds(2) &&
+                !ReadPreviewTouchPackets(packets).Any(p => p.Action == "up"))
+                AdvanceDispatcher(TimeSpan.FromMilliseconds(20));
+        }
+
+        preview.PointerInput += Observe;
+        try
+        {
+            foreach (var delta in new[] { -120, 120 })
+            {
+                packets.SetLength(0);
+                dispatched = null;
+                Wheel(delta, x, y);
+                InteractionAssert(dispatched?.X == x && dispatched.Y == y,
+                    $"{context}: expected wheel at ({x},{y}), got ({dispatched?.X},{dispatched?.Y}); hit={hit:x}, preview={hwnd:x}.");
+                WaitForRelease();
+                var touches = ReadPreviewTouchPackets(packets);
+                InteractionAssert(touches.Length >= 3 && touches[0].Action == "down" && touches[^1].Action == "up" &&
+                    touches.All(p => Math.Abs(p.X - expected.X) < 0.01) &&
+                    Math.Abs(touches[0].Y - expected.Y) < 0.01 &&
+                    Math.Sign(touches[^1].Y - touches[0].Y) == Math.Sign(delta),
+                    $"{context}: the wheel must drag in both directions starting under the cursor.");
+            }
+
+            if (testGestureTransitions) TestGestureTransitions();
+
+            packets.SetLength(0);
+            dispatched = null;
+            Wheel(120, -5, y);
+            AdvanceDispatcher(TimeSpan.FromMilliseconds(100));
+            InteractionAssert(dispatched is null && ReadPreviewTouchPackets(packets).Length == 0,
+                $"{context}: a focused preview must not send the wheel from outside the native surface.");
+            Console.WriteLine($"{context}: native wheel input checks passed.");
+        }
+        finally
+        {
+            preview.PointerInput -= Observe;
+        }
+
+        void TestGestureTransitions()
+        {
+            packets.SetLength(0);
+            // Match the geometry forwarded by a portrait source in an
+            // independent preview turned clockwise into landscape.
+            KeyboardCall(window, "FocusControlDevice", KeyboardField(window, "ActiveInputDeviceUdid"), (nint)0);
+            var rotated = new Controls.PreviewPointerEventArgs(Controls.PreviewPointerKind.Wheel,
+                400, 100, 0, 120, 800, 400, 800, 400, 1);
+            KeyboardCall(window, "OnControlPointerInput", preview, rotated);
+            WaitForRelease();
+            var rotatedTouches = ReadPreviewTouchPackets(packets);
+            InteractionAssert(rotatedTouches.Length >= 3 &&
+                rotatedTouches.All(p => Math.Abs(p.Y - 0.5) < 0.01) &&
+                rotatedTouches.Any(p => p.Action == "move" && p.X > rotatedTouches[0].X),
+                $"{context}: rotated wheel did not follow the mouse drag axis. " +
+                string.Join(", ", rotatedTouches.Select(p => $"{p.Action}({p.X:F3},{p.Y:F3})")));
+
+            packets.SetLength(0);
+            Wheel(120, x, y);
+            var clickPosition = (nint)((y << 16) | (x & 0xffff));
+            PreviewStyleSendMessage(hwnd, 0x0201, 1, clickPosition);
+            WaitForRelease();
+            var overlapping = ReadPreviewTouchPackets(packets);
+            var mouse = overlapping.Where(p => p.Id == 1).ToArray();
+            var wheel = overlapping.Where(p => p.Id != 1).ToArray();
+            InteractionAssert(mouse.Select(p => p.Action).SequenceEqual(new[] { "down" }) &&
+                wheel.Select(p => p.Action).SequenceEqual(new[] { "down", "up" }) && wheel[0].Id == wheel[1].Id,
+                $"{context}: pressing the mouse while scrolling must release only the wheel's contact.");
+            PreviewStyleSendMessage(hwnd, 0x0207, 0, clickPosition);
+            PreviewStyleSendMessage(hwnd, 0x0208, 0, clickPosition);
+            var afterSecondButton = ReadPreviewTouchPackets(packets).Where(p => p.Id == 1).Select(p => p.Action).ToArray();
+            InteractionAssert(afterSecondButton.SequenceEqual(new[] { "down" }),
+                $"{context}: a second mouse button interrupted the held touch ({string.Join(", ", afterSecondButton)}).");
+            PreviewStyleSendMessage(hwnd, 0x0202, 0, clickPosition);
+            Console.WriteLine($"{context}: rotated wheel and overlapping mouse-button contacts passed.");
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct PreviewWheelPoint { internal int X, Y; }
+
+    [DllImport("user32.dll", EntryPoint = "ClientToScreen")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool PreviewWheelClientToScreen(nint hwnd, ref PreviewWheelPoint point);
+
+    [DllImport("user32.dll", EntryPoint = "WindowFromPoint")]
+    private static extern nint PreviewWheelWindowFromPoint(PreviewWheelPoint point);
 
     private static void TestNativeMouseShortcutRoute(MainWindow window, DeviceViewModel device,
         MemoryStream packets, string context)
@@ -325,18 +500,19 @@ internal static partial class Program
         }
     }
 
-    private static (string Action, double X, double Y)[] ReadPreviewTouchPackets(MemoryStream packets)
+    private static (string Action, double X, double Y, int Id)[] ReadPreviewTouchPackets(MemoryStream packets)
     {
         using var copy = new MemoryStream(packets.ToArray());
         using var reader = new BinaryReader(copy);
-        var result = new List<(string, double, double)>();
+        var result = new List<(string, double, double, int)>();
         while (copy.Position < copy.Length)
         {
             using var doc = JsonDocument.Parse(reader.ReadBytes(reader.ReadInt32()));
             if (!doc.RootElement.TryGetProperty("points", out var points)) continue;
             foreach (var point in points.EnumerateArray())
                 result.Add((point.GetProperty("action").GetString()!,
-                    point.GetProperty("normalizedX").GetDouble(), point.GetProperty("normalizedY").GetDouble()));
+                    point.GetProperty("normalizedX").GetDouble(), point.GetProperty("normalizedY").GetDouble(),
+                    point.GetProperty("pointerId").GetInt32()));
         }
         return result.ToArray();
     }

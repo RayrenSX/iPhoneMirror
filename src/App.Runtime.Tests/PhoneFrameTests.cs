@@ -145,6 +145,23 @@ internal static partial class Program
             var middle = new PreviewPointerEventArgs(PreviewPointerKind.TouchDown, frame.FrameWidth / 2, frame.FrameHeight / 2,
                 1, 0, frame.FrameWidth, frame.FrameHeight, (uint)frame.ScreenWidth, (uint)frame.ScreenHeight, 0, 1, 0);
             InteractionAssert(PhoneFrameGeometry.ContainsScreenPoint(frame, 0, middle), "Model center is not an interactive screen.");
+            foreach (var rotation in new[] { 0, 1, 4, 5 })
+            {
+                var landscape = (rotation & 1) != 0;
+                var surfaceWidth = landscape ? frame.FrameHeight : frame.FrameWidth;
+                var surfaceHeight = landscape ? frame.FrameWidth : frame.FrameHeight;
+                var screen = PhoneFrameGeometry.ScreenBounds(frame, rotation, surfaceWidth, surfaceHeight);
+                var inside = new PreviewPointerEventArgs(PreviewPointerKind.Wheel,
+                    (int)Math.Ceiling(screen.Right) - 1, (int)screen.Top + (int)screen.Height / 2, 0, 120,
+                    surfaceWidth, surfaceHeight, 160, 160, rotation, 0, 0);
+                var mapped = PhoneFrameGeometry.MapPointer(frame, rotation, inside);
+                InteractionAssert(mapped.X == 159 && mapped.Y >= 0 && mapped.Y < 160,
+                    "The last physical pixel inside the frame must map to a usable source pixel.");
+                var outside = new PreviewPointerEventArgs(PreviewPointerKind.Wheel, inside.X + 1, inside.Y, 0, 120,
+                    surfaceWidth, surfaceHeight, 160, 160, rotation, 0, 0);
+                InteractionAssert(!PhoneFrameGeometry.ContainsScreenPoint(frame, rotation, outside),
+                    "The first pixel on the right frame boundary must stay outside the screen.");
+            }
             GC.Collect();
         }
         InteractionAssert(!DeviceFrameCatalog.Resolve("iPhone13,1", new("1", "", "")).Detected,

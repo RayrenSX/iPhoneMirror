@@ -4358,7 +4358,7 @@ internal sealed partial class MainViewModel : INotifyPropertyChanged
                 await _coreGate.WaitAsync(_shutdownCancellation.Token);
                 coreGateHeld = true;
                 if (_disposed || _sessions.Values.Any(state =>
-                        string.Equals(state.Udid, udid, StringComparison.OrdinalIgnoreCase) &&
+                        AppleDeviceIdentity.Matches(state.Udid, udid) &&
                         (state.IsStarting || state.HasSession)))
                     continue;
                 await _lockdownHandshakeGate.WaitAsync(_shutdownCancellation.Token);

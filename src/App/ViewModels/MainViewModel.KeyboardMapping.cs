@@ -44,7 +44,7 @@ internal sealed partial class MainViewModel
         Func<double, double, (double X, double Y)> transform)
         => CaptureTouchRoute(SelectedDevice?.Udid, isCurrent, transform, requireSelection: true);
 
-    private int _nextTouchPointerId = 1; // Mouse/wheel retains ID 1.
+    private int _nextTouchPointerId = 1; // The mouse button contact retains ID 1.
 
     internal MappedTouchRoute? CaptureTouchRoute(string? targetUdid, Func<bool> isCurrent,
         Func<double, double, (double X, double Y)> transform, bool requireSelection = false, bool automation = false)

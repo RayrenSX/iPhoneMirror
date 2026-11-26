@@ -362,8 +362,9 @@ internal sealed class NativePreviewHost : HwndHost
                     if (BluetoothWindowMouseEnabled) _windowMouse.TrackLeave(hwnd);
                     else
                     {
+                        var firstButton = _capturedMouseButtons == 0;
                         _capturedMouseButtons |= MouseButtonFromMessage(message, wParam);
-                        _ = SetCapture(_window);
+                        if (firstButton) _ = SetCapture(_window);
                     }
                     RaiseMouseInput(PreviewPointerKind.ButtonDown, lParam, MouseButtonFromMessage(message, wParam));
                     handled = true;
@@ -388,12 +389,9 @@ internal sealed class NativePreviewHost : HwndHost
                         handled = true;
                         return 0;
                     }
-                    if (BluetoothWindowMouseEnabled)
-                    {
-                        if (!NativePreviewMouse.TryGetWheelClientPosition(hwnd, lParam, out lParam))
-                            break;
-                        _windowMouse.TrackLeave(hwnd);
-                    }
+                    if (!NativePreviewMouse.TryGetWheelClientPosition(hwnd, lParam, out lParam))
+                        break;
+                    if (BluetoothWindowMouseEnabled) _windowMouse.TrackLeave(hwnd);
                     RaiseMouseInput(PreviewPointerKind.Wheel, lParam, 0, (short)((long)wParam >> 16),
                         NativePreviewMouse.PressedButtons(wParam));
                     handled = true;

@@ -42,7 +42,7 @@ internal sealed class SetupCheckRuntime
             if (!Enum.TryParse<SetupState>(root.GetProperty("state").GetString(), out var state))
                 return (SetupState.Unknown, "SetupCheckUnavailable", null);
             if (state == SetupState.Completed && (!root.TryGetProperty("udid", out var identity) ||
-                !SetupAssessment.SameDevice(identity.GetString() ?? "", udid)))
+                !AppleDeviceIdentity.Matches(identity.GetString(), udid)))
                 return (SetupState.Invalid, "SetupCheckControlHint", "device_identity_mismatch");
             return (state, state == SetupState.Completed ? null : "SetupCheckControlHint",
                 root.TryGetProperty("code", out var code) ? code.GetString() : null);

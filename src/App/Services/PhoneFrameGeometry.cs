@@ -75,7 +75,7 @@ internal static class PhoneFrameGeometry
         byte[]? mask = null, Int32Rect? hiddenSensor = null)
     {
         var bounds = ScreenBounds(frame, turns, input.SurfaceWidth, input.SurfaceHeight);
-        if (!bounds.Contains(input.X, input.Y)) return false;
+        if (!bounds.Contains(input.X, input.Y) || input.X >= bounds.Right || input.Y >= bounds.Bottom) return false;
         double u = (input.X - bounds.X) / bounds.Width, v = (input.Y - bounds.Y) / bounds.Height;
         for (int i = 0; i < (turns % 4 + 4) % 4; ++i) (u, v) = (v, 1 - u);
         var x = frame.ScreenX + u * frame.ScreenWidth;
@@ -95,9 +95,11 @@ internal static class PhoneFrameGeometry
     internal static PreviewPointerEventArgs MapPointer(DeviceFrameProfile frame, int turns, PreviewPointerEventArgs input)
     {
         var bounds = ScreenBounds(frame, turns, input.SurfaceWidth, input.SurfaceHeight);
+        // Keep the screen interval half-open after scaling. Rounding can push
+        // its last visible pixel outside a downscaled source.
         return new(input.Kind,
-            (int)Math.Round((input.X - bounds.X) / bounds.Width * input.SourceWidth),
-            (int)Math.Round((input.Y - bounds.Y) / bounds.Height * input.SourceHeight),
+            (int)Math.Floor((input.X - bounds.X) / bounds.Width * input.SourceWidth),
+            (int)Math.Floor((input.Y - bounds.Y) / bounds.Height * input.SourceHeight),
             input.Button, input.Wheel, (int)input.SourceWidth, (int)input.SourceHeight,
             input.SourceWidth, input.SourceHeight, input.Rotation, input.TouchId, input.SourceWindow)
         { WindowsButtons = input.WindowsButtons };

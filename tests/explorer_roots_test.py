@@ -97,8 +97,8 @@ class ExplorerRootsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(service.close.await_count, 2)
 
     async def test_trusted_route_is_pinned_to_rsd_device_and_closed(self):
-        rsd = SimpleNamespace(udid='fixture-device')
-        lockdown = SimpleNamespace(udid='fixture-device', close=AsyncMock())
+        rsd = SimpleNamespace(udid='00008120-0123456789ABCDEF')
+        lockdown = SimpleNamespace(udid=rsd.udid.lower().replace('-', ''), close=AsyncMock())
         service = Files()
         service.send_command = AsyncMock()
         service.close = AsyncMock()
@@ -106,7 +106,7 @@ class ExplorerRootsTests(unittest.IsolatedAsyncioTestCase):
              patch('explorer_file_roots.HouseArrestService', return_value=service) as factory:
             async with application_files(rsd, 'com.test.app', False) as files:
                 self.assertIs(files, service)
-            connect.assert_awaited_once_with(serial='fixture-device', autopair=False)
+            connect.assert_awaited_once_with(serial=rsd.udid, autopair=False)
             factory.assert_called_once_with(lockdown, documents_only=False)
         lockdown.close.assert_awaited_once()
 

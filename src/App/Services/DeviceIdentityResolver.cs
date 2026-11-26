@@ -20,12 +20,15 @@ internal sealed record CanonicalDeviceIdentity(string DeviceKey, string? AppleUd
 }
 
 internal sealed record ControlDeviceBinding(Guid ProfileId, DeviceIdentityType SourceType,
-    string SourceStableId, string TargetStableId)
+    string SourceStableId, DeviceIdentityType TargetType, string TargetStableId)
 {
     internal bool Matches(ControlDeviceBinding? other) => other is not null &&
-        ProfileId == other.ProfileId && SourceType == other.SourceType &&
-        DeviceViewModel.UdidEquals(SourceStableId, other.SourceStableId) &&
-        DeviceViewModel.UdidEquals(TargetStableId, other.TargetStableId);
+        ProfileId == other.ProfileId && SourceType == other.SourceType && TargetType == other.TargetType &&
+        SameIdentity(SourceType, SourceStableId, other.SourceStableId) &&
+        SameIdentity(TargetType, TargetStableId, other.TargetStableId);
+
+    private static bool SameIdentity(DeviceIdentityType type, string left, string right) =>
+        type == DeviceIdentityType.Wired ? AppleDeviceIdentity.Matches(left, right) : DeviceViewModel.UdidEquals(left, right);
 }
 
 /// <summary>Maps a mirror-session identity to a real profile and never guesses.</summary>
@@ -45,7 +48,7 @@ internal sealed class DeviceIdentityResolver(DeviceBindingManager bindings)
             ? profile.BluetoothIdentity?.StableId : profile.WiredIdentity?.Udid;
         if (mode == ReverseControlMode.None || string.IsNullOrWhiteSpace(target) ||
             bindings.FindByIdentity(targetType, target)?.Id != profile.Id) return null;
-        return new(profile.Id, resolution.SourceType, resolution.SourceStableId, target);
+        return new(profile.Id, resolution.SourceType, resolution.SourceStableId, targetType, target);
     }
 
     internal DeviceIdentityResolution ResolveProfile(DeviceViewModel? device)

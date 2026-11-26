@@ -61,7 +61,7 @@ internal static class DeviceActionService
                         type.ValueKind != JsonValueKind.String || type.GetString() != "device_action_result") continue;
                     if (process.Process.ExitCode == 0 && root.TryGetProperty("success", out var success) && success.ValueKind == JsonValueKind.True &&
                         root.TryGetProperty("udid", out var target) && target.ValueKind == JsonValueKind.String &&
-                        DeviceViewModel.UdidEquals(target.GetString()?.Replace("-", ""), udid.Replace("-", "")) &&
+                        AppleDeviceIdentity.Matches(target.GetString(), udid) &&
                         root.TryGetProperty("action", out var reportedAction) && reportedAction.ValueKind == JsonValueKind.String &&
                         reportedAction.GetString() == action.ToString().ToLowerInvariant()) return;
                     var detail = root.TryGetProperty("message", out var message) && message.ValueKind == JsonValueKind.String ? message.GetString() : null;

@@ -65,6 +65,45 @@ var diagnosticTestRoot = args is ["--component-public-uxplay", var componentPubl
 Environment.SetEnvironmentVariable("IPHONE_MIRROR_APP_LOG_DIRECTORY",
     diagnosticTestRoot, EnvironmentVariableTarget.Process);
 
+if (args is ["--apple-device-identity"])
+{
+    VerifyAppleDeviceIdentity();
+    Console.WriteLine("Apple device bindings and USB provisioning identity checks passed.");
+    return;
+}
+
+static void VerifyAppleDeviceIdentity()
+{
+    var directory = Path.Combine(Path.GetTempPath(), $"iPhoneMirror-apple-identity-{Guid.NewGuid():N}");
+    var deviceBindingPath = Path.Combine(directory, "profiles.json");
+    try
+    {
+        var bindings = new DeviceBindingManager(deviceBindingPath);
+        const string dashedAppleUdid = "00008120-0123456789ABCDEF";
+        const string compactAppleUdid = "000081200123456789abcdef";
+        var modernProfile = bindings.CreateProfileFromIdentity("Modern iPhone", DeviceIdentityType.Wired, dashedAppleUdid, null).Profile!;
+        Equal(modernProfile.Id, bindings.FindByIdentity(DeviceIdentityType.Wired, compactAppleUdid)?.Id,
+            "a saved wired binding resolves across both Apple UDID spellings");
+        Equal(false, bindings.CreateProfileFromIdentity("Duplicate modern iPhone", DeviceIdentityType.Wired, compactAppleUdid, null).Success,
+            "a second spelling of the same phone cannot create another binding");
+        var modernInsertion = new WifiSyncInsertionTracker();
+        Sequence([dashedAppleUdid], modernInsertion.Observe([new(dashedAppleUdid, 20, true, true)]),
+            "the first trusted insertion retains the advertised UDID");
+        Sequence([], modernInsertion.Observe([new(compactAppleUdid, 20, true, true)]),
+            "another spelling of the same insertion does not provision Wi-Fi sync again");
+        var duplicate = modernProfile with { Id = Guid.NewGuid(), WiredIdentity = modernProfile.WiredIdentity! with { Udid = compactAppleUdid } };
+        File.WriteAllText(deviceBindingPath, System.Text.Json.JsonSerializer.Serialize(new[] { modernProfile, duplicate }));
+        Equal(null, new DeviceBindingManager(deviceBindingPath).FindByIdentity(DeviceIdentityType.Wired, dashedAppleUdid),
+            "a previous store with conflicting aliases does not choose one profile arbitrarily");
+        Equal(true, new DeviceBindingManager(deviceBindingPath, readOnly: true).LoadError is InvalidDataException,
+            "setup rejects a previous store with conflicting Apple UDID aliases");
+    }
+    finally
+    {
+        if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+    }
+}
+
 if (args is ["--diagnostic-log-maintenance"])
 {
     await DiagnosticLogMaintenanceTests.RunAsync();
@@ -601,7 +640,7 @@ Equal(true,
     "reverse-control bridge callbacks and shutdowns are instance-safe");
 Equal(true,
     mainWindowSource.Contains(
-        "e.Kind == Controls.PreviewPointerKind.ButtonUp && state.Pressed",
+        "e.Kind == Controls.PreviewPointerKind.ButtonUp && (!state.Pressed || e.Button != state.PressedButton)",
         StringComparison.Ordinal) &&
     mainWindowSource.Contains(
         "SendUsbTouchAsync(\"up\", state.LastX",
@@ -6077,6 +6116,7 @@ Equal(true, new DeviceBindingManager(deviceBindingPath).Profiles.All(p => p.Blue
     "bulk clear survives restart");
 var readOnlyBindings = new DeviceBindingManager(deviceBindingPath, readOnly: true);
 Equal(false, readOnlyBindings.RenameProfile(profileA.Id, "Read-only mutation"), "read-only snapshots reject writes");
+VerifyAppleDeviceIdentity();
 if (Directory.Exists(deviceBindingTestRoot))
     Directory.Delete(deviceBindingTestRoot, recursive: true);
 

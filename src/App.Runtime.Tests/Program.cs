@@ -476,6 +476,8 @@ internal static partial class Program
                 return RunKeyboardFocusTests(initializeHiddenHandle: true, mouseShortcutReview: true);
             if (args is ["--preview-pointer"])
                 return RunKeyboardFocusTests(initializeHiddenHandle: true);
+            if (args is ["--preview-wheel"])
+                return RunKeyboardFocusTests(initializeHiddenHandle: true, wheelAuditOnly: true);
             if (args is ["--driver-localization-audit", var localizedDriverAssembly])
                 return LocalizationAuditTests.RunDriver(localizedDriverAssembly);
             if (args is ["--driver-combobox", var comboDriverAssembly])

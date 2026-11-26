@@ -1982,8 +1982,9 @@ internal sealed class NativePreviewWindow : IDisposable
         if (UsesBluetoothWindowMouse) _windowMouse.TrackLeave(hwnd);
         else
         {
+            var firstButton = _capturedMouseButtons == 0;
             _capturedMouseButtons |= button;
-            _ = SetCapture(hwnd);
+            if (firstButton) _ = SetCapture(hwnd);
         }
     }
 

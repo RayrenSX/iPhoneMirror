@@ -20,7 +20,7 @@ internal sealed class PairedDeviceDiscovery
     private long _lastStarted;
     private bool _started;
     internal PairedDeviceDiscovery(TimeProvider? clock = null) => _clock = clock ?? TimeProvider.System;
-    internal static string Key(string udid) => udid.Replace("-", "").ToLowerInvariant();
+    internal static string Key(string udid) => AppleDeviceIdentity.Key(udid).ToLowerInvariant();
 
     internal void ObserveVerifiedDevices(IEnumerable<PairedNetworkDevice> devices, CancellationToken cancellation = default)
     {

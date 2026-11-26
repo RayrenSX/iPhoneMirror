@@ -13,15 +13,16 @@ import asyncio
 import sys
 import time
 
-from pymobiledevice3.lockdown import create_using_usbmux
 from pymobiledevice3.usbmux import list_devices
+from iostouch.apple_identity import udid_matches
+from iostouch.apple_lockdown import create_using_usbmux
 
 
 async def connection_types(udid: str) -> set[str]:
     return {
         str(device.connection_type)
         for device in await list_devices()
-        if device.serial.casefold() == udid.casefold()
+        if udid_matches(device.serial, udid)
     }
 
 
@@ -31,8 +32,11 @@ async def enable(udid: str, wait_seconds: float) -> int:
         print(f"ERROR: {udid} is not available over USB. Connect, unlock, and trust it first.")
         return 2
 
-    device = await create_using_usbmux(serial=udid, connection_type="USB")
+    device = await create_using_usbmux(serial=udid, connection_type="USB", autopair=False)
     try:
+        if not udid_matches(device.udid, udid) or not device.paired:
+            print('ERROR: Could not verify the selected trusted USB device.')
+            return 2
         before = await device.get_enable_wifi_connections()
         if not before:
             await device.set_enable_wifi_connections(True)

@@ -201,7 +201,7 @@ public sealed class DeviceViewModel : INotifyPropertyChanged
     {
         var metadata = DeviceAppearanceCache.Shared.GetMetadata(info.Udid);
         var fingerprint = profile?.WiredIdentity?.Fingerprint ?? profile?.DeviceFingerprint;
-        var device = new DeviceViewModel(info.Udid,
+        var device = new DeviceViewModel(AppleDeviceIdentity.Format(info.Udid),
             info.Name ?? metadata?.Name ?? profile?.DisplayName ?? "iPhone",
             info.ProductType ?? metadata?.ProductType ?? fingerprint?.ProductType ?? "",
             info.OsVersion ?? metadata?.OsVersion ?? fingerprint?.SystemVersion ?? "",

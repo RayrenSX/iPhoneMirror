@@ -29,7 +29,7 @@ public partial class MainWindow
                 if (_mappingExecutor.IsBusyFor(device.Udid)) return true;
                 if (_previewTouches.TryGetValue(device.Udid, out var touches) && touches.Count != 0) return true;
                 if (_usbTouchStates.TryGetValue(device.Udid, out var pointer) &&
-                    (pointer.Pressed || pointer.MoveDraining || pointer.PendingMoveQueued || pointer.WheelDraining || pointer.WheelActive)) return true;
+                    (pointer.Pressed || pointer.MoveDraining || pointer.PendingMoveQueued || pointer.WheelDraining)) return true;
             }
             return false;
         };

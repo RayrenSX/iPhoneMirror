@@ -59,7 +59,8 @@ from hyperframe.frame import DataFrame, GoAwayFrame, PingFrame, RstStreamFrame
 import pymobiledevice3.remote.tunnel_service as _ts
 _ts.USE_USERSPACE_TUNNEL = True
 
-from pymobiledevice3 import lockdown as _lockdown
+from iostouch.apple_identity import published_capture_mux, udid_matches as _udid_matches
+from iostouch.apple_lockdown import LOCKDOWN_CLEANUP_TIMEOUT_SECONDS, create_using_usbmux
 from pymobiledevice3.common import get_home_folder
 from pymobiledevice3.exceptions import (
     AlreadyMountedError,
@@ -695,11 +696,6 @@ INTERFACE_SUBCLASS_USBMUX = 0xFE
 INTERFACE_SUBCLASS_QUICKTIME = 0x2A
 
 
-def _udid_matches(serial: str, udid: str) -> bool:
-    """Compare an Apple identifier across hyphenation and letter-case drift."""
-    return serial.replace('-', '').casefold() == udid.replace('-', '').casefold()
-
-
 def _interface_with_subclass(configuration, subclass: int):
     for interface in configuration:
         if (interface.bInterfaceClass == INTERFACE_CLASS_VENDOR and
@@ -733,7 +729,6 @@ BUTTON_STATES = frozenset(('down', 'up', 'canceled', 'double_press'))
 LEGACY_UNIVERSAL_HID_SERVICE = 'com.apple.coredevice.hid.universalhid'
 LOCKDOWN_CONNECT_ATTEMPTS = 4
 LOCKDOWN_CONNECT_TIMEOUT_SECONDS = 15
-LOCKDOWN_CLEANUP_TIMEOUT_SECONDS = 2
 LOCKDOWN_RETRY_DELAY_SECONDS = 0.35
 CAPTURE_MUX_START_ATTEMPTS = 3
 CAPTURE_MUX_RETRY_DELAY_SECONDS = 0.75
@@ -2163,79 +2158,6 @@ def bridge_error_code(error: Exception) -> str:
     return type(error).__name__.lower()
 
 
-async def _close_owned_lockdown_service(service):
-    writer, sock = service.writer, service.socket
-    try:
-        async with asyncio.timeout(LOCKDOWN_CLEANUP_TIMEOUT_SECONDS):
-            await service.close()
-    except Exception as error:
-        log.warning('Lockdown service cleanup failed: %s', type(error).__name__)
-    finally:
-        if writer is not None:
-            with contextlib.suppress(Exception): writer.transport.abort()
-        if sock is not None:
-            with contextlib.suppress(Exception): sock.close()
-
-
-class _OwnedLockdownServices:
-    async def close(self):
-        await _close_owned_lockdown_service(self.service)
-
-    async def start_lockdown_service(self, name, include_escrow_bag=False):
-        # Match the SDK's public service/TLS protocol, but own the new connection
-        # until TLS is complete. The mounter cannot clean up an unreturned socket.
-        attributes = await self.get_service_connection_attributes(
-            name, include_escrow_bag=include_escrow_bag)
-        connection = await self.create_service_connection(attributes['Port'])
-        adopted = False
-        try:
-            if attributes.get('EnableServiceSSL', False):
-                with self.ssl_file() as certificate:
-                    await connection.ssl_start(certificate)
-            adopted = True
-            return connection
-        finally:
-            if not adopted:
-                await _close_owned_lockdown_service(connection)
-
-
-class BridgeUsbmuxLockdownClient(_OwnedLockdownServices, _lockdown.UsbmuxLockdownClient):
-    pass
-
-
-class BridgePlistUsbmuxLockdownClient(_OwnedLockdownServices, _lockdown.PlistUsbmuxLockdownClient):
-    pass
-
-
-async def create_using_usbmux(*, serial=None, connection_type=None, autopair=False):
-    """Own the opened device socket until the pinned SDK client is initialized.
-
-    The SDK convenience factory catches Exception, which excludes task
-    cancellation. Use its public client factory with the same mux/BUID choice,
-    retaining ownership across cancellation and partial initialization.
-    """
-    service = await _lockdown.ServiceConnection.create_using_usbmux(
-        serial, _lockdown.SERVICE_PORT, connection_type=connection_type)
-    adopted = False
-    try:
-        client_type = BridgeUsbmuxLockdownClient
-        system_buid = _lockdown.SYSTEM_BUID
-        async with await _lockdown.usbmux.create_mux() as mux:
-            if isinstance(mux, _lockdown.PlistMuxConnection):
-                system_buid = await mux.get_buid()
-                client_type = BridgePlistUsbmuxLockdownClient
-        identifier = service.mux_device.serial if service.mux_device is not None else serial
-        client = await client_type.create(service, identifier=identifier,
-                                          system_buid=system_buid, autopair=autopair)
-        adopted = True
-        return client
-    finally:
-        if not adopted:
-            # Keep handles: SDK close clears attributes even if cancelled
-            # while awaiting a TLS close, before closing the underlying socket.
-            await _close_owned_lockdown_service(service)
-
-
 async def create_lockdown_with_retry(ipc, udid: Optional[str],
                                      connection_type: str):
     """Share one handshake/retry budget, allowing bounded failed-open cleanup."""
@@ -2831,14 +2753,9 @@ class TouchSession:
         """
         if self.transport_mode != 'usb':
             return
-        from screen_orientation import capture_mux_address, capture_mux_environment_key
         if getattr(self, '_usb_mux_borrowed', False):
             return
-        try:
-            shared_key = capture_mux_environment_key(self.udid or '')
-        except ValueError:
-            shared_key = None
-        shared = capture_mux_address(os.environ.get(shared_key)) if shared_key else None
+        shared = published_capture_mux(self.udid)
         if shared:
             # The native orientation helper or another host-owned control
             # bridge already owns the interface. Share its local mux server;
@@ -2878,9 +2795,8 @@ class TouchSession:
             device = next((item for item in devices if item.activated and
                            (not self.udid or _udid_matches(item.serial, self.udid))), None)
             if device is None:
-                # The discovery filter may differ in case/hyphen normalization.
-                # Uniqueness is not proof of identity: never adopt another phone
-                # (or an unreadable serial) just because it is the only one present.
+                # The interface may have re-enumerated. Retry discovery while
+                # still requiring a readable serial that matches this phone.
                 devices = _find_usb_devices(backend, None)
                 device = next((item for item in devices if item.activated and
                                _udid_matches(item.serial, self.udid or '')), None)
@@ -6555,6 +6471,8 @@ async def enable_wifi_sync_async(udid: str) -> bool:
     try:
         await ipc.emit({'event': 'status', 'code': 'enabling_wifi_sync'})
         lockdown = await create_lockdown_with_retry(ipc, udid, 'USB')
+        if not _udid_matches(lockdown.udid, udid):
+            raise BridgePrerequisiteError('device_identity_mismatch', 'Lockdown returned a different Apple device.')
         was_enabled = await get_wifi_sync_enabled(lockdown)
         if not was_enabled:
             await lockdown.set_enable_wifi_connections(True)
@@ -6588,8 +6506,10 @@ async def check_setup_async(udid: str, wireless: bool = False) -> dict:
     lockdown = None
     try:
         async with asyncio.timeout(20):
-            lockdown = await create_using_usbmux(serial=udid, connection_type='USB', autopair=False)
-            if lockdown.udid.replace('-', '').lower() != udid.replace('-', '').lower():
+            address = published_capture_mux(udid)
+            lockdown = await create_using_usbmux(serial=udid, connection_type='USB',
+                                                autopair=False, usbmux_address=address)
+            if not _udid_matches(lockdown.udid, udid):
                 return {'state': 'Invalid', 'code': 'device_identity_mismatch'}
             if not await lockdown.get_developer_mode_status():
                 return {'state': 'Incomplete', 'code': 'developer_mode_required'}

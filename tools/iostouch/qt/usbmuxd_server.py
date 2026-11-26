@@ -22,6 +22,7 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
+from iostouch.apple_identity import correct_serial, udid_key, udid_matches
 from iostouch.qt.usbmux_usb import ConnectionRefused, MuxConnection, MuxDevice, MuxError
 
 logger = logging.getLogger(__name__)
@@ -190,7 +191,7 @@ class UsbmuxdServer:
         # devices' records, or special files such as SystemConfiguration.
         return (isinstance(identifier, str) and
                 re.fullmatch(r"[0-9A-Fa-f]{8}-?[0-9A-Fa-f]{16}|[0-9A-Fa-f]{40}", identifier) is not None and
-                identifier.replace("-", "").lower() == self.serial.replace("-", "").lower())
+                udid_matches(identifier, self.serial))
 
     def _load_pair_record(self, identifier: str) -> Optional[bytes]:
         if not self._valid_pair_record_id(identifier):
@@ -199,7 +200,11 @@ class UsbmuxdServer:
             if self._valid_pair_record_id(key):
                 return data
         root = _pair_record_dir().resolve()
-        for name in (identifier, identifier.replace("-", ""), self.serial, self.serial.replace("-", "")):
+        compact = udid_key(identifier)
+        dashed = correct_serial(compact)
+        names = (identifier, identifier.replace('-', ''), self.serial, self.serial.replace('-', ''),
+                 dashed, dashed.upper(), compact, compact.upper())
+        for name in dict.fromkeys(names):
             try:
                 p = (root / f"{name}.plist").resolve()
                 # Also refuse symlinks/junctions pointing outside Lockdown.

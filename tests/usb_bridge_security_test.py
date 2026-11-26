@@ -31,6 +31,10 @@ class TestPairRecordBoundary(unittest.IsolatedAsyncioTestCase):
                     self.assertIsNone(server._load_pair_record(identifier), identifier)
                 self.assertEqual(server._load_pair_record(UDID), b'own record')
                 self.assertEqual(server._load_pair_record(UDID.replace('-', '').lower()), b'own record')
+                compact = UDID.replace('-', '').lower()
+                compact_server = usbmuxd_server.UsbmuxdServer(Mock(), compact)
+                self.assertEqual(compact_server._load_pair_record(compact), b'own record')
+                self.assertIsNone(compact_server._load_pair_record(OTHER))
 
     async def test_pair_record_cannot_escape_through_a_link(self):
         with TemporaryDirectory() as temporary:

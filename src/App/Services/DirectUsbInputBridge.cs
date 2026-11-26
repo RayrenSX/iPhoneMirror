@@ -543,7 +543,7 @@ public sealed partial class DirectUsbInputBridge : IAsyncDisposable
                     }
                     var readyUdid = root.TryGetProperty("udid", out var u) ? u.GetString() : null;
                     var transport = root.TryGetProperty("transport", out var t) ? t.GetString() : null;
-                    if (!string.Equals(readyUdid, _requestedUdid, StringComparison.OrdinalIgnoreCase))
+                    if (!AppleDeviceIdentity.Matches(readyUdid, _requestedUdid))
                     {
                         RejectReady("device_identity_mismatch", LocalizationService.Format("TouchBridgeTargetMismatchFormat", _requestedUdid, readyUdid ?? LocalizationService.Get("Unavailable")));
                         return;
@@ -560,7 +560,7 @@ public sealed partial class DirectUsbInputBridge : IAsyncDisposable
                             c.ValueKind == JsonValueKind.String && c.GetString() == "iphoneMirror.clipboard.rpc.v1");
                     SupportsTouchDisplayPreview = caps.ValueKind == JsonValueKind.Array && caps.EnumerateArray().Any(c =>
                         c.ValueKind == JsonValueKind.String && c.GetString() == "iphoneMirror.touch_display_preview.v1");
-                    Udid = readyUdid;
+                    Udid = _requestedUdid;
                     SupportsDeviceHub = root.TryGetProperty("capabilities", out var hubCaps) &&
                         hubCaps.ValueKind == JsonValueKind.Array && hubCaps.EnumerateArray().Any(c =>
                             c.ValueKind == JsonValueKind.String && c.GetString() == "iphoneMirror.hub.rpc.v1");

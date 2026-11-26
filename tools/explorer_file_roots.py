@@ -10,11 +10,13 @@ import math
 
 from pymobiledevice3.remote.core_device.file_service import Domain, FileServiceService
 from pymobiledevice3.remote.xpc_message import XpcInt64Type, XpcUInt64Type
-from pymobiledevice3.lockdown import LockdownClient, create_using_usbmux
+from pymobiledevice3.lockdown import LockdownClient
 from pymobiledevice3.exceptions import CoreDeviceError
 from pymobiledevice3.services.house_arrest import VEND_CONTAINER
 
 from document_file_service import DocumentsFiles, HouseArrestService, VEND_DOCUMENTS
+from iostouch.apple_identity import udid_matches
+from iostouch.apple_lockdown import create_using_usbmux
 
 CORE_FEATURE = 'com.apple.coredevice.feature.filesystemoperation'
 CORE_FILE_OPERATIONS_VERIFIED = True
@@ -48,7 +50,7 @@ async def application_files(rsd, identifier, documents):
         try:
             async with asyncio.timeout(1):
                 lockdown = await create_using_usbmux(serial=rsd.udid, autopair=False)
-            if lockdown.udid != rsd.udid:
+            if not udid_matches(lockdown.udid, rsd.udid):
                 raise ValueError('Device identity changed')
             provider = lockdown
         except Exception:

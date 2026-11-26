@@ -6,17 +6,18 @@ import sys
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock, call, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
 import usb_touch_bridge as b
+from iostouch import apple_lockdown as owned
 from pymobiledevice3 import lockdown as sdk
 
 
 class LockdownBoundaryTests(unittest.IsolatedAsyncioTestCase):
     def service_client(self, connection):
         # Exercise the real named-service factory, without a phone or TLS keys.
-        cls = getattr(b, 'BridgeUsbmuxLockdownClient', sdk.UsbmuxLockdownClient)
+        cls = owned.BridgeUsbmuxLockdownClient
         client = object.__new__(cls)
         client.get_service_connection_attributes = AsyncMock(return_value={'Port':123, 'EnableServiceSSL':True})
         client.create_service_connection = AsyncMock(return_value=connection)
@@ -64,7 +65,7 @@ class LockdownBoundaryTests(unittest.IsolatedAsyncioTestCase):
                                  transport=SimpleNamespace(abort=Mock()))
         connection.writer = writer
         connection.ssl_start = AsyncMock(side_effect=b.PasswordRequiredError())
-        with patch.object(b, 'LOCKDOWN_CLEANUP_TIMEOUT_SECONDS', .01):
+        with patch.object(owned, 'LOCKDOWN_CLEANUP_TIMEOUT_SECONDS', .01):
             with self.assertRaises(b.PasswordRequiredError):
                 await self.service_client(connection).start_lockdown_service('test.image.service')
         self.assertEqual(-1, raw.fileno())
@@ -79,7 +80,7 @@ class LockdownBoundaryTests(unittest.IsolatedAsyncioTestCase):
         writer = SimpleNamespace(close=Mock(), wait_closed=stalled,
                                  transport=SimpleNamespace(abort=Mock()))
         connection.writer = writer
-        client = object.__new__(b.BridgeUsbmuxLockdownClient)
+        client = object.__new__(owned.BridgeUsbmuxLockdownClient)
         client.service = connection
         with self.assertRaises(TimeoutError):
             async with asyncio.timeout(.01):
@@ -99,7 +100,7 @@ class LockdownBoundaryTests(unittest.IsolatedAsyncioTestCase):
         writer = SimpleNamespace(close=Mock(), wait_closed=stalled,
                                  transport=SimpleNamespace(abort=Mock()))
         connection.writer = writer
-        client = object.__new__(b.BridgePlistUsbmuxLockdownClient)
+        client = object.__new__(owned.BridgePlistUsbmuxLockdownClient)
         client.service = connection
         task = asyncio.create_task(client.close())
         await asyncio.wait_for(closing.wait(), 1)
@@ -131,6 +132,37 @@ class LockdownBoundaryTests(unittest.IsolatedAsyncioTestCase):
                 system_buid='apple-buid' if plist else sdk.SYSTEM_BUID, autopair=False)
             service.close.assert_not_awaited()
 
+    async def test_retries_bound_device_using_usb_broker_serial_spelling(self):
+        requested = '00008101-0123456789ABCDEF'
+        advertised = requested.lower().replace('-', '')
+        service = SimpleNamespace(mux_device=SimpleNamespace(serial=advertised))
+        devices = [SimpleNamespace(serial=requested.lower(), connection_type='Network', is_usb=False),
+                   SimpleNamespace(serial=advertised, connection_type='USB', is_usb=True)]
+        mux = contextlib.nullcontext(object())
+        expected = object()
+        with patch.object(sdk.ServiceConnection, 'create_using_usbmux',
+                          AsyncMock(side_effect=[b.DeviceNotFoundError(requested), service])) as open_service, \
+             patch.object(sdk.usbmux, 'list_devices', AsyncMock(return_value=devices)), \
+             patch.object(sdk.usbmux, 'create_mux', AsyncMock(return_value=mux)), \
+             patch.object(owned.BridgeUsbmuxLockdownClient, 'create', AsyncMock(return_value=expected)) as create:
+            self.assertIs(expected, await b.create_using_usbmux(serial=requested, connection_type='USB'))
+        self.assertEqual(open_service.await_args_list, [
+            call(requested, sdk.SERVICE_PORT, connection_type='USB'),
+            call(advertised, sdk.SERVICE_PORT, connection_type='USB'),
+        ])
+        self.assertFalse(create.await_args.kwargs['autopair'])
+
+    async def test_missing_bound_usb_device_never_uses_another_device_or_transport(self):
+        requested = '00008101-0123456789ABCDEF'
+        devices = [SimpleNamespace(serial=requested.lower(), connection_type='Network'),
+                   SimpleNamespace(serial='00008101-0123456789ABCDEE', connection_type='USB')]
+        with patch.object(sdk.ServiceConnection, 'create_using_usbmux',
+                          AsyncMock(side_effect=b.DeviceNotFoundError(requested))) as open_service, \
+             patch.object(sdk.usbmux, 'list_devices', AsyncMock(return_value=devices)):
+            with self.assertRaises(b.DeviceNotFoundError):
+                await b.create_using_usbmux(serial=requested, connection_type='USB')
+        open_service.assert_awaited_once_with(requested, sdk.SERVICE_PORT, connection_type='USB')
+
     async def test_failed_initialization_bounds_cleanup_and_aborts_saved_handles(self):
         async def close():
             service.writer = service.socket = None
@@ -145,7 +177,7 @@ class LockdownBoundaryTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(sdk.ServiceConnection, 'create_using_usbmux', AsyncMock(return_value=service)), \
              patch.object(sdk.usbmux, 'create_mux', AsyncMock(return_value=Mux())), \
              patch.object(sdk.UsbmuxLockdownClient, 'create', AsyncMock(side_effect=b.NotPairedError('not trusted'))), \
-             patch.object(b, 'LOCKDOWN_CLEANUP_TIMEOUT_SECONDS', .01):
+             patch.object(owned, 'LOCKDOWN_CLEANUP_TIMEOUT_SECONDS', .01):
             with self.assertRaises(b.NotPairedError):
                 await asyncio.wait_for(b.create_using_usbmux(serial='test-device'), .5)
         writer.transport.abort.assert_called_once()

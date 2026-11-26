@@ -69,7 +69,7 @@ internal sealed partial class MainViewModel
         return appleUdid is not null && _deviceControls.Values.Any(c =>
             (c.Enabled || c.Starting || c.Stopping ||
              (!DeviceViewModel.UdidEquals(c.DeviceUdid, udid) && c.WiredBridge is not null)) &&
-            DeviceViewModel.UdidEquals(c.AppleUdid, appleUdid));
+            AppleDeviceIdentity.Matches(c.AppleUdid, appleUdid));
     }
 
     private Task StartDeviceControlAsync(string? udid, bool wireless)

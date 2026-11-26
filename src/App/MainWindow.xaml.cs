@@ -80,7 +80,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     // DeviceViewModel.UdidEquals comparison used for bridge targeting.
     private sealed class UsbTouchPointerState
     {
-        public bool Pressed;
+        public byte PressedButton;
+        public bool Pressed => PressedButton != 0;
         public double LastX = 0.5;
         public double LastY = 0.5;
         public bool MoveDraining;
@@ -89,9 +90,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         public double PendingMoveY;
         public Func<bool>? PendingMoveCanSend;
         public double WheelRemainder;
-        public bool WheelActive;
+        public double WheelX;
         public double WheelY;
-        public bool WheelNeedsDown;
         public bool WheelDraining;
         public bool WheelCancelled;
         public double WheelVelocity;
@@ -751,7 +751,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         {
             CancelWheelScroll(state);
             var wasPressed = state.Pressed;
-            state.Pressed = false;
+            state.PressedButton = 0;
             state.PendingMoveQueued = false;
             state.WheelRemainder = 0;
             if (wasPressed)
@@ -760,6 +760,14 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             return;
         }
         var canSend = CapturePointerSendGuard(GetControlKeyboardWindow(sourceUdid));
+        var preferences = _viewModel.ControlPreferencesFor(sourceUdid);
+        var portrait = (Services.BluetoothMouseDirection)preferences.PortraitDirection;
+        var landscape = (Services.BluetoothMouseDirection)preferences.LandscapeDirection;
+        var reverseX = preferences.ReverseHorizontal;
+        var reverseY = preferences.ReverseVertical;
+        (double X, double Y) MapToDevice(double x, double y) =>
+            BluetoothMouseOrientationMapper.MapNormalized(x, y, sourceWidth, sourceHeight,
+                e.Rotation, portrait, landscape, reverseX, reverseY);
         if (e.Kind == Controls.PreviewPointerKind.Wheel)
         {
             // Velocity-based wheel simulation: the whole scroll gesture is
@@ -770,66 +778,65 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             // of a burst of separate small swipes, and releasing the wheel
             // lets the velocity decay for a natural ease-out stop. Positive
             // delta (scroll up) = downward drag (Y increases) on iOS.
-            if (state.Pressed) return;
+            if (state.Pressed || state.WheelCancelled) return;
+            if (MapPointerToNormalized(e, sourceWidth, sourceHeight) is not { } wheelPoint)
+            {
+                state.WheelRemainder = 0;
+                return;
+            }
             state.WheelRemainder += e.Wheel;
             var ticks = (int)Math.Truncate(state.WheelRemainder / 120.0);
             state.WheelRemainder -= ticks * 120.0;
             if (ticks == 0) return;
             const double velocityPerTick = 0.45;
             const double maxVelocity = 2.2;
-            if (!state.WheelActive)
+            MappedTouchRoute? route = null;
+            if (!state.WheelDraining)
             {
-                state.WheelCancelled = false;
-                state.WheelActive = true;
-                // Clamp the gesture origin into the safe vertical band with
-                // direction-aware margin: leave room for the initial travel
-                // so the gesture never immediately hits the safe-band edge
-                // and collapses to a zero-distance down→up (which iOS reads
-                // as a tap and opens whatever is under the cursor).
-                if (ticks > 0) // scrolling up = Y increases
-                    state.WheelY = Math.Clamp(state.LastY,
-                        WheelSafeMinY, WheelSafeMaxY - WheelMinGesture);
-                else // scrolling down = Y decreases
-                    state.WheelY = Math.Clamp(state.LastY,
-                        WheelSafeMinY + WheelMinGesture, WheelSafeMaxY);
-                state.WheelNeedsDown = true;
+                route = _viewModel.CaptureTouchRoute(sourceUdid,
+                    () => !state.WheelCancelled && canSend(), MapToDevice);
+                if (route is null) return;
+
+                // Keep the drag vertical in the displayed picture. The same
+                // transform as a mouse drag then maps each point to the device.
+                state.WheelX = wheelPoint.X;
+                state.WheelY = Math.Clamp(wheelPoint.Y,
+                    ticks < 0 ? WheelSafeMinY + WheelMinGesture : WheelSafeMinY,
+                    ticks > 0 ? WheelSafeMaxY - WheelMinGesture : WheelSafeMaxY);
                 state.WheelGestureDistance = 0;
             }
             state.WheelVelocity = Math.Clamp(
                 state.WheelVelocity + ticks * velocityPerTick,
                 -maxVelocity, maxVelocity);
             state.WheelLastDirection = Math.Sign(ticks);
-            if (!state.WheelDraining)
+            if (route is not null)
             {
                 state.WheelDraining = true;
-                _ = DrainWheelAsync(state, sourceUdid, canSend);
+                _ = DrainWheelAsync(state, route);
             }
             return;
         }
         if (e.Kind is not (Controls.PreviewPointerKind.Move or
             Controls.PreviewPointerKind.ButtonDown or Controls.PreviewPointerKind.ButtonUp)) return;
+        if (e.Kind == Controls.PreviewPointerKind.ButtonDown && (state.Pressed || e.Button == 0)) return;
+        if (e.Kind == Controls.PreviewPointerKind.ButtonUp && (!state.Pressed || e.Button != state.PressedButton)) return;
         var mapped = MapPointerToNormalized(e, sourceWidth, sourceHeight);
         if (mapped is null)
         {
-            if (e.Kind == Controls.PreviewPointerKind.ButtonUp && state.Pressed)
+            if (e.Kind == Controls.PreviewPointerKind.ButtonUp)
             {
-                state.Pressed = false;
+                state.PressedButton = 0;
                 state.PendingMoveQueued = false;
                 await _viewModel.SendUsbTouchAsync("up", state.LastX,
                     state.LastY, sourceUdid);
             }
             return;
         }
-        var position = BluetoothMouseOrientationMapper.MapNormalized(
-            mapped.Value.X, mapped.Value.Y, sourceWidth, sourceHeight, e.Rotation,
-            (Services.BluetoothMouseDirection)_viewModel.ControlPreferencesFor(sourceUdid).PortraitDirection,
-            (Services.BluetoothMouseDirection)_viewModel.ControlPreferencesFor(sourceUdid).LandscapeDirection,
-            _viewModel.ControlPreferencesFor(sourceUdid).ReverseHorizontal,
-            _viewModel.ControlPreferencesFor(sourceUdid).ReverseVertical);
+        var position = MapToDevice(mapped.Value.X, mapped.Value.Y);
         if (e.Kind == Controls.PreviewPointerKind.ButtonDown)
         {
             CancelWheelScroll(state);
-            state.Pressed = true;
+            state.PressedButton = e.Button;
             // A new contact starts from a clean coalescing state; the down
             // itself carries the newest position, so any move sampled before
             // it would only be stale after this point.
@@ -839,7 +846,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             return;
         var action = e.Kind == Controls.PreviewPointerKind.ButtonDown ? "down" :
             e.Kind == Controls.PreviewPointerKind.ButtonUp ? "up" : "move";
-        if (action == "up") state.Pressed = false;
+        if (action == "up") state.PressedButton = 0;
         // Publish the sampled position before an asynchronous send, so a
         // reset cannot release at coordinates from an older gesture.
         state.LastX = position.X;
@@ -874,29 +881,26 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     // steady-state speed reflects the rolling rate. When the velocity decays
     // to zero the gesture ends, with a minimum-distance tail so even a
     // single light tick travels far enough that iOS never reads it as a tap.
-    private async Task DrainWheelAsync(UsbTouchPointerState state,
-        string? sourceUdid, Func<bool> canSend)
+    private async Task DrainWheelAsync(UsbTouchPointerState state, MappedTouchRoute route)
     {
         const double stopVelocity = 0.05;   // below this the gesture is over
         const double decayPerFrame = 0.9;   // velocity decay each frame
         const double maxFrameSeconds = 0.1; // clamp for pathological stalls
-        const double minGesture = 0.08;     // total travel so iOS sees a drag
         const double tailStep = 0.008;      // per-frame distance while topping up
-        bool CanSendWheel() => !state.WheelCancelled && canSend();
+        Task Send(string action, CancellationToken token = default)
+        {
+            var position = route.Transform(state.WheelX, state.WheelY);
+            return route.SendAsync(action, position.X, position.Y, token);
+        }
         try
         {
-            if (state.WheelNeedsDown)
-            {
-                state.WheelNeedsDown = false;
-                await _viewModel.SendUsbTouchAsync("down", state.LastX,
-                    state.WheelY, sourceUdid, canSend: CanSendWheel);
-            }
+            await Send("down");
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
             var lastMs = 0.0;
-            while (CanSendWheel())
+            while (route.IsCurrent())
             {
                 await Task.Delay(16);
-                if (!CanSendWheel()) break;
+                if (!route.IsCurrent()) break;
                 // Real elapsed time (not the nominal 16 ms) keeps the speed
                 // correct even when the HID tunnel backpressure stretches a
                 // frame beyond its target interval.
@@ -909,7 +913,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                     state.WheelVelocity = 0;
                 if (state.WheelVelocity == 0)
                 {
-                    if (state.WheelGestureDistance >= minGesture ||
+                    if (state.WheelGestureDistance >= WheelMinGesture ||
                         state.WheelLastDirection == 0)
                         break;
                     // Top up the travel so the gesture never reads as a tap.
@@ -917,18 +921,17 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                     // travel remains instead of aborting the tail mid-way.
                     var tailDelta = state.WheelLastDirection *
                         Math.Min(tailStep,
-                            minGesture - state.WheelGestureDistance);
+                            WheelMinGesture - state.WheelGestureDistance);
                     var tailY = Math.Clamp(state.WheelY + tailDelta,
                         WheelSafeMinY, WheelSafeMaxY);
                     var tailTravel = Math.Abs(tailY - state.WheelY);
                     state.WheelY = tailY;
                     state.WheelGestureDistance += tailTravel;
                     if (tailTravel > 0.0005)
-                        await _viewModel.SendUsbTouchAsync("move",
-                            state.LastX, tailY, sourceUdid, canSend: CanSendWheel);
+                        await Send("move");
                     // A tail clamped against the band can no longer move —
                     // bail out instead of spinning on the same position.
-                    if (state.WheelGestureDistance >= minGesture ||
+                    if (state.WheelGestureDistance >= WheelMinGesture ||
                         tailTravel < 0.0005)
                         break;
                     continue;
@@ -948,28 +951,39 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                         state.WheelGestureDistance +=
                             Math.Abs(newY - state.WheelY);
                         state.WheelY = newY;
-                        await _viewModel.SendUsbTouchAsync("move",
-                            state.LastX, newY, sourceUdid, canSend: CanSendWheel);
+                        await Send("move");
                     }
                     break;
                 }
                 state.WheelY = newY;
                 state.WheelGestureDistance += Math.Abs(deltaY);
-                await _viewModel.SendUsbTouchAsync("move", state.LastX,
-                    newY, sourceUdid, canSend: CanSendWheel);
+                await Send("move");
             }
-            // Release the contact unless the user has taken it over with a
-            // ButtonDown (race: the button's down must not be undone here).
-            if (!state.Pressed)
-                await _viewModel.SendUsbTouchAsync("up", state.LastX,
-                    state.WheelY, sourceUdid);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception error)
+        {
+            _viewModel.AddDiagnosticLog(AppLog.Event("preview_wheel_failed", ("error", AppLog.Error(error))));
         }
         finally
         {
-            state.WheelCancelled = false;
-            state.WheelActive = false;
-            state.WheelNeedsDown = false;
-            state.WheelDraining = false;
+            // The wheel owns its own contact, so cancellation can always
+            // release it without lifting a newer mouse or touch contact.
+            state.WheelCancelled = true;
+            state.WheelVelocity = 0;
+            try
+            {
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+                await Send("up", timeout.Token);
+            }
+            catch (OperationCanceledException) { }
+            catch (InvalidOperationException) { }
+            catch (System.IO.IOException) { }
+            finally
+            {
+                state.WheelCancelled = false;
+                state.WheelDraining = false;
+            }
         }
     }
 
@@ -6553,7 +6567,14 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             nameof(MainViewModel.IsAudioOnlyAirPlay) or
             nameof(MainViewModel.IsVideoProtected))
         {
-            if (e.PropertyName == nameof(MainViewModel.SelectedDevice))
+            if (e.PropertyName == nameof(MainViewModel.SourceVideoHeight) &&
+                _viewModel.SelectedDevice is { } resized && !_secondaryMirrors.IsOpen(resized) &&
+                (_usbTouchStates.ContainsKey(resized.Udid) || _previewTouches.ContainsKey(resized.Udid)))
+            {
+                MainPreviewHost.ReleasePointerCapture();
+                OnControlPointerInput(this, new Controls.PreviewPointerEventArgs(Controls.PreviewPointerKind.Reset, 0, 0, 0, 0));
+            }
+            else if (e.PropertyName == nameof(MainViewModel.SelectedDevice))
             {
                 RefreshIndependentWindowLayoutEditor();
                 if (_protectedContentNoticeWindow is not null &&

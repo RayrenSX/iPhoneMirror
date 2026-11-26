@@ -52,8 +52,7 @@ internal sealed partial class MainViewModel
         string Read(string key) => values.TryGetProperty(key, out var value) && value.ValueKind == JsonValueKind.String
             ? value.GetString()?.Trim() ?? "" : "";
         var reportedUdid = Read("UniqueDeviceID");
-        if (reportedUdid.Length > 0 && !DeviceViewModel.UdidEquals(
-            reportedUdid.Replace("-", ""), appleUdid.Replace("-", ""))) return;
+        if (reportedUdid.Length > 0 && !AppleDeviceIdentity.Matches(reportedUdid, appleUdid)) return;
         var metadata = new WiredDeviceMetadata(Read("DeviceName"), Read("ProductType"), Read("ProductVersion"));
         if (Application.Current is not App { IsUiPreviewMode: true })
             DeviceAppearanceCache.Shared.RememberMetadata(device.Udid, metadata);

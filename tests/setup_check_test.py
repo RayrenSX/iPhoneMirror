@@ -1,4 +1,5 @@
 import asyncio
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -7,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
 import usb_touch_bridge as bridge
+from iostouch.apple_identity import capture_mux_environment_key
 
 
 class SetupCheckTests(unittest.IsolatedAsyncioTestCase):
@@ -16,7 +18,20 @@ class SetupCheckTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(bridge, 'create_using_usbmux', AsyncMock(return_value=client)) as create:
             result = await bridge.check_setup_async('phone-a', True)
         self.assertEqual(result, {'state': 'Completed', 'udid': 'phone-a'})
-        create.assert_awaited_once_with(serial='phone-a', connection_type='USB', autopair=False)
+        create.assert_awaited_once_with(serial='phone-a', connection_type='USB', autopair=False, usbmux_address=None)
+        client.close.assert_awaited_once()
+
+    async def test_active_capture_uses_only_the_selected_devices_published_broker(self):
+        requested = '00008120-0123456789ABCDEF'
+        reported = requested.lower().replace('-', '')
+        client = SimpleNamespace(udid=reported, get_developer_mode_status=AsyncMock(return_value=True), close=AsyncMock())
+        with patch.dict(os.environ, {capture_mux_environment_key(reported): '127.0.0.1:43125',
+                                     capture_mux_environment_key('00008120-1234567890123456'): '127.0.0.1:43126'}), \
+             patch.object(bridge, 'create_using_usbmux', AsyncMock(return_value=client)) as create:
+            result = await bridge.check_setup_async(requested)
+        self.assertEqual(result, {'state': 'Completed', 'udid': reported})
+        create.assert_awaited_once_with(serial=requested, connection_type='USB', autopair=False,
+                                        usbmux_address='127.0.0.1:43125')
         client.close.assert_awaited_once()
 
     async def test_missing_developer_mode_and_wireless_setting_are_incomplete(self):

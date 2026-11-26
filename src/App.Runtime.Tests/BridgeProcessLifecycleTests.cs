@@ -60,7 +60,9 @@ internal static partial class Program
                 child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'],
                                          stdin=subprocess.DEVNULL)
                 pathlib.Path(__file__).with_name('child.pid').write_text(str(child.pid))
-            print(json.dumps({'event':'ready', 'protocol':2, 'udid':udid, 'transport':'usb',
+            reported = udid.replace('-', '').lower() if udid.startswith('0000812') else udid
+            if udid.startswith('00008121-'): reported = reported[:-1] + '0'
+            print(json.dumps({'event':'ready', 'protocol':2, 'udid':reported, 'transport':'usb',
                               'rateHz':120, 'gateOpen':True, 'authMode':'direct', 'generation':1}), flush=True)
             if udid == 'stubborn-device': time.sleep(60)
             if udid == 'orphan-device': sys.exit(0)
@@ -70,6 +72,19 @@ internal static partial class Program
         try
         {
             using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            const string boundIdentity = "00008120-0123456789ABCDEF";
+            await bridge.StartAsync(python, script, boundIdentity, ct: deadline.Token);
+            if (!bridge.IsReady || bridge.Udid != boundIdentity)
+                throw new InvalidOperationException("A matching compact bridge identity did not retain the bound identity.");
+            await bridge.StopAsync();
+            try
+            {
+                await bridge.StartAsync(python, script, "00008121-0123456789ABCDEF", ct: deadline.Token);
+            }
+            catch (InvalidOperationException) when (bridge.LastErrorCode == "device_identity_mismatch") { }
+            if (bridge.IsReady || bridge.LastErrorCode != "device_identity_mismatch")
+                throw new InvalidOperationException("A different Apple device opened the control session.");
+            await bridge.StopAsync();
             for (var attempt = 0; attempt < 2; attempt++)
             {
                 await bridge.StartAsync(python, script, "noisy-device", ct: deadline.Token);

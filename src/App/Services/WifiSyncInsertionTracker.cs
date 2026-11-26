@@ -17,11 +17,11 @@ internal sealed class WifiSyncInsertionTracker
     {
         var current = devices
             .Where(device => !string.IsNullOrWhiteSpace(device.Udid))
-            .GroupBy(device => device.Udid, StringComparer.OrdinalIgnoreCase)
+            .GroupBy(device => AppleDeviceIdentity.Key(device.Udid), StringComparer.OrdinalIgnoreCase)
             .Select(group => group.First())
             .ToArray();
         var present = new HashSet<string>(
-            current.Select(device => device.Udid), StringComparer.OrdinalIgnoreCase);
+            current.Select(device => AppleDeviceIdentity.Key(device.Udid)), StringComparer.OrdinalIgnoreCase);
         foreach (var disconnected in _attemptedInsertionIds.Keys
                      .Where(udid => !present.Contains(udid)).ToArray())
             _attemptedInsertionIds.Remove(disconnected);
@@ -31,10 +31,11 @@ internal sealed class WifiSyncInsertionTracker
         {
             if (!device.PairRecordPresent || !device.LockdownAccessible)
                 continue;
-            if (_attemptedInsertionIds.TryGetValue(device.Udid,
+            var key = AppleDeviceIdentity.Key(device.Udid);
+            if (_attemptedInsertionIds.TryGetValue(key,
                     out var attemptedDeviceId) && attemptedDeviceId == device.DeviceId)
                 continue;
-            _attemptedInsertionIds[device.Udid] = device.DeviceId;
+            _attemptedInsertionIds[key] = device.DeviceId;
             targets.Add(device.Udid);
         }
         return targets;

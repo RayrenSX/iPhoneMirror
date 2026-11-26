@@ -27,6 +27,10 @@ internal static class PairedDeviceDiscoveryTests
         Require(network.IsPairedNetwork && !network.Ready, "unplugging must revoke cached USB readiness");
         Require(PairedDeviceDiscovery.Key(udid) == PairedDeviceDiscovery.Key(udid.Replace("-", "").ToLowerInvariant()),
             "LAN and USB UDID formats must deduplicate");
+        var compactNetwork = DeviceViewModel.FromPairedNetwork(new(udid.Replace("-", "").ToLowerInvariant(),
+            "My phone", "iPhone17,1", "18.0"), null);
+        Require(DeviceViewModel.UdidEquals(compactNetwork.Udid, usb.Udid),
+            "A compact LAN pairing record and USB inventory must use the same card and session key");
         VerifyProbeHandoff(udid);
         Console.WriteLine("Paired LAN device model checks passed.");
     }

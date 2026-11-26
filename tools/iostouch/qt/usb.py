@@ -16,6 +16,8 @@ from typing import Callable, Optional
 import usb.core
 import usb.util
 
+from iostouch.apple_identity import correct_serial, udid_matches
+
 logger = logging.getLogger(__name__)
 
 APPLE_VID = 0x05AC
@@ -111,13 +113,6 @@ def _serial_of(dev) -> str:
     return correct_serial(s.rstrip("\x00").strip())
 
 
-def correct_serial(s: str) -> str:
-    """USB 序列号 24 位时缺连字符（应为 8-16 形式的 UDID）。"""
-    if len(s) == 24 and "-" not in s:
-        return s[:8] + "-" + s[8:]
-    return s
-
-
 def find_devices(backend=None, udid: Optional[str] = None) -> list[IosUsbDevice]:
     backend = backend or get_backend()
     found = []
@@ -130,7 +125,7 @@ def find_devices(backend=None, udid: Optional[str] = None) -> list[IosUsbDevice]
         if mux == -1 and qt == -1:
             continue
         serial = _serial_of(dev)
-        if udid and serial != udid and serial.replace("-", "") != udid.replace("-", ""):
+        if udid and not udid_matches(serial, udid):
             continue
         found.append(IosUsbDevice(dev, serial, mux, qt))
     return found

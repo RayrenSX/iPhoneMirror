@@ -114,7 +114,11 @@ internal sealed class DeviceBindingManager
     internal DeviceBindingProfile? FindByIdentity(DeviceIdentityType type, string stableId)
     {
         if (string.IsNullOrWhiteSpace(stableId)) return null;
-        lock (_gate) return _profiles.Values.FirstOrDefault(profile => Matches(profile, type, stableId));
+        lock (_gate)
+        {
+            var matches = _profiles.Values.Where(profile => Matches(profile, type, stableId)).Take(2).ToArray();
+            return matches.Length == 1 ? matches[0] : null;
+        }
     }
 
     internal DeviceBindingCompatibility ValidateCompatibility(Guid profileId, DeviceFingerprint? candidate)
@@ -200,7 +204,7 @@ internal sealed class DeviceBindingManager
 
     private static bool Matches(DeviceBindingProfile profile, DeviceIdentityType type, string id) => type switch
     {
-        DeviceIdentityType.Wired => string.Equals(profile.WiredIdentity?.Udid, id, StringComparison.OrdinalIgnoreCase),
+        DeviceIdentityType.Wired => AppleDeviceIdentity.Matches(profile.WiredIdentity?.Udid, id),
         DeviceIdentityType.AirPlay => string.Equals(profile.AirPlayIdentity?.StableId, id, StringComparison.OrdinalIgnoreCase),
         _ => string.Equals(profile.BluetoothIdentity?.StableId, id, StringComparison.OrdinalIgnoreCase)
     };
@@ -244,7 +248,8 @@ internal sealed class DeviceBindingManager
                         (DeviceIdentityType.Bluetooth, profile.BluetoothIdentity?.StableId) })
                     {
                         if (value is null) continue;
-                        if (string.IsNullOrWhiteSpace(value) || !identities.Add(type + ":" + value))
+                        var key = type == DeviceIdentityType.Wired ? AppleDeviceIdentity.Key(value) : value;
+                        if (string.IsNullOrWhiteSpace(value) || !identities.Add(type + ":" + key))
                             throw new InvalidDataException("Invalid or ambiguous device identity.");
                     }
                 }

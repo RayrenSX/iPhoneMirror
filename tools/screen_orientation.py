@@ -9,22 +9,7 @@ import os
 import sys
 
 from pymobiledevice3.services.springboard import SpringBoardServicesService
-
-
-def capture_mux_environment_key(udid):
-    identity = udid.replace('-', '').upper()
-    if not identity or any(c not in '0123456789ABCDEF' for c in identity):
-        raise ValueError('invalid Apple device identity')
-    return 'IPHONE_MIRROR_CAPTURE_MUX_' + identity
-
-
-def capture_mux_address(value):
-    if not isinstance(value, str) or not value.startswith('127.0.0.1:'):
-        return None
-    port = value[len('127.0.0.1:'):]
-    if not port.isascii() or not port.isdigit() or not 1 <= int(port) <= 65535:
-        return None
-    return value
+from iostouch.apple_identity import capture_mux_address, capture_mux_environment_key
 
 
 async def observe_orientation(bridge, udid):

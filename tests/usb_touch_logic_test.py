@@ -1769,6 +1769,22 @@ class TestMuxConnectionLifecycle(unittest.TestCase):
 
 
 class TestWifiSyncProvisioning(unittest.IsolatedAsyncioTestCase):
+    async def test_wifi_sync_never_writes_a_different_device(self):
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock, patch
+        import usb_touch_bridge as bridge
+
+        ipc = SimpleNamespace(emit=AsyncMock())
+        client = SimpleNamespace(udid='another-device', get_enable_wifi_connections=AsyncMock(),
+                                 set_enable_wifi_connections=AsyncMock(), close=AsyncMock())
+        with patch.object(bridge, 'BridgeChannel', return_value=ipc), \
+             patch.object(bridge, 'create_using_usbmux', AsyncMock(return_value=client)):
+            self.assertFalse(await bridge.enable_wifi_sync_async('selected-device'))
+        self.assertEqual(ipc.emit.await_args.args[0]['code'], 'device_identity_mismatch')
+        client.get_enable_wifi_connections.assert_not_awaited()
+        client.set_enable_wifi_connections.assert_not_awaited()
+        client.close.assert_awaited_once()
+
     async def test_missing_wifi_sync_value_is_treated_as_disabled(self):
         import usb_touch_bridge as bridge
         from pymobiledevice3.exceptions import MissingValueError

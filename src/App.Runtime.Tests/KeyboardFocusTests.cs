@@ -45,7 +45,7 @@ internal static partial class Program
         owner.GetType().GetMethod(name, KeyboardTestMembers)!.Invoke(owner, args);
 
     private static int RunKeyboardFocusTests(bool initializeHiddenHandle = false,
-        bool shortcutReview = false, bool mouseShortcutReview = false)
+        bool shortcutReview = false, bool mouseShortcutReview = false, bool wheelAuditOnly = false)
     {
         SynchronizationContext.SetSynchronizationContext(new System.Windows.Threading.DispatcherSynchronizationContext());
         var app = new App { ShutdownMode = ShutdownMode.OnExplicitShutdown };
@@ -97,6 +97,7 @@ internal static partial class Program
                     "Creating the main HWND before Show (tray startup) must retain its input source.");
             foreach (var mode in new[] { "Bluetooth", "Usb", "Wireless" })
             {
+                if (wheelAuditOnly && mode == "Bluetooth") continue;
                 SetKeyboardField(vm, "_bluetoothControlEnabled", mode == "Bluetooth");
                 SetKeyboardField(vm, "_bluetoothControlConnected", mode == "Bluetooth");
                 SetKeyboardField(vm, "_bluetoothControlInputEnabled", mode == "Bluetooth");
@@ -125,6 +126,11 @@ internal static partial class Program
                         mode == "Usb" ? ReverseControlMode.Usb : ReverseControlMode.Wireless);
                 }
                 ReleaseTestPhysicalKeys(window);
+                if (wheelAuditOnly)
+                {
+                    TestStandaloneNativePreviewWheel(window, device, packets, mode);
+                    continue;
+                }
                 TestIsolatedKeyboardFocusRoute(window, other, udid, packets, mode != "Bluetooth");
                 TestFullScreenKeyEditorGuard(window, udid, mode);
                 if (shortcutReview)
@@ -138,6 +144,7 @@ internal static partial class Program
                 }
                 Console.WriteLine($"{mode}: foreground routing, releases, queued input and independent-window checks passed.");
             }
+            if (wheelAuditOnly) return 0;
             TestBluetoothKeyboardTransportGates();
             TestMultipleDeviceControl(window, vm, device, host, packets, bindings,
                 testPointerInput: initializeHiddenHandle && !mouseShortcutReview);
