@@ -98,10 +98,12 @@ jobs:
         shell: pwsh
         run: ./scripts/verify_localization.ps1
 
-      - name: Set up .NET 10 SDK
+      - name: Set up .NET for the build and SBOM tool
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
-          dotnet-version: 10.0.x
+          dotnet-version: |
+            8.0.x
+            10.0.x
 
       - name: Cache NuGet packages
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -127,7 +129,8 @@ jobs:
         shell: pwsh
         run: ./scripts/verify_localization_surfaces.ps1
 
-      - name: Set up MSYS2 UCRT64 for UxPlay
+      - name: Set up MSYS2 UCRT64 for UxPlay and the CoreDevice decoder
+        id: msys2
         uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2
         with:
           msystem: UCRT64
@@ -136,8 +139,11 @@ jobs:
           # unrelated mirror timeouts during database refresh.
           update: false
           install: >-
+            make
+            patch
             mingw-w64-ucrt-x86_64-cmake
             mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-nasm
             mingw-w64-ucrt-x86_64-toolchain
             mingw-w64-ucrt-x86_64-pkgconf
             mingw-w64-ucrt-x86_64-gstreamer
@@ -163,7 +169,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
-        run: ./build.ps1 -Configuration Release -Version $env:RELEASE_VERSION -PrepareUxPlayComponent
+          MSYS2_ROOT: ${{ steps.msys2.outputs.msys2-location }}
+        run: |
+          ./scripts/build_coredevice_decoder.ps1 -MsysRoot $env:MSYS2_ROOT
+          ./build.ps1 -Configuration Release -Version $env:RELEASE_VERSION -PrepareUxPlayComponent
 
       - name: Package release assets
         shell: pwsh
@@ -175,6 +184,7 @@ jobs:
           -SkipBuild
           -GenerateSbom
           -UpdateReleaseManifest
+          -RequireCoreDeviceDecoder
 
       - name: Preserve packaged release assets
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

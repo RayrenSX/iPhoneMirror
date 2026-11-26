@@ -36,6 +36,9 @@ The full build runs native, Python, application-logic and driver tests. WPF runt
 
 The packaging script reads the app version and checks it against Driver Manager and the native core. For pre7, the product version is `1.8.5-pre7` and the managed assembly and file version is `1.8.5.0`. Output includes Setup, the portable ZIP, the optional UxPlay component, SHA-256 hashes, and the SPDX SBOM. `-SkipBuild` requires a matching staged payload.
 
+GitHub Releases builds the experimental CoreDevice decoder before packaging and uses `-RequireCoreDeviceDecoder` to verify that Setup and ZIP contain the same decoder and licenses. To prepare that payload locally, first run `./scripts/build_coredevice_decoder.ps1 -MsysRoot <MSYS2 directory>`.
+When packaging an isolated local build, pass its `build.ps1 -OutputRoot` directory to `package_release.ps1 -BuildOutputRoot`.
+
 Verify the final ZIP by extracting it to a separate folder and checking the files, versions, and startup. Verify the final Setup with installation, startup, upgrade, removal, and reinstall in an isolated test environment. Check USB, AirPlay, control and reconnection on suitable devices when those behaviors change. Report the scope of each result without treating a successful build as a device test.
 
 Each release tag contains five files in `docs/releases`. Put the English body in `v<version>.md` and use `.zh-CN`, `.zh-HK`, `.zh-TW`, and `.ja-JP` before `.md` for translations. GitHub Releases displays the English body and asset table with a link to the Simplified Chinese notes. The release metadata carries the authored notes for all five interface languages. The updater selects the current language directly from that response. Older releases use the available original notes when localized notes are unavailable.

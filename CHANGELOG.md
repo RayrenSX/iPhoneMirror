@@ -5,7 +5,7 @@ All notable changes to iPhoneMirror are documented here. The project follows
 
 ## [1.8.5-pre7] - 2026-11-26
 
-The local build is the final preview before the iPhoneMirror 1.8.5 stable release.
+This is the final preview before the iPhoneMirror 1.8.5 stable release.
 
 ### Added
 
@@ -24,6 +24,8 @@ The local build is the final preview before the iPhoneMirror 1.8.5 stable releas
 ### Fixed
 
 - Preserve rounded dialog corners and transparent overlay backgrounds.
+- Match the same Apple device across UDID spellings in reverse control, setup checks, and file access.
+- Restore mouse-wheel scrolling over the preview. Keep scrolling aligned through rotation and isolate wheel gestures from mouse-button drags.
 
 ## [1.8.5-pre6] - 2026-11-17
 

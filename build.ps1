@@ -1045,10 +1045,8 @@ try {
             -ForegroundColor Green
     }
     else {
-        if ($OutputsRoot -eq (Join-Path $Root 'outputs')) {
-            . (Join-Path $Root 'scripts\CompactBuildRecord.ps1')
-            Write-CompactBuildRecord $Root $BuildUxPlayComponent $UseMediaOutputRuntime
-        }
+        . (Join-Path $Root 'scripts\CompactBuildRecord.ps1')
+        Write-CompactBuildRecord $Root $BuildUxPlayComponent $UseMediaOutputRuntime $OutputsRoot
         Write-Host "Build complete: $OutputsRoot\iPhoneMirror" -ForegroundColor Green
         Write-Host "Installer payload: $OutputsRoot\iPhoneMirror.Installer" `
             -ForegroundColor Green

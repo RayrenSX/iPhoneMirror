@@ -69,11 +69,16 @@ jobs:
         shell: pwsh
         run: ./scripts/verify_localization_surfaces.ps1
 
+      - name: Verify documentation links and anchors
+        shell: pwsh
+        run: python scripts/verify_docs.py
+
       - name: Verify SRS lab HTTP error handling
         shell: pwsh
         run: node --test scripts/test_srs_lab_server.mjs
 
-      - name: Set up MSYS2 UCRT64 for UxPlay
+      - name: Set up MSYS2 UCRT64 for UxPlay and the CoreDevice decoder
+        id: msys2
         uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2
         with:
           msystem: UCRT64
@@ -82,8 +87,11 @@ jobs:
           # unrelated mirror timeouts during database refresh.
           update: false
           install: >-
+            make
+            patch
             mingw-w64-ucrt-x86_64-cmake
             mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-nasm
             mingw-w64-ucrt-x86_64-toolchain
             mingw-w64-ucrt-x86_64-pkgconf
             mingw-w64-ucrt-x86_64-gstreamer
@@ -98,7 +106,10 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: ./build.ps1 -Configuration Release
+          MSYS2_ROOT: ${{ steps.msys2.outputs.msys2-location }}
+        run: |
+          ./scripts/build_coredevice_decoder.ps1 -MsysRoot $env:MSYS2_ROOT
+          ./build.ps1 -Configuration Release
 
       - name: Verify control handshake and process lifecycle without a phone
         shell: pwsh

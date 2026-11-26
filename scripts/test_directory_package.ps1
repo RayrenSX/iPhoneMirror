@@ -41,6 +41,17 @@ try {
     }
     Write-CompactBuildRecord $fixture $false $false
     Assert-CompactBuildRecord $fixture $false $false
+    $isolated = Join-Path $fixture 'isolated'
+    Copy-Item -LiteralPath (Join-Path $fixture 'outputs') -Destination $isolated -Recurse
+    $decoder = Join-Path $isolated 'iPhoneMirror\tools\CoreDevice'
+    New-Item -ItemType Directory -Path $decoder -Force | Out-Null
+    foreach ($name in @('iPhoneMirror.MediaDecoder.exe', 'LICENSE.FFmpeg', 'LICENSE.rplayhub')) {
+        [IO.File]::WriteAllText((Join-Path $decoder $name), 'build fixture')
+    }
+    Write-CompactBuildRecord $fixture $false $false $isolated
+    Assert-CompactBuildRecord $fixture $false $false $isolated
+    [IO.File]::WriteAllText((Join-Path $decoder 'iPhoneMirror.MediaDecoder.exe'), 'substituted decoder')
+    Assert-Rejected { Assert-CompactBuildRecord $fixture $false $false $isolated } '*metadata changed after building*MediaDecoder.exe*'
     [IO.File]::WriteAllText((Join-Path $fixture 'outputs\iPhoneMirror\iPhoneMirror.Driver.exe'), 'substituted')
     Assert-Rejected { Assert-CompactBuildRecord $fixture $false $false } '*metadata changed after building*Driver.exe*'
     Write-Output 'PASS missing driver, matching payloads, stale camera/helper, and substituted release driver.'

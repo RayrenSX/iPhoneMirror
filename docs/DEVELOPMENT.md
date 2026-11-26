@@ -199,6 +199,8 @@ pre7 的主程序和驱动管理器使用产品版本 `1.8.5-pre7`，程序集�
 
 脚本生成 `outputs/releases` 下的 Setup、ZIP、`SHA256SUMS.txt` 和 SPDX SBOM。
 标准包另附 UxPlay 可选组件 ZIP；应用首次选用时通过镜像下载并显示进度弹窗。
+GitHub 发布流程先构建实验性 CoreDevice 解码器，再用 `-RequireCoreDeviceDecoder` 校验 Setup 和 ZIP 中的解码器及其许可证。本地准备相同载荷时，先运行 `./scripts/build_coredevice_decoder.ps1 -MsysRoot <MSYS2目录>`。
+打包单独构建的本地版本时，用 `package_release.ps1 -BuildOutputRoot` 指定构建时 `build.ps1 -OutputRoot` 使用的目录。
 安装包默认以 100,000,000 字节为优化目标，超出时只提醒，组件完整可用优先。
 需要强制限制的构建可显式传入 `-EnforceInstallerSizeLimit`。
 打包默认读取当前项目版本。`-SkipBuild` 仅适用于已有匹配载荷，仍执行版本和完整性检查。构建与打包应使用一致的运行时省略选项。

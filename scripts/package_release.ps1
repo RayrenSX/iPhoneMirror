@@ -4,9 +4,11 @@ param(
     [string]$Version,
     [switch]$AllowVersionOverride,
     [switch]$SkipBuild,
+    [string]$BuildOutputRoot,
     [string]$ReleaseOutputDirectory,
     [switch]$GenerateSbom,
     [switch]$UpdateReleaseManifest,
+    [switch]$RequireCoreDeviceDecoder,
     [ValidateRange(1,2147483647)][long]$MaximumInstallerBytes = 100000000,
     [switch]$EnforceInstallerSizeLimit,
     [switch]$IncludeMediaOutputRuntime,
@@ -59,13 +61,21 @@ if ($AllowVersionOverride -and
 if ($Version -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
     throw "Invalid package version in ${AppProjectPath}: $Version"
 }
-$PublishRoot = Join-Path $Root 'outputs\iPhoneMirror'
-$InstallerPublishRoot = Join-Path $Root 'outputs\iPhoneMirror.Installer'
+$BuildRoot = if ($BuildOutputRoot) {
+    $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($BuildOutputRoot)
+} else { Join-Path $Root 'outputs' }
+$PublishRoot = Join-Path $BuildRoot 'iPhoneMirror'
+$InstallerPublishRoot = Join-Path $BuildRoot 'iPhoneMirror.Installer'
 $ReleaseRoot = if ($ReleaseOutputDirectory) {
     [IO.Path]::GetFullPath($ReleaseOutputDirectory)
 } else { Join-Path $Root 'outputs\releases' }
 $ReleaseManifestPath = Join-Path $Root 'updates\releases.json'
-$StagingBase = Join-Path $Root 'outputs\release-staging'
+$CoreDeviceArtifacts = @(
+    'tools\CoreDevice\iPhoneMirror.MediaDecoder.exe'
+    'tools\CoreDevice\LICENSE.FFmpeg'
+    'tools\CoreDevice\LICENSE.rplayhub'
+)
+$StagingBase = Join-Path $BuildRoot 'release-staging'
 $StagingRoot = Join-Path $StagingBase ([Guid]::NewGuid().ToString('N'))
 $PackageName = "iPhoneMirror-v$Version-win-x64"
 $PackageRoot = Join-Path $StagingRoot $PackageName
@@ -350,6 +360,29 @@ function Assert-SafeWorkspaceDirectory([string]$Path) {
     }
 }
 
+function Assert-CoreDeviceDecoder([string]$PayloadRoot, [string]$ReferenceRoot) {
+    $decoderRoot = Join-Path $PayloadRoot 'tools\CoreDevice'
+    Assert-SafeWorkspaceDirectory $decoderRoot
+    $links = @(Get-ChildItem -LiteralPath $decoderRoot -Recurse -Force -ErrorAction SilentlyContinue |
+        Where-Object { ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 })
+    if ($links.Count) { throw "CoreDevice decoder directory contains reparse points: $decoderRoot" }
+    $actual = @(Get-ChildItem -LiteralPath $decoderRoot -Recurse -File -ErrorAction SilentlyContinue |
+        ForEach-Object { $_.FullName.Substring($PayloadRoot.Length + 1) })
+    if ($actual.Count -ne $CoreDeviceArtifacts.Count -or
+        @($CoreDeviceArtifacts | Where-Object { $_ -notin $actual }).Count -ne 0) {
+        throw "CoreDevice decoder and its licenses are missing or incomplete in $PayloadRoot."
+    }
+    if ($ReferenceRoot) {
+        foreach ($artifact in $CoreDeviceArtifacts) {
+            $published = Get-FileHash -LiteralPath (Join-Path $PayloadRoot $artifact) -Algorithm SHA256
+            $reference = Get-FileHash -LiteralPath (Join-Path $ReferenceRoot $artifact) -Algorithm SHA256
+            if ($published.Hash -ne $reference.Hash) {
+                throw "The Setup and ZIP payloads disagree on $artifact."
+            }
+        }
+    }
+}
+
 function Assert-PublishedOutput {
     Assert-SafeWorkspaceDirectory $PublishRoot
     if (-not (Test-Path -LiteralPath $PublishRoot -PathType Container)) {
@@ -375,6 +408,10 @@ function Assert-PublishedOutput {
     $actualArtifacts = @(Get-ChildItem -LiteralPath $PublishRoot -Recurse -File |
         ForEach-Object { $_.FullName.Substring($fullPublishRoot.Length + 1) })
     $optionalArtifacts = @('AppleMobileDeviceSupport64.msi')
+    if ($RequireCoreDeviceDecoder -or (Test-Path -LiteralPath (Join-Path $PublishRoot 'tools\CoreDevice'))) {
+        Assert-CoreDeviceDecoder $PublishRoot
+        $optionalArtifacts += $CoreDeviceArtifacts
+    }
     if ($UseMediaOutputRuntime) {
         $optionalArtifacts += @(
             'tools\ffmpeg\ffmpeg.exe',
@@ -590,6 +627,7 @@ try {
         $buildArguments = @{
             Configuration = 'Release'
             Version = $Version
+            OutputRoot = $BuildRoot
         }
         if ($OmitMediaOutputRuntime) {
             $buildArguments.OmitMediaOutputRuntime = $true
@@ -609,11 +647,12 @@ try {
     }
 
     Assert-PublishedOutput
+    Assert-SafeWorkspaceDirectory $InstallerPublishRoot
     . (Join-Path $PSScriptRoot 'DdiBundle.ps1')
     Assert-BundledDdi (Join-Path $PublishRoot 'tools\ddi')
     Assert-BundledDdi (Join-Path $InstallerPublishRoot 'tools\ddi')
     . (Join-Path $PSScriptRoot 'CompactBuildRecord.ps1')
-    Assert-CompactBuildRecord $Root (-not $OmitUxPlayRuntime) $UseMediaOutputRuntime
+    Assert-CompactBuildRecord $Root (-not $OmitUxPlayRuntime) $UseMediaOutputRuntime $BuildRoot
     if (-not (Test-Path -LiteralPath $InstallerPublishRoot -PathType Container)) {
         throw "Shared-runtime installer output is missing: $InstallerPublishRoot"
     }
@@ -641,6 +680,11 @@ try {
     }
     Assert-UsbTouchBridgeRuntime (Join-Path $InstallerPublishRoot 'tools') `
         'Shared-runtime installer USB touch bridge runtime'
+    if ($RequireCoreDeviceDecoder -or
+        (Test-Path -LiteralPath (Join-Path $PublishRoot 'tools\CoreDevice')) -or
+        (Test-Path -LiteralPath (Join-Path $InstallerPublishRoot 'tools\CoreDevice'))) {
+        Assert-CoreDeviceDecoder $InstallerPublishRoot $PublishRoot
+    }
     $versionedDac = @(Get-ChildItem -LiteralPath $InstallerPublishRoot `
         -Filter 'mscordaccore_amd64_amd64_*.dll' -File)
     if ($versionedDac.Count -ne 1) {
@@ -862,6 +906,30 @@ try {
                 copyrightText = 'NOASSERTION'
                 versionInfo = '8.1.2'
                 supplier = $(if ($MediaOutputManifest.PrebuiltDirectory) { 'Organization: iPhoneMirror' } else { 'Organization: gyan.dev' })
+            })
+        }
+        if (Test-Path -LiteralPath (Join-Path $PackageRoot 'tools\CoreDevice\iPhoneMirror.MediaDecoder.exe')) {
+            $NativePackages.Add([PSCustomObject][ordered]@{
+                name = 'FFmpeg CoreDevice decoder runtime'
+                SPDXID = 'SPDXRef-Package-FFmpeg-8.1.2-CoreDevice'
+                downloadLocation = 'https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz'
+                filesAnalyzed = $false
+                licenseConcluded = 'GPL-3.0-or-later'
+                licenseDeclared = 'GPL-3.0-or-later'
+                copyrightText = 'NOASSERTION'
+                versionInfo = '8.1.2'
+                supplier = 'Organization: FFmpeg project'
+            })
+            $NativePackages.Add([PSCustomObject][ordered]@{
+                name = 'rPlayHub RVRA patch'
+                SPDXID = 'SPDXRef-Package-rPlayHub-RVRA'
+                downloadLocation = 'https://github.com/rPlayAI/rPlayHub/tree/fe6a7a9f1cff431acfda142cd3564fc8e0e849a3'
+                filesAnalyzed = $false
+                licenseConcluded = 'GPL-3.0-or-later'
+                licenseDeclared = 'GPL-3.0-or-later'
+                copyrightText = 'NOASSERTION'
+                versionInfo = 'fe6a7a9f1cff431acfda142cd3564fc8e0e849a3'
+                supplier = 'Organization: rPlayAI'
             })
         }
         foreach ($NativePackage in $NativePackages) {
