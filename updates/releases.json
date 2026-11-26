@@ -1,5 +1,51 @@
 [
   {
+    "tag_name": "v1.8.5-pre7",
+    "name": "iPhoneMirror v1.8.5-pre7",
+    "body": "### Notes\n\n**v1.8.5-pre7 is the final preview before the iPhoneMirror 1.8.5 stable release.** It targets Windows x64 and includes the following changes since v1.8.5-pre6.\n\n### Added\n\n- Discover paired wireless devices and show wired and wireless availability on one device card. Experimental CoreDevice mirroring provides video on eligible iOS and iPadOS 27 or later devices with pairing, Developer Mode, and a matching developer image.\n- Copy on-screen text, send files from the preview, and transfer or install a dropped IPA. Installation requires a valid signature and device authorization.\n- Expand Explorer mappings to include accessible media, crash logs, and app directories while honoring the device's file permissions.\n- Keep audio on the phone during eligible USB mirroring sessions. Windows recording and streaming cannot capture that source audio while this option is selected. Game microphone compatibility still needs device testing (#100).\n- Remember the last independent-window layout per device, save a preset, and set a custom position. Configure window actions and Windows hotkey rules in shortcut settings (#91, #92, #93).\n\n### Changed\n\n- Offer native AirPlay and compatibility Demo modes for USB mirroring. A saved fixed-size C mode selection migrates to native AirPlay.\n- Save resolution, frame rate, and decoder settings automatically. Color and wireless receiver settings keep their explicit save and apply actions.\n- Add a free-software notice and a skippable author-support page to the full setup wizard.\n- Show update notes in the current app language. GitHub release pages display the English notes with a separate link to Simplified Chinese.\n- Update the user guide for the new workflows and set the application and Driver Manager product versions to `1.8.5-pre7`.\n\n### Fixed\n\n- Keep rounded dialog corners and transparent overlays clear of the owner window's background.\n- Correct Apple device matching for USB reverse control, setup checks, and file access when the same UDID has different casing or hyphenation.\n- Restore wheel scrolling over the phone preview, including near its frame. Keep the scroll direction aligned with a rotated preview, and prevent wheel gestures and mouse-button drags from interrupting one another.",
+    "published_at": "2026-11-26T11:20:59Z",
+    "draft": false,
+    "prerelease": true,
+    "assets": [
+      {
+        "name": "iPhoneMirror-Setup-v1.8.5-pre7-x64.exe",
+        "size": 214643212,
+        "digest": "sha256:572ab7dba81818c47a3eca10ff743ef5230646da84b975530c9e9392b01f371d",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.5-pre7/iPhoneMirror-Setup-v1.8.5-pre7-x64.exe"
+      },
+      {
+        "name": "iPhoneMirror-v1.8.5-pre7-win-x64.zip",
+        "size": 330823135,
+        "digest": "sha256:dbb86a210309fd81d584efc2fa5207876dc3b281d55de387e0eb9e19fea0360d",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.5-pre7/iPhoneMirror-v1.8.5-pre7-win-x64.zip"
+      },
+      {
+        "name": "iPhoneMirror-UxPlay-v1.8.5-pre7-win-x64.zip",
+        "size": 70628653,
+        "digest": "sha256:e25d06da6e764c5f97434d6d4108bcf8b3d02bc807b56ccfba10196dbcc3fe89",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.5-pre7/iPhoneMirror-UxPlay-v1.8.5-pre7-win-x64.zip"
+      },
+      {
+        "name": "iPhoneMirror-v1.8.5-pre7-win-x64-sbom.spdx.json",
+        "size": 792346,
+        "digest": "sha256:b7460f3ebb84301b0d414ee55c73ec104508d07624c2d30d99f06bba32f4af27",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.5-pre7/iPhoneMirror-v1.8.5-pre7-win-x64-sbom.spdx.json"
+      },
+      {
+        "name": "SHA256SUMS.txt",
+        "size": 432,
+        "digest": "sha256:e43410c6147b6ca14cafeffa89fab311285c79c5113ceec0044b33fc10677b63",
+        "browser_download_url": "https://github.com/RayrenSX/iPhoneMirror/releases/download/v1.8.5-pre7/SHA256SUMS.txt"
+      }
+    ],
+    "localized_notes": {
+      "zh-CN": "v1.8.5-pre7 是 **iPhoneMirror 1.8.5 正式发布前的最后一个预览版**，面向 Windows x64。以下是自 v1.8.5-pre6 以来的主要变更。\n\n### 投屏与设备连接\n\n- 新增已配对无线设备发现。同一台手机的有线和无线状态合并到一张设备卡片。\n- 新增实验性 CoreDevice 无线投屏。此方式目前仅提供画面，需要 iOS／iPadOS 27 及以上、设备绑定、开发者模式和匹配的开发者镜像。\n- USB 投屏提供推荐的原生 AirPlay 和兼容 Demo 两种模式。此前保存的固定尺寸 C 模式选择会迁移到原生 AirPlay。\n- 支持在适用的 USB 投屏中将声音留在手机。使用此选项时，电脑录制或直播无法采集该设备的声音。游戏内开麦兼容性仍需实机验证（#100）。\n- 分辨率、帧率和解码器设置改为自动保存。色彩编辑和无线接收设置继续使用各自的保存或应用操作。\n\n### 预览、文件与独立窗口\n\n- 在预览中复制画面文字、发送文件，或拖入 IPA 后选择传输或安装。IPA 安装需要有效签名和设备许可。\n- 扩展 Windows 资源管理器映射，统一展示设备允许访问的媒体、崩溃日志和应用目录，保留设备报告的读写权限。\n- 独立窗口支持按设备记住上次布局、保存预设和自定义位置。可在快捷键设置中配置窗口动作及独立窗口内的 Windows 热键规则（#91、#92、#93）。\n- 修复部分圆角对话框角落被宿主窗口背景填充的问题，保留透明覆盖窗口的背景效果。\n- 修复同一台设备的 UDID 大小写或连字符不同时，有线反控、设置检查和文件访问可能找不到设备的问题。\n- 修复有手机边框时滚轮失效、预览旋转后滚动方向错误，以及滚轮和鼠标拖动互相中断的问题。\n\n### 使用与兼容性\n\n- 完整设置向导增加免费开源说明和可跳过的作者支持页。\n- 应用内更新说明随界面语言切换。GitHub Release 默认显示英文正文，并提供独立的简体中文链接。\n- 使用指南补充了两种 USB 投屏模式、配对无线投屏、预览工具和独立窗口的操作步骤。具体实机验证范围见相应功能文档。\n- 主程序与驱动管理器的产品版本统一为 `1.8.5-pre7`。",
+      "zh-HK": "**v1.8.5-pre7 是 iPhoneMirror 1.8.5 正式推出前的最後一個預覽版本**，適用於 Windows x64。以下是自 v1.8.5-pre6 以來的主要改動。\n\n### 投屏與裝置連接\n\n- 新增已配對無線裝置偵測。同一部手機的有線和無線狀態會顯示於同一張裝置卡片。\n- 新增實驗性 CoreDevice 無線投屏，目前只傳送畫面。需要 iOS／iPadOS 27 或以上、已綁定裝置、開發者模式及相符的開發者映像。\n- USB 投屏提供建議使用的原生 AirPlay 和兼容示範模式。以往儲存的固定尺寸 C 模式會轉用原生 AirPlay。\n- 支援在適用的 USB 投屏連線中讓聲音留在手機播放。電腦錄影或直播無法擷取該裝置的音訊。遊戲咪高峰兼容性仍需使用實機測試（#100）。\n- 解像度、幀率和解碼器選項會自動儲存。色彩編輯和無線接收設定仍須分別儲存或套用。\n\n### 預覽、檔案及獨立視窗\n\n- 可在預覽中複製畫面文字、傳送檔案，或拖入 IPA 後選擇傳送或安裝。安裝需要有效簽署及裝置授權。\n- 擴充 Windows 檔案總管對應，在同一位置顯示裝置允許存取的媒體、當機記錄和應用程式資料夾，並保留讀寫權限。\n- 可按裝置記住上次的獨立視窗佈局、儲存預設佈局或自訂位置。可在快速鍵設定中配置視窗動作和 Windows 快速鍵規則（#91、#92、#93）。\n- 修正部分圓角對話框的角落被主控視窗背景填滿的問題，並保留透明覆疊視窗的背景效果。\n- 修正同一部裝置的 UDID 大小寫或連字符有別時，有線反控、設定檢查及檔案存取可能找不到裝置的問題。\n- 修正顯示手機邊框時滾輪失效、預覽旋轉後捲動方向有誤，以及滾輪與滑鼠拖曳互相中斷的問題。\n\n### 使用及兼容性\n\n- 完整設定助手新增免費開放原始碼說明，以及可略過的作者支援頁面。\n- 應用程式內的更新說明跟隨介面語言。GitHub Release 預設顯示英文正文，並附有獨立簡體中文連結。\n- 使用指南補充兩種 USB 投屏模式、配對後的無線投屏、預覽工具及獨立視窗的操作步驟。實機測試範圍見各功能說明。\n- 主程式及驅動程式管理員的產品版本統一為 `1.8.5-pre7`。",
+      "zh-TW": "**v1.8.5-pre7 是 iPhoneMirror 1.8.5 正式發行前的最後一個預覽版**，適用於 Windows x64。以下是自 v1.8.5-pre6 以來的主要變更。\n\n### 鏡像與裝置連線\n\n- 新增已配對無線裝置探索。同一支手機的有線和無線狀態會顯示在同一張裝置卡片。\n- 新增實驗性 CoreDevice 無線鏡像，目前僅傳送畫面。需要 iOS／iPadOS 27 或更新版本、裝置綁定、開發者模式和相符的開發者映像。\n- USB 鏡像提供建議的原生 AirPlay 模式與相容的示範模式。先前儲存的固定尺寸 C 模式會移轉至原生 AirPlay。\n- 在相容的 USB 鏡像連線中，可以將聲音留在手機播放。電腦錄影或直播將無法擷取該裝置的聲音。遊戲麥克風相容性仍需實機驗證（#100）。\n- 解析度、影格率和解碼器設定會自動儲存。色彩編輯及無線接收設定仍須個別儲存或套用。\n\n### 預覽、檔案與獨立視窗\n\n- 可在預覽中複製畫面文字、傳送檔案，或拖入 IPA 後選擇傳送或安裝。安裝需要有效的簽署及裝置授權。\n- 擴充 Windows 檔案總管對應，集中顯示裝置允許存取的媒體、當機記錄和應用程式資料夾，並保留讀寫權限。\n- 可依裝置記住上次使用的獨立視窗配置、儲存預設配置及自訂位置。可在快速鍵設定中配置視窗動作和 Windows 快速鍵規則（#91、#92、#93）。\n- 修正部分圓角對話方塊的角落被擁有者視窗背景填滿的問題，並保留透明覆疊視窗的背景效果。\n- 修正在同一部裝置的 UDID 大小寫或連字號不同時，有線反向控制、設定檢查和檔案存取可能找不到裝置的問題。\n- 修正顯示手機外框時滾輪失效、預覽旋轉後捲動方向錯誤，以及滾輪和滑鼠拖曳互相中斷的問題。\n\n### 使用與相容性\n\n- 完整設定精靈新增免費開放原始碼說明，以及可略過的支持作者頁面。\n- 應用程式的更新說明跟隨介面語言。GitHub Release 預設顯示英文內容，並提供獨立的簡體中文連結。\n- 使用指南補充兩種 USB 鏡像模式、配對後的無線鏡像、預覽工具及獨立視窗的操作步驟。實機驗證範圍請參閱各項功能說明。\n- 主程式與驅動程式管理員的產品版本統一為 `1.8.5-pre7`。",
+      "ja-JP": "**v1.8.5-pre7 は iPhoneMirror 1.8.5 正式版に向けた最後のプレビューです。** Windows x64 向けで、v1.8.5-pre6 からの主な変更は以下のとおりです。\n\n### ミラーリングとデバイス接続\n\n- ペアリング済みのワイヤレスデバイスを検出し、同じデバイスの有線と無線の状態を一つのカードに表示します。\n- 試験的な CoreDevice ワイヤレスミラーリングを追加しました。現在は映像のみで、iOS／iPadOS 27 以降、デバイスの関連付け、デベロッパモード、対応する開発者用イメージが必要です。\n- USB ミラーリングには推奨のネイティブ AirPlay モードと互換性重視のデモモードがあります。固定サイズの C モードを保存している場合は、ネイティブ AirPlay に移行します。\n- 対応する USB 接続では、音をデバイス側で再生できます。この設定中は Windows の録画や配信にそのデバイスの音声を取り込めません。ゲーム内マイクとの互換性は実機での検証が必要です（#100）。\n- 解像度、フレームレート、デコーダーの設定を自動で保存します。色調整とワイヤレス受信設定は、それぞれの保存または適用操作で反映します。\n\n### プレビュー、ファイル、独立ウィンドウ\n\n- プレビューから画面上の文字をコピーしたり、ファイルを送信したりできます。IPA をドロップした際は、転送またはインストールを選べます。インストールには有効な署名とデバイスの許可が必要です。\n- エクスプローラーのマッピングを拡張し、アクセス可能なメディア、クラッシュログ、アプリのフォルダーをまとめて表示します。デバイス側の読み書き権限も維持します。\n- デバイスごとに独立ウィンドウの前回のレイアウトを復元でき、プリセットとカスタム位置も設定できます。ウィンドウの操作と Windows ホットキーの規則はショートカット設定から変更できます（#91、#92、#93）。\n- 一部の角丸ダイアログの隅に親ウィンドウの背景が描画される問題を修正しました。透明なオーバーレイの背景は維持されます。\n- 同じ UDID の大文字と小文字やハイフンの表記が異なっていても、USB 操作、設定確認、ファイルアクセスでデバイスを正しく認識するよう修正しました。\n- 端末フレームを表示したプレビューでのホイール操作と、回転後のスクロール方向を修正しました。ホイール操作とマウスドラッグが互いに中断される問題も解消しました。\n\n### セットアップと互換性\n\n- セットアップウィザードに、無料のオープンソースソフトウェアであることを案内するページと、スキップできる作者支援ページを追加しました。\n- アプリ内の更新内容を現在の表示言語で表示します。GitHub のリリースページは英語で表示し、簡体字中国語版へのリンクを掲載します。\n- ユーザーガイドに、USB の二つのモード、ペアリング済みの無線デバイス、プレビューツール、独立ウィンドウの操作を追加しました。実機での確認範囲は各機能の資料に記載されています。\n- アプリケーションとドライバー管理ツールの製品バージョンを `1.8.5-pre7` に統一しました。"
+    }
+  },
+  {
     "tag_name": "v1.8.5-pre6",
     "name": "iPhoneMirror v1.8.5-pre6",
     "body": "### Added\n\n- Add integrated device management and opt-in read/write Windows Explorer mappings for media and file-sharing app Documents, persistent proxy settings, and a default-on phone keyboard visibility control.\n- Add device frame assets and calibrated corner profiles for recent iPhones.\n\n### Fixed\n\n- Fix AirPlay item completion, ad handoff, HLS discontinuities, scrub/seek parsing, retry state and iQIYI next-episode continuation (#88).\n- Fix UxPlay frame geometry and rotation transitions (#90), recovered wireless preview binding, control-window focus restoration and USB/keyboard recovery.\n- Fix Windows mapped uploads with PROPPATCH/file-time handling; improve setup, Driver Manager, description visibility and disabled controls.\n- See [pre6 release notes](docs/releases/v1.8.5-pre6.md) for validation boundaries. Full Files → On My iPhone mapping remains unavailable and is not part of this release.",
