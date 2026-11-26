@@ -16,6 +16,7 @@ The local build is the final preview before the iPhoneMirror 1.8.5 stable releas
 
 ### Changed
 
+- Display update notes in the interface language. Use English as the default GitHub Release body and link to the Simplified Chinese notes.
 - Keep two USB choices: recommended native AirPlay and compatible Demo. Remove the former fixed-size C mode and migrate its saved preference to AirPlay.
 - Save picture settings automatically and retain explicit confirmation for actions such as saving color adjustments and applying receiver settings.
 - Rewrite the user guide and align maintained documentation, SDK/MCP guidance and historical indexes with the local implementation. Real-device validation remains scoped to its individual records.

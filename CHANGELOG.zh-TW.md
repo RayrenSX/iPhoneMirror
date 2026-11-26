@@ -15,6 +15,7 @@ iPhoneMirror 的重要變更均記錄於此。已發布版本遵循[語意化版
 
 ### 變更
 
+- 更新說明跟隨介面語言。GitHub Release 預設顯示英文正文並提供簡體中文連結。
 - USB 僅保留建議的原生 AirPlay 與相容示範模式；移除舊固定尺寸 C 模式，並將其已儲存選擇移轉為 AirPlay。
 - 畫面設定改為自動儲存；色彩調整、接收端設定等操作仍保留各自的儲存或套用步驟。
 - 重寫使用指南，依本機實作更新維護中文件、SDK／MCP 說明及歷史索引；實機驗證範圍仍以各記錄為準。
@@ -1143,7 +1144,7 @@ Apple signing, DDI installation and control on target devices, and full installa
 - 首次驅動程式安裝流程仍需更廣泛的全新電腦驗證。
 - Apple 使用私人協定，可能在未來 iOS 版本中變更。
 
-[1.8.5-pre7]: docs/releases/v1.8.5-pre7.md
+[1.8.5-pre7]: docs/releases/v1.8.5-pre7.zh-TW.md
 [1.8.4-test4]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.8.3...v1.8.4-test4
 [1.8.3]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.8.2...v1.8.3
 [1.8.2]: https://github.com/RayrenSX/iPhoneMirror/compare/v1.8.1...v1.8.2

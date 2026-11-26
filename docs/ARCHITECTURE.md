@@ -2,7 +2,7 @@
 
 [文档索引](README.md) · [English architecture guide](en/ARCHITECTURE.md)
 
-本页描述本地 main 的 v1.8.5-pre7 实现。构建与测试见[开发指南](DEVELOPMENT.md)。版本范围见[pre7 发布说明](releases/v1.8.5-pre7.md)。
+本页描述本地 main 的 v1.8.5-pre7 实现。构建与测试见[开发指南](DEVELOPMENT.md)。版本范围见[pre7 发布说明](releases/v1.8.5-pre7.zh-CN.md)。
 
 ## 数据流
 

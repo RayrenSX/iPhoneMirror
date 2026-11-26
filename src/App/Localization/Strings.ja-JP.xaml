@@ -1090,6 +1090,7 @@
     <system:String x:Key="ControlProgressSkipped">スキップ</system:String>
     <system:String x:Key="ControlProgressPending">待機中</system:String>
     <system:String x:Key="ReleaseNotesEmpty">リリースノートはありません。</system:String>
+    <system:String x:Key="ReleaseNotesLoading">リリースノートを読み込んでいます…</system:String>
     <system:String x:Key="ControlStageStopping">操作を切断中</system:String>
     <system:String x:Key="AirPlayEmptyState">iPhoneでコントロールセンターを開き、「画面ミラーリング」をタップしてこのPCを選択してください。</system:String>
     <system:String x:Key="AirPlayWaitingForDevice">iPhoneの接続を待っています。接続されるとここに表示されます。</system:String>

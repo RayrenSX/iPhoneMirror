@@ -1090,6 +1090,7 @@
     <system:String x:Key="ControlProgressSkipped">已跳过</system:String>
     <system:String x:Key="ControlProgressPending">等待中</system:String>
     <system:String x:Key="ReleaseNotesEmpty">未提供更新说明。</system:String>
+    <system:String x:Key="ReleaseNotesLoading">正在加载更新说明…</system:String>
     <system:String x:Key="ControlStageStopping">正在断开控制连接</system:String>
     <system:String x:Key="AirPlayEmptyState">在 iPhone 上打开控制中心，轻点「屏幕镜像」，然后选择这台电脑。</system:String>
     <system:String x:Key="AirPlayWaitingForDevice">正在等待 iPhone 连接，连接后设备会出现在这里。</system:String>

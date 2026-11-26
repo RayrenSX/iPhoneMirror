@@ -1090,6 +1090,7 @@
     <system:String x:Key="ControlProgressSkipped">Skipped</system:String>
     <system:String x:Key="ControlProgressPending">Pending</system:String>
     <system:String x:Key="ReleaseNotesEmpty">No release notes were provided.</system:String>
+    <system:String x:Key="ReleaseNotesLoading">Loading release notes…</system:String>
     <system:String x:Key="ControlStageStopping">Disconnecting control</system:String>
     <system:String x:Key="AirPlayEmptyState">On your iPhone, open Control Center, tap Screen Mirroring, then select this PC.</system:String>
     <system:String x:Key="AirPlayWaitingForDevice">Waiting for your iPhone. It will appear here once it connects.</system:String>

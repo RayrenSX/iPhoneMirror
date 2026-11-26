@@ -22,8 +22,9 @@ internal sealed record ReleaseInfo(
     ReleaseAsset? ChecksumAsset)
 {
     internal Uri ReleaseUrl { get; init; } = new($"https://github.com/RayrenSX/iPhoneMirror/releases/tag/{TagName}");
-    internal string? TaiwanBody { get; init; }
-    internal bool TaiwanNotesChecked { get; init; }
+    internal string? TaggedBody { get; init; }
+    internal IReadOnlyDictionary<string, string?> LocalizedNotes { get; init; } =
+        new Dictionary<string, string?>(StringComparer.Ordinal);
     internal ReleaseAsset? UxPlayAsset { get; init; }
 
     internal ReleaseAsset? PreferredAsset => InstallerAsset ?? ZipAsset;
@@ -79,6 +80,7 @@ internal static class ReleaseParser
                 GetOptionalString(element, "body") ?? string.Empty,
                 published, version, prerelease, installer, zip, checksum)
             {
+                LocalizedNotes = ParseLocalizedNotes(element),
                 UxPlayAsset = assets.FirstOrDefault(asset =>
                     asset.Name == $"iPhoneMirror-UxPlay-{tag}-win-x64.zip" &&
                     asset.DownloadUri.AbsoluteUri ==
@@ -90,6 +92,21 @@ internal static class ReleaseParser
             releases.Add(releaseInfo);
         }
         return releases.OrderByDescending(release => release.Version).FirstOrDefault();
+    }
+
+    private static Dictionary<string, string?> ParseLocalizedNotes(JsonElement release)
+    {
+        var notes = new Dictionary<string, string?>(StringComparer.Ordinal);
+        if (!release.TryGetProperty("localized_notes", out var element) ||
+            element.ValueKind != JsonValueKind.Object)
+            return notes;
+
+        foreach (var language in LocalizedReleaseNotes.TranslationLanguages)
+        {
+            var body = GetOptionalString(element, language);
+            if (!string.IsNullOrWhiteSpace(body)) notes[language] = body;
+        }
+        return notes;
     }
 
     internal static string? FindExpectedSha256(string manifest, string assetName)

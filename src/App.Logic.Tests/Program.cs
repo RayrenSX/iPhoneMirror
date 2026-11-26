@@ -2752,6 +2752,45 @@ var betaRelease = ReleaseParser.ParseLatest(releaseFixture,
     includeStable: true, includePrerelease: true);
 Equal("v1.4.0-beta.1", betaRelease?.TagName,
     "beta update channel selects the newest allowed prerelease");
+var releaseWithTranslations = ReleaseParser.ParseLatest("""
+    [{"tag_name":"v1.8.5-pre7","prerelease":true,"body":"English notes",
+      "localized_notes":{"zh-CN":"简体中文","zh-HK":"繁體中文（香港）",
+        "zh-TW":"繁體中文（台灣）","ja-JP":"日本語","other":"ignored"}}]
+    """, includeStable: true, includePrerelease: true)!;
+Equal("English notes", LocalizedReleaseNotes.Body(releaseWithTranslations, "en-US"),
+    "English uses the default release body");
+Equal(4, releaseWithTranslations.LocalizedNotes.Count, "manifest accepts the four translated locales");
+Equal("简体中文", LocalizedReleaseNotes.Body(releaseWithTranslations, "zh-CN"), "Simplified Chinese notes");
+Equal("繁體中文（香港）", LocalizedReleaseNotes.Body(releaseWithTranslations, "zh-HK"), "Hong Kong notes");
+Equal("繁體中文（台灣）", LocalizedReleaseNotes.Body(releaseWithTranslations, "zh-TW"), "Taiwan notes");
+Equal("日本語", LocalizedReleaseNotes.Body(releaseWithTranslations, "ja-JP"), "Japanese notes");
+var combinedNotes = releaseWithTranslations with
+{
+    Body = "中文说明\r\n\r\n---\r\n\r\n### Added\r\n\r\nEnglish change\r\n\r\n<!-- release-assets:start -->\r\n## 发布资产",
+    LocalizedNotes = new Dictionary<string, string?>(),
+};
+Equal("中文说明", LocalizedReleaseNotes.Body(combinedNotes, "zh-CN"), "legacy Chinese body excludes English and assets");
+Equal("### Added\r\n\r\nEnglish change", LocalizedReleaseNotes.Body(combinedNotes, "en-US"),
+    "legacy English body excludes Chinese and assets");
+Equal("### Added\r\n\r\nEnglish change", LocalizedReleaseNotes.Body(combinedNotes, "ja-JP"),
+    "untranslated legacy notes use the English section");
+var legacySummary = combinedNotes with
+{
+    TaggedBody = "中文说明\r\n\r\nv1.8.3 is a maintenance release.\r\n\r\n### Fixed\r\n\r\nEnglish details",
+};
+Equal("中文说明", LocalizedReleaseNotes.Body(legacySummary, "zh-CN"),
+    "older standalone English summaries do not appear in the Chinese body");
+Equal("v1.8.3 is a maintenance release.\r\n\r\n### Fixed\r\n\r\nEnglish details",
+    LocalizedReleaseNotes.Body(legacySummary, "en-US"), "older English summaries are retained");
+var publishedEnglish = combinedNotes with
+{
+    TaggedBody = "仅保存了中文版",
+    Body = "English body\n\n<!-- release-notes:translation-link -->\n[简体中文发布说明](https://github.com)",
+};
+Equal("English body", LocalizedReleaseNotes.Body(publishedEnglish, "en-US"),
+    "the published English body remains available when the tagged file is Chinese-only");
+Equal("仅保存了中文版", LocalizedReleaseNotes.Body(publishedEnglish, "zh-CN"),
+    "the tagged Chinese body remains available independently of the public English body");
 Equal("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     ReleaseParser.FindExpectedSha256(
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  iPhoneMirror-Setup-v1.3.1-x64.exe\n",
@@ -3563,9 +3602,11 @@ try
     Sequence(["api.github.com", "raw.githubusercontent.com"], releaseRequests,
         "release metadata lookup does not fetch full notes before version comparison");
     fallbackRelease = await releaseClient.EnrichReleaseNotesAsync(fallbackRelease!);
-    Equal(true, fallbackRelease.Body.Contains("完整中文说明",
+    Equal(true, LocalizedReleaseNotes.Body(fallbackRelease, "zh-CN").Contains("完整中文说明",
             StringComparison.Ordinal) == true,
-        "fallback metadata is enriched with the complete version release notes");
+        "fallback metadata keeps the complete tagged Chinese notes available");
+    Equal("### Fixed\n\nFull English notes.", LocalizedReleaseNotes.Body(fallbackRelease, "en-US"),
+        "the same tag also supplies English-only notes");
     Sequence(["api.github.com", "raw.githubusercontent.com", "raw.githubusercontent.com"], releaseRequests,
         "release check uses only official GitHub metadata endpoints");
 
@@ -3589,7 +3630,7 @@ try
     var oversizedNotesRelease = fallbackRelease with { Body = "metadata notes" };
     var limitedNotesRelease = await oversizedNotesClient.EnrichReleaseNotesAsync(
         oversizedNotesRelease);
-    Equal("metadata notes", limitedNotesRelease.Body,
+    Equal("metadata notes", LocalizedReleaseNotes.Body(limitedNotesRelease, "en-US"),
         "oversized release notes fall back to the bounded metadata body");
 
     var oversizedReleaseList = System.Text.Encoding.UTF8.GetBytes(

@@ -362,69 +362,98 @@ internal sealed class GitHubReleaseClient : IDisposable
     internal async Task<ReleaseInfo> EnrichReleaseNotesAsync(ReleaseInfo release,
         CancellationToken cancellationToken = default)
     {
-        var notesUri = new Uri(
-            $"https://raw.githubusercontent.com/RayrenSX/iPhoneMirror/{release.TagName}/docs/releases/{release.TagName}.md");
-        try
+        var language = LocalizationService.EffectiveCulture.Name;
+        var needsTranslation = LocalizedReleaseNotes.TranslationLanguages.Contains(language) &&
+            !release.LocalizedNotes.ContainsKey(language);
+        var taggedNotes = ReadTaggedNotesAsync(release.TagName,
+            $"docs/releases/{release.TagName}.md", cancellationToken);
+        var translation = needsTranslation
+            ? GetLocalizedReleaseNotesAsync(release.TagName, language, cancellationToken)
+            : Task.FromResult(default(ReleaseNoteLookup));
+        await Task.WhenAll(taggedNotes, translation);
+
+        release = release with { TaggedBody = (await taggedNotes).Body };
+        var localized = await translation;
+        if (needsTranslation && !localized.Retryable)
         {
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeout.CancelAfter(TimeSpan.FromSeconds(5));
-            using var response = await _httpClient.GetAsync(notesUri,
-                HttpCompletionOption.ResponseHeadersRead, timeout.Token);
-            var finalUri = response.RequestMessage?.RequestUri;
-            if (finalUri is null || finalUri.Scheme != Uri.UriSchemeHttps ||
-                !finalUri.Host.Equals(notesUri.Host, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidDataException(
-                    LocalizationService.Get("UpdateUntrustedNotesRedirect"));
-            response.EnsureSuccessStatusCode();
-            var notes = await ReadReleaseNotesAsync(response.Content, timeout.Token);
-            if (!string.IsNullOrWhiteSpace(notes))
-                release = release with { Body = notes.Trim() };
+            var notes = new Dictionary<string, string?>(release.LocalizedNotes, StringComparer.Ordinal)
+            {
+                [language] = localized.Body,
+            };
+            release = release with { LocalizedNotes = notes };
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception error) when (error is HttpRequestException or
-                                           OperationCanceledException or
-                                           InvalidDataException)
-        {
-            DiagnosticLogger.Exception("updater", "release_notes_failed", error,
-                ("release", release.TagName));
-        }
-        if (LocalizationService.EffectiveCulture.Name == LocalizationService.TraditionalChineseTaiwan)
-            release = await EnrichTaiwanReleaseNotesAsync(release, cancellationToken);
         return release;
     }
 
-    internal async Task<ReleaseInfo> EnrichTaiwanReleaseNotesAsync(ReleaseInfo release,
+    internal async Task<ReleaseNoteLookup> GetLocalizedReleaseNotesAsync(string tag, string language,
         CancellationToken cancellationToken)
     {
-        if (release.TaiwanNotesChecked) return release;
-        release = release with { TaiwanNotesChecked = true };
-        var uri = new Uri($"https://raw.githubusercontent.com/RayrenSX/iPhoneMirror/{release.TagName}/CHANGELOG.zh-TW.md");
+        if (!LocalizedReleaseNotes.TranslationLanguages.Contains(language)) return default;
+
+        var notes = await ReadTaggedNotesAsync(tag, $"docs/releases/{tag}.{language}.md", cancellationToken);
+        if (notes.Body is not null || language != LocalizationService.TraditionalChineseTaiwan)
+            return notes;
+
+        var changelog = await ReadTaggedNotesAsync(tag, "CHANGELOG.zh-TW.md", cancellationToken);
+        var legacyBody = changelog.Body is null ? null : LocalizedReleaseNotes.FindSection(changelog.Body, tag);
+        return new(legacyBody, legacyBody is null && (notes.Retryable || changelog.Retryable));
+    }
+
+    internal readonly record struct ReleaseNoteLookup(string? Body, bool Retryable);
+
+    private async Task<ReleaseNoteLookup> ReadTaggedNotesAsync(string tag, string path,
+        CancellationToken cancellationToken)
+    {
+        var escapedTag = Uri.EscapeDataString(tag);
+        var escapedPath = string.Join('/', path.Split('/').Select(Uri.EscapeDataString));
+        var rawUri = new Uri($"https://raw.githubusercontent.com/RayrenSX/iPhoneMirror/{escapedTag}/{escapedPath}");
         try
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(TimeSpan.FromSeconds(5));
-            using var response = await _httpClient.GetAsync(uri,
-                HttpCompletionOption.ResponseHeadersRead, timeout.Token);
-            var finalUri = response.RequestMessage?.RequestUri;
-            if (finalUri is null || finalUri.Scheme != Uri.UriSchemeHttps ||
-                !finalUri.Host.Equals(uri.Host, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidDataException(LocalizationService.Get("UpdateUntrustedNotesRedirect"));
-            response.EnsureSuccessStatusCode();
-            var changelog = await ReadReleaseNotesAsync(response.Content, timeout.Token);
-            return release with { TaiwanBody = LocalizedReleaseNotes.FindSection(changelog, release.TagName) };
+            using var rawTimeout = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token);
+            rawTimeout.CancelAfter(TimeSpan.FromSeconds(3));
+            try
+            {
+                return new(await FetchTaggedNotesAsync(rawUri, false, rawTimeout.Token), false);
+            }
+            catch (Exception error) when (
+                error is OperationCanceledException && !timeout.IsCancellationRequested ||
+                error is HttpRequestException { StatusCode: null or HttpStatusCode.Forbidden or
+                    HttpStatusCode.TooManyRequests or >= HttpStatusCode.InternalServerError })
+            {
+                var apiUri = new Uri("https://api.github.com/repos/RayrenSX/iPhoneMirror/contents/" +
+                    $"{escapedPath}?ref={escapedTag}");
+                var body = await FetchTaggedNotesAsync(apiUri, true, timeout.Token);
+                return new(body, body is null);
+            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception error) when (error is HttpRequestException or OperationCanceledException or InvalidDataException)
         {
-            // Older tags predate Taiwan support; the embedded reviewed history
-            // supplies their translation without another language dictionary.
-            DiagnosticLogger.Exception("updater", "taiwan_release_notes_unavailable", error,
-                ("release", release.TagName));
-            return release;
+            DiagnosticLogger.Exception("updater", "release_notes_unavailable", error,
+                ("release", tag), ("path", path));
+            return new(null, true);
         }
+    }
+
+    private async Task<string?> FetchTaggedNotesAsync(Uri uri, bool useApi,
+        CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+        if (useApi)
+            request.Headers.Accept.ParseAdd("application/vnd.github.raw+json");
+        using var response = await _httpClient.SendAsync(request,
+            HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        if (response.RequestMessage?.RequestUri != uri)
+            throw new InvalidDataException(LocalizationService.Get("UpdateUntrustedNotesRedirect"));
+        if (response.StatusCode == HttpStatusCode.NotFound) return null;
+        response.EnsureSuccessStatusCode();
+        if (useApi && !string.Equals(response.Content.Headers.ContentType?.MediaType,
+                "application/vnd.github.raw+json", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("GitHub did not return raw release notes.");
+        var text = await ReadReleaseNotesAsync(response.Content, cancellationToken);
+        return string.IsNullOrWhiteSpace(text) ? null : text.Trim();
     }
 
     private static async Task<string> ReadReleaseNotesAsync(HttpContent content,

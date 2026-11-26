@@ -8,7 +8,7 @@ The menu labels below refer to v1.8.5-pre7. Features vary by version. [Pre7 rele
 
 Download Setup or the portable ZIP for Windows 10 or 11 x64. Run Setup, or extract the entire ZIP and run `iPhoneMirror.exe`. Official packages include the .NET runtime and Driver Manager. Windows may show SmartScreen. The release's `SHA256SUMS.txt` lists the expected hashes. [Download](../../README.md#download)
 
-Check for updates under **About** and read the notes before applying an update. **Update settings** controls the update channel, startup checks, automatic downloading, and download route. To uninstall Setup, use **Windows Settings → Apps**. The uninstaller asks whether to remove settings and cached downloads. Use Driver Manager to remove capture drivers.
+Check for updates under **About**. Update notes follow the app language. Older releases without a translation show the available original notes. **Update settings** controls the update channel, startup checks, automatic downloading, and download route. To uninstall Setup, use **Windows Settings → Apps**. The uninstaller asks whether to remove settings and cached downloads. Use Driver Manager to remove capture drivers.
 
 ## First launch and setup
 

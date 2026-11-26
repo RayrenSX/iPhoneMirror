@@ -6,7 +6,7 @@
 
 ## 版本记录
 
-- [v1.8.5-pre7](v1.8.5-pre7.md)（本地预览，1.8.5 正式发布前最后一版）。操作步骤见[使用指南](../USER_GUIDE.md)，源码构建见[开发指南](../DEVELOPMENT.md)。
+- v1.8.5-pre7（1.8.5 正式发布前最后一个预览版）。[简体中文](v1.8.5-pre7.zh-CN.md) · [English](v1.8.5-pre7.md) · [繁體中文（香港）](v1.8.5-pre7.zh-HK.md) · [繁體中文（台灣）](v1.8.5-pre7.zh-TW.md) · [日本語](v1.8.5-pre7.ja-JP.md)。操作步骤见[使用指南](../USER_GUIDE.md)，源码构建见[开发指南](../DEVELOPMENT.md)。
 - [v1.8.5-pre6](v1.8.5-pre6.md)
 - [v1.8.5-pre5](v1.8.5-pre5.md)
 - [v1.8.5-pre4](v1.8.5-pre4.md)

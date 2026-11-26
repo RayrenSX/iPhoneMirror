@@ -85,6 +85,14 @@ jobs:
           }
           "sha=$releaseSha" >> $env:GITHUB_OUTPUT
 
+      - name: Verify tagged release note sources
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          . ./scripts/ReleaseNotes.ps1
+          Read-ReleaseNoteSources $env:GITHUB_WORKSPACE $env:RELEASE_TAG -RequireTranslations | Out-Null
+
       - name: Verify all App and Driver localization dictionaries
         shell: pwsh
         run: ./scripts/verify_localization.ps1
@@ -180,8 +188,6 @@ jobs:
         id: notes
         shell: pwsh
         env:
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          WORKFLOW_SHA: ${{ github.sha }}
           RELEASE_TAG: ${{ steps.version.outputs.tag }}
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
@@ -193,11 +199,11 @@ jobs:
             "iPhoneMirror-UxPlay-v$env:RELEASE_VERSION-win-x64.zip"
           )
           $descriptions = @{
-            $expectedNames[0] = 'Windows x64 安装程序，支持覆盖升级与卸载。'
-            $expectedNames[1] = '免安装便携版，完整解压后运行。'
-            $expectedNames[2] = 'SPDX 2.2 软件物料清单。'
-            $expectedNames[3] = '全部公开 Release 资产的 SHA-256 校验清单。'
-            $expectedNames[4] = 'UxPlay 可选无线组件，由应用通过镜像加速按需下载安装。'
+            $expectedNames[0] = 'Windows x64 installer with in-place upgrades and uninstall.'
+            $expectedNames[1] = 'Portable build. Extract the entire ZIP before running.'
+            $expectedNames[2] = 'SPDX 2.2 software bill of materials.'
+            $expectedNames[3] = 'SHA-256 checksums for all downloadable release files.'
+            $expectedNames[4] = 'Optional UxPlay receiver. The app downloads it on demand.'
           }
 
           $manifestPath = Join-Path $env:GITHUB_WORKSPACE 'updates/releases.json'
@@ -275,42 +281,29 @@ jobs:
             }
           }
 
-          git fetch origin `
-            "refs/heads/$env:DEFAULT_BRANCH`:refs/remotes/origin/$env:DEFAULT_BRANCH"
-          if ($LASTEXITCODE -ne 0) {
-            throw "Failed to fetch release notes from $env:DEFAULT_BRANCH."
+          . ./scripts/ReleaseNotes.ps1
+          $sources = Read-ReleaseNoteSources $env:GITHUB_WORKSPACE $env:RELEASE_TAG -RequireTranslations
+          $manifestEntry = $manifestMatches[0]
+          if ([string]$manifestEntry.body -cne $sources.English) {
+            throw "The fallback manifest English notes do not match $env:RELEASE_TAG."
           }
-          $templateSpec = "$env:WORKFLOW_SHA`:docs/releases/$env:RELEASE_TAG.md"
-          $templateLines = @(git show $templateSpec)
-          if ($LASTEXITCODE -ne 0 -or $templateLines.Count -eq 0) {
-            throw "Release notes template is missing: docs/releases/$env:RELEASE_TAG.md"
+          foreach ($language in $sources.Translations.Keys) {
+            $actualNotes = $manifestEntry.localized_notes.PSObject.Properties[$language].Value
+            if ([string]$actualNotes -cne $sources.Translations[$language]) {
+              throw "The fallback manifest $language notes do not match $env:RELEASE_TAG."
+            }
           }
-          $template = ($templateLines -join "`n").Trim()
-          if ([regex]::IsMatch($template,
-              '(?mi)^#{1,6}[ \t]*(?:中文|英文)[ \t]*$')) {
-            throw 'Release notes must not contain standalone Chinese or English labels.'
-          }
-          if ([regex]::IsMatch($template,
-              '(?mi)^##[ \t]+发布资产[ \t]*$|<!-- release-assets:')) {
-            throw 'The release notes template must not contain a generated asset section.'
-          }
-          $firstChinese = [regex]::Match($template, '[\u3400-\u9fff]')
-          $firstEnglishHeading = [regex]::Match($template,
-            '(?m)^### (?:Added|Changed|Fixed|Removed|Security|Notes)$')
-          if (-not $firstChinese.Success -or -not $firstEnglishHeading.Success -or
-              $firstChinese.Index -gt $firstEnglishHeading.Index) {
-            throw 'Release notes must place the Chinese content above the English content.'
-          }
+          $template = Format-PublicReleaseNotes $sources.English $env:GITHUB_REPOSITORY $env:RELEASE_TAG
 
           $assetSection = [Collections.Generic.List[string]]::new()
           $assetSection.Add('<!-- release-assets:start -->')
-          $assetSection.Add('## 发布资产')
+          $assetSection.Add('## Release assets')
           $assetSection.Add('')
           foreach ($asset in $assetRecords) {
-            $assetSection.Add("- ``$($asset.Name)``：$($descriptions[$asset.Name])")
+            $assetSection.Add("- ``$($asset.Name)`` — $($descriptions[$asset.Name])")
           }
           $assetSection.Add('')
-          $assetSection.Add('| 资产 | 大小 | SHA-256 |')
+          $assetSection.Add('| Asset | Size | SHA-256 |')
           $assetSection.Add('| --- | ---: | --- |')
           foreach ($asset in $assetRecords) {
             $size = $asset.Size.ToString('N0', [Globalization.CultureInfo]::InvariantCulture)
@@ -796,6 +789,7 @@ jobs:
               tag_name = [string]$Release.tag_name
               name = [string]$Release.name
               body = [string]$Release.body
+              localized_notes = $Release.localized_notes
               published_at = [string]$Release.published_at
               draft = [bool]$Release.draft
               prerelease = [bool]$Release.prerelease
@@ -1043,6 +1037,7 @@ jobs:
               tag_name = [string]$Release.tag_name
               name = [string]$Release.name
               body = [string]$Release.body
+              localized_notes = $Release.localized_notes
               published_at = [string]$Release.published_at
               draft = [bool]$Release.draft
               prerelease = [bool]$Release.prerelease

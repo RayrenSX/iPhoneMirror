@@ -2,7 +2,7 @@
 
 [文档索引](README.md) · [English development guide](en/DEVELOPMENT.md)
 
-本文以本地 main 的 v1.8.5-pre7 构建流程为准。[pre7 发布说明](releases/v1.8.5-pre7.md)
+本文以本地 main 的 v1.8.5-pre7 构建流程为准。[pre7 发布说明](releases/v1.8.5-pre7.zh-CN.md)
 以下命令均从仓库根目录运行。模块关系见[架构说明](ARCHITECTURE.md)，文档入口见[索引](README.md)。
 
 ## 环境与依赖
@@ -229,7 +229,7 @@ Apple 支持包只在拥有再分发权时显式提供；参数及校验要求�
 [驱动依赖说明](DRIVER_DEPENDENCIES.md)。通常公开包不包含 Apple USB 支持 MSI；
 DDI 是另一项载荷，当前标准包按 `config/ddi-bundles.json` 内置并校验 Personalized 与 Cryptex 镜像。
 其分发状态见[组件来源说明](USB_TOUCH_THIRD_PARTY_LICENSES.md#apple-ddi-载荷)。
-发布说明放在 `docs/releases`，根目录变更记录汇总版本；不要把工作区验证结果写成已发布事实。
+每个发布标签在 `docs/releases` 下保存五份说明。英文用 `v<version>.md`，其余四份在版本名后加 `.zh-CN`、`.zh-HK`、`.zh-TW`、`.ja-JP`。发布流程使用标签中的英文正文和资产表，另提供简体中文链接。应用内更新说明跟随界面语言，较早版本缺少对应译文时会使用可用的原始说明。根目录变更记录汇总版本，实机结果按实际验证范围记录。
 
 ## 配置、诊断与维护
 

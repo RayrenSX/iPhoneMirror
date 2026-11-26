@@ -38,4 +38,6 @@ The packaging script reads the app version and checks it against Driver Manager 
 
 Verify the final ZIP by extracting it to a separate folder and checking the files, versions, and startup. Verify the final Setup with installation, startup, upgrade, removal, and reinstall in an isolated test environment. Check USB, AirPlay, control and reconnection on suitable devices when those behaviors change. Report the scope of each result without treating a successful build as a device test.
 
+Each release tag contains five files in `docs/releases`. Put the English body in `v<version>.md` and use `.zh-CN`, `.zh-HK`, `.zh-TW`, and `.ja-JP` before `.md` for translations. GitHub Releases displays the English body and asset table with a link to the Simplified Chinese notes. The updater uses the app's current interface language and falls back to the available original notes for older releases without a translation.
+
 [Architecture](ARCHITECTURE.md) · [Contribution guide](../../CONTRIBUTING.md)

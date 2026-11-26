@@ -32,6 +32,7 @@ if (-not (Test-Path -LiteralPath $UsbTouchBridgeRuntimeScript -PathType Leaf)) {
     throw "USB touch bridge runtime validator is missing: $UsbTouchBridgeRuntimeScript"
 }
 . $UsbTouchBridgeRuntimeScript
+. (Join-Path $PSScriptRoot 'ReleaseNotes.ps1')
 
 function Get-ProjectVersion([string]$ProjectPath) {
     [xml]$project = Get-Content -LiteralPath $ProjectPath -Raw
@@ -228,19 +229,23 @@ function Update-ReleaseManifestAssets([string]$Path, [string]$ReleaseVersion,
     if ($matches.Count -gt 1) {
         throw "Fallback release manifest contains duplicate $tag entries."
     }
+    $notes = Read-ReleaseNoteSources $Root $tag
     if ($matches.Count -eq 0) {
-        $changelogPath = Join-Path $Root 'CHANGELOG.md'
-        $changelog = [IO.File]::ReadAllText($changelogPath, [Text.Encoding]::UTF8)
-        $escapedVersion = [regex]::Escape($ReleaseVersion)
-        $section = [regex]::Match($changelog,
-            "(?ms)^## \[$escapedVersion\] - [^\r\n]+\r?\n(?<body>.*?)(?=^## \[|\z)")
-        if (-not $section.Success) {
-            throw "CHANGELOG.md has no release section for $ReleaseVersion."
+        $body = if ($notes) { $notes.English } else {
+            $changelogPath = Join-Path $Root 'CHANGELOG.md'
+            $changelog = [IO.File]::ReadAllText($changelogPath, [Text.Encoding]::UTF8)
+            $escapedVersion = [regex]::Escape($ReleaseVersion)
+            $section = [regex]::Match($changelog,
+                "(?ms)^## \[$escapedVersion\] - [^\r\n]+\r?\n(?<body>.*?)(?=^## \[|\z)")
+            if (-not $section.Success) {
+                throw "CHANGELOG.md has no release section for $ReleaseVersion."
+            }
+            $section.Groups['body'].Value.Trim()
         }
         $release = [PSCustomObject][ordered]@{
             tag_name = $tag
             name = "iPhoneMirror $tag"
-            body = $section.Groups['body'].Value.Trim()
+            body = $body
             published_at = [DateTimeOffset]::UtcNow.ToString(
                 'yyyy-MM-ddTHH:mm:ssZ', [Globalization.CultureInfo]::InvariantCulture)
             draft = $false
@@ -274,6 +279,10 @@ function Update-ReleaseManifestAssets([string]$Path, [string]$ReleaseVersion,
         throw "Published release asset names are not unique: $($duplicateNames.Name -join ', ')"
     }
     $matches[0].assets = $manifestAssets
+    if ($notes) {
+        $matches[0].body = $notes.English
+        $matches[0] | Add-Member -NotePropertyName localized_notes -NotePropertyValue $notes.Translations -Force
+    }
 
     # Windows PowerShell 5.1 can serialize a one-item Object[] as a
     # value/Count wrapper. Serialize each record and assemble the root array

@@ -27,7 +27,7 @@ public partial class UpdateWindow : IPhoneMirror.UI.Controls.RoundedWindow, INot
     private string _speedText = string.Empty;
     private string _updateButtonText;
     private string _displayedReleaseBody = string.Empty;
-    private bool _loadingTaiwanNotes;
+    private readonly HashSet<string> _loadingNotes = new(StringComparer.Ordinal);
 
     public event PropertyChangedEventHandler? PropertyChanged;
     public string CurrentVersion => VersionManager.DisplayVersion;
@@ -72,13 +72,13 @@ public partial class UpdateWindow : IPhoneMirror.UI.Controls.RoundedWindow, INot
             OnPropertyChanged(nameof(StatusText));
             OnPropertyChanged(nameof(UpdateButtonText));
             OnPropertyChanged(nameof(ReleaseName));
+            _ = EnsureLocalizedReleaseNotesAsync();
             RefreshReleaseNotes();
-            _ = EnsureTaiwanReleaseNotesAsync();
         });
         RefreshReleaseNotes();
         Loaded += (_, _) =>
         {
-            _ = EnsureTaiwanReleaseNotesAsync();
+            _ = EnsureLocalizedReleaseNotesAsync();
             if (autoDownload) _ = DownloadAndInstallAsync();
         };
         Closed += OnClosed;
@@ -86,32 +86,45 @@ public partial class UpdateWindow : IPhoneMirror.UI.Controls.RoundedWindow, INot
 
     private void RefreshReleaseNotes()
     {
-        var body = LocalizationService.RefreshText(_readOnlyPreview
-            ? _release.Body : LocalizedReleaseNotes.Body(_release));
-        if (body == _displayedReleaseBody && ReleaseNotesViewer.Document is not null) return;
+        var language = LocalizationService.EffectiveCulture.Name;
+        var body = _readOnlyPreview ? LocalizationService.RefreshText(_release.Body)
+            : _loadingNotes.Contains(language) && LocalizedReleaseNotes.TranslatedBody(_release, language) is null
+                ? LocalizationService.Get("ReleaseNotesLoading")
+                : LocalizedReleaseNotes.Body(_release, language);
+        if (body.Length > 0 && body == _displayedReleaseBody && ReleaseNotesViewer.Document is not null) return;
         _displayedReleaseBody = body;
         ReleaseNotesViewer.Document = MarkdownFlowDocumentRenderer.Render(body);
     }
 
-    private async Task EnsureTaiwanReleaseNotesAsync()
+    private async Task EnsureLocalizedReleaseNotesAsync()
     {
-        if (_readOnlyPreview || !IsLoaded || _loadingTaiwanNotes || _release.TaiwanNotesChecked ||
-            LocalizationService.EffectiveCulture.Name != LocalizationService.TraditionalChineseTaiwan ||
-            LocalizedReleaseNotes.TaiwanBody(_release) is not null) return;
-        _loadingTaiwanNotes = true;
-        var token = _token;
+        var language = LocalizationService.EffectiveCulture.Name;
+        if (_readOnlyPreview || !IsLoaded || _closed ||
+            !LocalizedReleaseNotes.TranslationLanguages.Contains(language) ||
+            _release.LocalizedNotes.ContainsKey(language) || !_loadingNotes.Add(language)) return;
+
+        RefreshReleaseNotes();
         try
         {
-            _release = await _client.EnrichTaiwanReleaseNotesAsync(_release, token);
-            if (!token.IsCancellationRequested) RefreshReleaseNotes();
+            var lookup = await _client.GetLocalizedReleaseNotesAsync(_release.TagName, language, _token);
+            if (_token.IsCancellationRequested || lookup.Retryable) return;
+            var notes = new Dictionary<string, string?>(_release.LocalizedNotes, StringComparer.Ordinal)
+            {
+                [language] = lookup.Body,
+            };
+            _release = _release with { LocalizedNotes = notes };
         }
-        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        catch (OperationCanceledException) when (_token.IsCancellationRequested) { }
         catch (Exception error)
         {
-            DiagnosticLogger.Exception("updater", "taiwan_notes_refresh_failed", error,
-                ("release", _release.TagName));
+            DiagnosticLogger.Exception("updater", "localized_notes_refresh_failed", error,
+                ("release", _release.TagName), ("language", language));
         }
-        finally { _loadingTaiwanNotes = false; }
+        finally
+        {
+            _loadingNotes.Remove(language);
+            if (!_token.IsCancellationRequested) RefreshReleaseNotes();
+        }
     }
 
     private async void OnUpdateClick(object sender, RoutedEventArgs e) =>

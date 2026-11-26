@@ -60,7 +60,14 @@ def check_changelog(root, errors):
                 errors.append(f'Changelog/{heading}: missing content or altered markup ({pattern})')
         if not target[heading].strip():
             errors.append(f'Changelog/{heading}: empty Taiwan section')
-    if re.findall(r'^\[[^\]\n]+\]:[^\n]+', original, re.M) != re.findall(r'^\[[^\]\n]+\]:[^\n]+', taiwan, re.M):
+    reference_pattern = r'^\[[^\]\n]+\]:[^\n]+'
+    expected_references = []
+    for reference in re.findall(reference_pattern, original, re.M):
+        match = re.fullmatch(r'(\[[^\]]+\]: )(docs/releases/v[\w.-]+)\.md', reference)
+        if match and (root / f'{match[2]}.zh-TW.md').is_file():
+            reference = f'{match[1]}{match[2]}.zh-TW.md'
+        expected_references.append(reference)
+    if expected_references != re.findall(reference_pattern, taiwan, re.M):
         errors.append('Changelog: Taiwan reference links differ from the original')
     if '\ufffd' in taiwan:
         errors.append('Changelog: replacement character')
