@@ -105,7 +105,7 @@
 
 长测结束后，12:29:50.415 同时确认正常 USB 配置与采集停止完成，随后通过 UI Automation 关闭应用；这是测试收尾，不是故障恢复机制。12:30:51 以 `-NoFault` 启动相同二进制，12:31:03 Connected，12:31:05 GUI 输入应答，12:31:31 正常启动检查通过。交付时应用 PID 44564、桥 PID 30288，投屏与反控保持运行。
 
-正常运行日志：`work/recovery-device-20261001-123051`。`Launch-Recovery-Build.cmd` 已指向 V5，并清除两项故障注入变量。Program Files 内旧安装不属于本次验证和覆盖范围，请使用该启动器。
+正常运行日志：`work/recovery-device-20261001-123051`。`Launch-Recovery-Build.cmd` 已指向 V5，并清除两项故障注入变量。Program Files 内旧安装不属于本次验证和覆盖范围。该启动器仅适用于当时的本地测试构建。当前用法见[使用指南](USER_GUIDE.md)，启动器原文见[历史提交](https://github.com/RayrenSX/iPhoneMirror/blob/b73a0dd2458a6212490fcf3c53068ad36b15f79d/Launch-Recovery-Build.cmd)。
 
 ## 使用方式声明
 
